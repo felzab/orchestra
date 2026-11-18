@@ -86,4 +86,5 @@ The fixes from the first project session that ran on the plugin.
 - The `orchestra` program and its hooks, five agent types, sixteen lenses and nine slash commands.
 
 [unreleased]: https://github.com/felzab/orchestra/commits/main
+[0.2.0]: https://github.com/felzab/orchestra/pull/2
 [0.1.0]: https://github.com/felzab/orchestra/commit/364d4ec
