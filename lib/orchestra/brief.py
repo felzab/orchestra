@@ -440,7 +440,11 @@ def _changed(root: Path, branch: str, ref: str, tree: Path | None) -> set[str]:
     except Refused:
         paths |= set(config.git(root, "diff", "-z", "--name-only", f"refs/heads/{branch}...{ref}").split("\0"))
     if tree is not None and tree.is_dir():
-        entries = iter(config.git(tree, "status", "--porcelain", "-z", "--untracked-files=all").split("\0"))
+        # Without `core.longpaths`, Git for Windows with the `core.fscache` its installer sets reads a path past 260
+        # characters, as a frozen tree under the state's long folder holds, as deleted and still exits 0; other
+        # platforms ignore the key.
+        listed = config.git(tree, "-c", "core.longpaths=true", "status", "--porcelain", "-z", "--untracked-files=all")
+        entries = iter(listed.split("\0"))
         for entry in entries:
             paths.add(entry[3:])
             # A rename or a copy names its source in the entry after it.

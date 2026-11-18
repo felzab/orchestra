@@ -243,6 +243,29 @@ def test_a_path_an_unlanded_branch_changes_by_commit_or_by_edit_is_refused(
     assert check(project, "A")[0] == 0
 
 
+@pytest.mark.skipif(sys.platform != "win32", reason="the 260-character path limit is Windows' alone")
+def test_a_frozen_tree_whose_paths_pass_windows_limit_changes_none_of_them(project: Path, state: Path) -> None:
+    """`git status` reads such a path as deleted unless `core.longpaths` is set, and exits 0 all the same."""
+    # Git for Windows' installer sets `core.fscache` in the system configuration, which the suite leaves out; with
+    # it, a path too long to read is reported missing rather than skipped with a warning.
+    git(project, "config", "core.fscache", "true")
+    # As deep as the checkout takes without long paths, as test_diff's long-path case builds it.
+    room = 240 - len(str(project)) - 1
+    segments = (room - 12) // 10
+    deep = "/".join(["deep12345"] * segments) + "/" + "f" * (room - segments * 10 - 4) + ".txt"
+    (project / deep).parent.mkdir(parents=True)
+    (project / deep).write_bytes(b"deep\n")
+    git(project, "add", deep)
+    git(project, "commit", "-m", "deep")
+    frozen = inprocess("diff", "--tree", cwd=project)
+    assert frozen.returncode == 0, frozen.stderr
+    tree = state / store.TREES / git(project, "rev-parse", "main")
+    assert len(str(tree / deep)) > 260, len(str(tree / deep))
+    briefed(project, "A", owns=deep)
+    code, lines = check(project, "A")
+    assert code == 0, lines
+
+
 def test_a_row_routed_to_a_live_agent_or_in_a_checked_brief_is_refused(project: Path, state: Path) -> None:
     def route(row: str, owner: str) -> None:
         model.write_findings(
