@@ -188,8 +188,9 @@ def test_a_row_routed_back_after_a_landing_is_closed_by_the_latest_report_alone(
 def test_a_landing_credits_every_agent_whose_branch_it_brought_in(
     fleet: Fleet, status: model.AgentStatus, turn: str, after: model.AgentStatus
 ) -> None:
-    """A merge agent's branch carries a fixer's commits: both rows close, and the fixer lands unless it still runs
-    or its report waits to be judged, a stopped one's that reads included.
+    """A merge agent's branch carries a fixer's commits: the fixer lands and its row closes unless it still runs or
+    its report waits to be judged, a stopped one's that reads included, since that report may still change or be
+    refused; its row closes when it lands itself.
     """
     fixer = agent(fleet, "FIXER", "b1")
     model.update_agent(fleet.state, "FIXER", lambda held: replace(held, status=status))
@@ -208,11 +209,21 @@ def test_a_landing_credits_every_agent_whose_branch_it_brought_in(
     code, out, err = fleet.run("land", "MERGER")
     assert code == 0, err
     assert {row: event.status for row, event in model.read_findings(fleet.state).items()} == {
-        "A-F1": "FIXED",
+        "A-F1": "FIXED" if after == "pruned" else "ROUTED",
         "A-F2": "FIXED",
     }
     assert [model.read_agent(fleet.state, name).status for name in ("FIXER", "MERGER")] == [after, "pruned"]
     assert out.splitlines()[-1].startswith("landed MERGER, FIXER as ")
+    if after == "pruned":
+        return
+    # Its turn long over and its report judged, the fixer lands by the merge that brought it in, closing its row.
+    ran(fleet, "b1", minutes=20)
+    model.update_agent(fleet.state, "FIXER", lambda held: replace(held, status="judged"))
+    code, out, err = fleet.run("land", "FIXER")
+    assert code == 0, out + err
+    assert out.splitlines()[-1].startswith("landed FIXER as "), out
+    assert model.read_agent(fleet.state, "FIXER").status == "pruned"
+    assert model.read_findings(fleet.state)["A-F1"].status == "FIXED", out
 
 
 def test_a_landing_credits_no_agent_whose_branch_had_landed_before_it(fleet: Fleet) -> None:

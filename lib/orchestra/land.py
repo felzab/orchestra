@@ -288,7 +288,10 @@ def _brought_in(root: Path, session: str, branch: str) -> tuple[str, str] | None
     entry before it is where the session branch stood. A branch with no commit of its own sits on the
     first-parent line too, and its own reflog holds nothing but its creation (git-reflog(1)).
     """
-    line = _git(root, "rev-list", "--first-parent", "--ancestry-path", f"{branch}..HEAD").split()
+    # The line's commits that descend from the branch, by any parent: with `--first-parent`, `--ancestry-path`
+    # walks no second parent, so it misses a branch another agent's merged branch carried in.
+    descends = set(_git(root, "rev-list", "--ancestry-path", f"{branch}..HEAD").split())
+    line = [made for made in _git(root, "rev-list", "--first-parent", f"{branch}..HEAD").split() if made in descends]
     if line and not _ok(root, "merge-base", "--is-ancestor", branch, f"{line[-1]}^1"):
         return f"{line[-1]}^1", line[-1]
     tip = _git(root, "rev-parse", f"refs/heads/{branch}").strip()
@@ -320,29 +323,28 @@ def _settle(
         and _ok(root, "merge-base", "--is-ancestor", other, after)
     ]
     names = [name, *carried]
-    lines = credit(state, names, short)
-    working: list[str] = []
-
-    def landed(held: model.Agent) -> model.Agent:
-        # An agent still at work keeps its record: its stop reports, and landing it then settles it.
-        if held.status in findings.LIVE:
-            working.append(
-                f"{held.name} is {held.status} and has not reported, so its record stays: land it again then"
-            )
-            return held
-        if why := context.working(held):
-            working.append(f"{held.name} may still be working ({why}), so its record stays: land it again then")
-            return held
-        # A carried agent's report not yet judged keeps its record too, so `judge` can still bank it.
-        if waits := findings.waiting(state, held):
-            working.append(f"{waits}; its record stays: land it again then")
-            return held
-        return replace(held, status="landed")
-
+    # Each agent is judged once, before any row closes: one whose record stays is credited nothing, since its
+    # report may still change or be refused, and its rows are credited when it lands itself.
+    kept = {each: why for each in names if (why := _kept(state, model.read_agent(state, each)))}
+    lines = credit(state, [each for each in names if each not in kept], short)
     for each in names:
-        model.update_agent(state, each, landed)
+        if each not in kept:
+            model.update_agent(state, each, lambda held: replace(held, status="landed"))
     log.record(state, "land", f"{', '.join(names)} landed as {short}")
-    return names, [*lines, *working], prune.prune(here, state, set(names))
+    return names, [*lines, *kept.values()], prune.prune(here, state, set(names))
+
+
+def _kept(state: Path, agent: model.Agent) -> str | None:
+    """Why a landing leaves the agent's record as it is, said so; None where the agent lands."""
+    # An agent still at work keeps its record: its stop reports, and landing it then settles it.
+    if agent.status in findings.LIVE:
+        return f"{agent.name} is {agent.status} and has not reported, so its record stays: land it again then"
+    if why := context.working(agent):
+        return f"{agent.name} may still be working ({why}), so its record stays: land it again then"
+    # A carried agent's report not yet judged keeps its record too, so `judge` can still bank it.
+    if waits := findings.waiting(state, agent):
+        return f"{waits}; its record stays: land it again then"
+    return None
 
 
 def _finish(

@@ -58,12 +58,11 @@ BUDGETS = {
             "use",
             "operations",
             "accessibility",
+            "disclosure",
         )
     },
     # Its twelfth checklist item, the built-the-right-way questions, outgrew the shared budget.
     "lenses/essential.md": 1650,
-    # Its Read first names the per-commit read's command and both of its spans.
-    "lenses/disclosure.md": 1550,
 }
 BUDGETED = ("skills/", "agents/", "lenses/")
 # Every folder whose pages name commands and links: the plugin's own, and the documents beside them.

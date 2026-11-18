@@ -95,15 +95,18 @@ def test_a_tree_folder_no_log_entry_names_is_refused_naming_its_removal(project:
     """A checkout stopped part-way leaves the folder with files missing; only a whole tree is logged."""
     assert inprocess("init", "s1", cwd=project).returncode == 0
     state = store.state_dir(project)
+    # An earlier commit's tree logged, so only an entry for this folder's own path vouches for it.
+    assert inprocess("diff", "--tree", cwd=project).returncode == 0
     commit(project, "lib/a.py", b"one\n")
     tree = state / store.TREES / git(project, "rev-parse", "main")
     git(project, "worktree", "add", "--detach", str(tree), "main")
     (tree / "lib" / "a.py").unlink()
     refused = inprocess("diff", "--tree", cwd=project)
     assert refused.returncode == 2
-    assert f'`git worktree remove --force "{tree.as_posix()}"`' in refused.stderr
+    # With `core.longpaths`, as the add takes it, since a deep tracked path under the state's folder needs it.
+    assert f'`git -c core.longpaths=true worktree remove --force "{tree.as_posix()}"`' in refused.stderr
     # The command it names clears the folder, and the tree is then made whole.
-    git(project, "worktree", "remove", "--force", tree.as_posix())
+    git(project, "-c", "core.longpaths=true", "worktree", "remove", "--force", tree.as_posix())
     done = inprocess("diff", "--tree", cwd=project)
     assert done.returncode == 0, done.stderr
     assert (tree / "lib" / "a.py").read_bytes() == b"one\n"

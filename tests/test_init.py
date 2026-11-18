@@ -71,71 +71,23 @@ def _programme_branch(project: Path) -> str:
     return git(project, "rev-parse", "HEAD")
 
 
-def _init_on(project: Path, session: str, *options: str) -> tuple[dict[str, object], str, str]:
-    """`init` run on a new branch named for the session; its record, its first line and its log's first line."""
+def _init_on(project: Path, session: str, *options: str) -> dict[str, object]:
+    """`init` run on a new branch named for the session; its record."""
     git(project, "switch", "-q", "-c", session)
     done = inprocess("init", session, *options, cwd=project)
     assert done.returncode == 0, done.stdout + done.stderr
-    state = _state(project).parent / session
-    first = done.stdout.splitlines()[0]
-    assert first.endswith(f": {state}")
-    logged = store.read_jsonl(state / store.LOG)[0]["text"]
-    return json.loads((state / store.SESSION).read_bytes()), first.removesuffix(f": {state}"), logged
-
-
-def test_init_without_base_takes_the_base_of_the_programmes_newest_session_and_names_it(project: Path) -> None:
-    """A forgotten `--base` would record the configuration's `main`, which shares history, so nothing refuses it."""
-    programme = _programme_branch(project)
-    _init_on(project, "s1", "--base", "follow-up")
-    session, said, logged = _init_on(project, "s2")
-    assert (session["base"], session["base_commit"]) == ("follow-up", programme)
-    assert said == logged == f"session project/s2 on s2, based on follow-up (session s1's base) at {programme[:9]}"
-
-
-def test_base_overrides_the_inherited_one_and_the_newest_session_is_judged_by_its_moment(project: Path) -> None:
-    """`--base` is the word for this session alone; the newest session is a moment, which offset text misorders."""
-    programme, main = _programme_branch(project), git(project, "rev-parse", "main")
-    _init_on(project, "s1", "--base", "follow-up")
-    session, said, _ = _init_on(project, "s2", "--base", "main")
-    assert (session["base"], session["base_commit"]) == ("main", main)
-    assert said == f"session project/s2 on s2, based on main (named by --base) at {main[:9]}"
-    # The night the clocks go back: s1 is the later moment, though the earlier text.
-    folder = _state(project).parent
-    for name, created in (("s1", "2026-10-25T02:10:00+01:00"), ("s2", "2026-10-25T02:30:00+02:00")):
-        model.write_session(folder / name, dataclasses.replace(model.read_session(folder / name), created=created))
-    session, said, _ = _init_on(project, "s3")
-    assert (session["base"], session["base_commit"]) == ("follow-up", programme)
-    assert said == f"session project/s3 on s3, based on follow-up (session s1's base) at {programme[:9]}"
+    return json.loads((_state(project).parent / session / store.SESSION).read_bytes())
 
 
 def test_init_without_base_refuses_a_branch_already_past_the_base_it_would_record(project: Path) -> None:
-    """A programme's first session cut from its branch would record `main` and count the programme's work as its own."""
-    programme = _programme_branch(project)
+    """A session cut from the programme's branch would record `main` and count the programme's work as its own."""
+    _programme_branch(project)
     git(project, "switch", "-q", "-c", "s1")
     done = inprocess("init", "s1", cwd=project)
     assert done.returncode == 2
     assert "s1 holds 1 commit main does not" in done.stderr
     assert "`--base <branch>`" in done.stderr
     assert not _state(project).exists()
-    # Named, the same base is taken: the option is the word for a branch that holds work before its session.
-    session, _, _ = _init_on(project, "s2", "--base", "follow-up")
-    assert (session["base"], session["base_commit"]) == ("follow-up", programme)
-
-
-def test_a_checkout_joining_a_programme_takes_its_own_configurations_base(tmp_path: Path, make_repo: MakeRepo) -> None:
-    """Another clone's sessions may branch from a base this clone has no branch of, or from another base."""
-    first, second = make_repo(tmp_path / "a" / "proj"), make_repo(tmp_path / "b" / "proj")
-    for root in (first, second):
-        write_config(root, {"stateRoot": (tmp_path / "state").as_posix()})
-    _programme_branch(first)
-    git(first, "switch", "-q", "-c", "s1")
-    assert inprocess("init", "s1", "--base", "follow-up", cwd=first).returncode == 0
-    git(second, "switch", "-q", "-c", "joined")
-    done = inprocess("init", "s2", "--programme", "proj", cwd=second)
-    assert done.returncode == 0, done.stdout + done.stderr
-    session = json.loads((tmp_path / "state" / "proj" / "s2" / store.SESSION).read_bytes())
-    assert (session["base"], session["base_commit"]) == ("main", git(second, "rev-parse", "main"))
-    assert done.stdout.startswith("session proj/s2 on joined, based on main (the configuration's base) at ")
 
 
 @pytest.mark.parametrize(
@@ -169,9 +121,10 @@ def test_init_refuses_a_base_missing_from_the_clone_naming_the_command_that_make
     assert not _state(project).exists()
 
 
-@pytest.mark.parametrize("named", ["refs/heads/follow-up", "origin/follow-up"])
+@pytest.mark.parametrize("named", ["refs/heads/follow-up", "origin/follow-up", "follow-up~0", "follow-up^"])
 def test_init_refuses_a_base_named_other_than_by_its_local_branchs_short_name(project: Path, named: str) -> None:
-    """`prune` spares the base by its short name, so a record spelling it otherwise spares no branch."""
+    """`prune` spares the base by its short name, so a record spelling it otherwise, or naming a commit from it by a
+    revision's suffix (gitrevisions(7)), spares no branch."""
     programme = _programme_branch(project)
     git(project, "update-ref", "refs/remotes/origin/follow-up", "HEAD")
     git(project, "switch", "-q", "-c", "s1")
@@ -182,9 +135,12 @@ def test_init_refuses_a_base_named_other_than_by_its_local_branchs_short_name(pr
         " fetch it, or name the branch this session is cut from with `--base <branch>`\n"
     )
     assert not _state(project).exists()
+    if named != "origin/follow-up":
+        # The arm below reads no parameter, so one runs it.
+        return
     # A tag of the branch's name, which git resolves before the branch (gitrevisions(7)), is not the base.
     git(project, "tag", "follow-up", "main")
-    session, _, _ = _init_on(project, "s2", "--base", "follow-up")
+    session = _init_on(project, "s2", "--base", "follow-up")
     assert (session["base"], session["base_commit"]) == ("follow-up", programme)
 
 
@@ -207,7 +163,7 @@ def test_init_refuses_a_base_named_other_than_by_its_local_branchs_short_name(pr
 def test_init_refuses_a_base_sharing_no_commit_with_head_naming_each_way_to_name_another(
     project: Path, options: tuple[str, ...], said: str
 ) -> None:
-    """The configuration's `base` reaches only a session neither `--base` nor an earlier session gives one."""
+    """The configuration's `base` reaches only a session `--base` gives none."""
     git(project, "switch", "-q", "--orphan", "elsewhere")
     git(project, "commit", "-q", "--allow-empty", "-m", "an unrelated history")
     git(project, "switch", "-q", "main")

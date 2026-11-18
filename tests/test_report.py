@@ -110,13 +110,12 @@ def test_a_stopped_status_carries_its_reason_and_a_later_round_its_number() -> N
     assert (held.status, held.reason, held.round) == ("NEEDS-ANSWER", "which queue takes it?", 2)
 
 
-def test_a_committing_agents_optional_rows_fixed_line_names_its_rows_each_faulted_where_it_is_none() -> None:
+def test_a_writers_optional_rows_fixed_line_names_its_rows_each_faulted_where_it_is_none() -> None:
     """The line after the commit line, which a landing reads; left out, the report names no row."""
-    for kind in ("writer", "driver"):
-        held, said = report.parse(text(kind, fixed="A-F2, A.2-F11."), kind, "FE", 1)
-        assert said == []
-        assert held is not None
-        assert (held.rows, len(held.findings)) == (("A-F2", "A.2-F11"), 2)
+    held, said = report.parse(text(fixed="A-F2, A.2-F11."), "writer", "FE", 1)
+    assert said == []
+    assert held is not None
+    assert (held.rows, len(held.findings)) == (("A-F2", "A.2-F11"), 2)
     held, said = report.parse(text(), "writer", "FE", 1)
     assert held is not None
     assert held.rows == ()
@@ -125,9 +124,21 @@ def test_a_committing_agents_optional_rows_fixed_line_names_its_rows_each_faulte
     assert problems(text(fixed="")) == [
         "line 7 `Rows fixed: `: names no row: `Rows fixed: <id>, <id>.`, or leave the line out"
     ]
-    # A type that commits nothing fixes no row, so the line is read as a stray item line.
-    found = problems(text("researcher", fixed="A-F2."), "researcher")
-    assert any(problem.startswith("line 7 `Rows fixed: A-F2.`: no item line") for problem in found), found
+    # Only a writer's branch lands, and a driver's lands nothing, so another type's line is a stray item line.
+    for kind in ("driver", "researcher"):
+        found = problems(text(kind, fixed="A-F2."), kind)
+        assert any(problem.startswith("line 7 `Rows fixed: A-F2.`: no item line") for problem in found), (kind, found)
+
+
+def test_a_writers_rows_fixed_line_is_left_out_of_the_summarys_byte_cap() -> None:
+    """The line names every row the branch fixes, an earlier round's included, so it grows with the work as the
+    item lines do: sixty rows pass beside a sentence that fits the cap only without them."""
+    sentence = "Built the store's writes" + ", and its reads" * 45 + "."
+    rows = ", ".join(f"REVIEW.2-F{n}" for n in range(1, 61))
+    held, said = report.parse(text(fixed=f"{rows}.").replace("Built the store's writes.", sentence), "writer", "FE", 1)
+    assert said == []
+    assert held is not None
+    assert len(held.rows) == 60
 
 
 def test_a_report_with_no_finding_holds_none() -> None:
