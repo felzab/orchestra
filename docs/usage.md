@@ -53,10 +53,11 @@ app takes no flag.
 
 Every Claude Code session started at the checkout's root after `init` runs at the window the
 environment or the files set, the desktop app's too, and its agents inherit it; each agent
-definition also sets 500,000, which lowers a larger window an agent would inherit. The session that
-ran `init` keeps the window it started with: in the desktop app, a session whose `init` wrote the
-window was seen running on toward Claude Code's default, and the next session started there ran at
-500,000. Run `/compact` yourself in that first session.
+definition also sets 500,000, which lowers a larger window an agent would inherit. In the desktop
+app, a session whose `init` wrote the window was seen running on toward Claude Code's default,
+and the next session started there ran at 500,000; Claude Code's settings page says most edits
+reach a running session, so this is a sighting, not a rule. In that first session, run `/compact`
+yourself before its context passes 500,000 tokens, which `/context` shows.
 
 ## Starting a session
 
@@ -143,7 +144,7 @@ them there.
 | `conformance`   | is every ruling and plan item met, every closed row closed  |
 | `use`           | can a newcomer carry out a plain request with it            |
 | `data`          | can two writes, a retry or a crash leave stored state wrong |
-| `tests`         | can each check fail, and does one hold each added behaviour |
+| `tests`         | can each check fail, does a case reach each added behaviour |
 | `necessity`     | does each test case guard a harm nothing else guards        |
 | `prompt`        | will a model holding only this page do the right thing      |
 | `document`      | is each claim of a page a person reads true                 |
@@ -205,8 +206,9 @@ rate limited, the line says so instead.
 It runs `claude` found on PATH, where Claude Code's installers put it, else the program the
 [configuration's `claude` key](#the-configuration-file) names, and the line says which. The
 desktop app puts no `claude` on PATH and keeps its own program in a folder named for its version,
-so a path to it goes stale at each update. There the line reads `usage unknown`, and the
-coordinator reads the same limits from the app's own `get_usage` tool instead.
+so a path to it goes stale at each update. There, unless the `claude` key names the app's current
+program, the `usage` line reads unknown with its reason, and the coordinator reads the same limits
+from the app's own `get_usage` tool instead.
 
 ## Your commands
 
@@ -285,8 +287,8 @@ does not know is refused, naming its path in the file.
   makes every agent's report write prompt.
 - **`base`** is the branch a session branch is cut from, `main` by default; `init --base` names
   another for one session. `init` records the commit where the session branch leaves it, and
-  refuses a base this clone has no branch of, naming `git branch <base> origin/<base>` where the
-  remote has it.
+  refuses a base this clone has no branch of, naming `git branch <base> origin/<base>` where
+  `origin` has it.
 - **`models`** maps a profile's name to a `model` alias (`opus`, `sonnet`, `haiku` or `fable`) and an
   optional `effort` (`low`, `medium`, `high`, `xhigh` or `max`). An agent gets the profile its
   brief's `Model:` line names, such as `Model: mechanical`, and `default` where the brief has no such
@@ -363,7 +365,10 @@ default `stateRoot` is the `orchestra` folder in the platform's folder for a use
 data: `%LOCALAPPDATA%` on Windows, `~/Library/Application Support` on macOS, and `$XDG_DATA_HOME` or
 `~/.local/share` elsewhere. Uninstalling the plugin leaves it in place. Under the desktop app on
 Windows, the folder can sit in the app's own packaged AppData instead, where Windows redirects a
-packaged app's writes; the first line of `orchestra status` names the folder in use.
+packaged app's writes; the first line of `orchestra status` names the folder in use. On Windows,
+run `git config --global core.longpaths true` once: the frozen tree `diff --tree` makes sits deep
+under this folder, and a git command an agent runs there without the key reads a path past 260
+characters as deleted, with exit code 0.
 
 `init` writes the folder's path into `<git common dir>/orchestra/<branch>`, the branch name
 URL-quoted, a file no commit carries and every worktree of the clone shares, so every command finds

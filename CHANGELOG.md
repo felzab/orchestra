@@ -13,9 +13,9 @@ The fixes from the first project session that ran on the plugin.
 
 ### Added
 
-- `orchestra init --base <branch>` names the branch one session is cut from, where it is not the
-  configuration's `base`. init now refuses a base this clone has no branch of, naming the
-  `git branch` command that makes one from origin's, and a base that shares no commit with `HEAD`.
+- `orchestra init <session> --base <branch>` names the branch one session is cut from, where it is
+  not the configuration's `base`. init now tells a base this clone has no branch of, naming
+  `git branch <base> origin/<base>`, from a base that shares no commit with `HEAD`, naming `--base`.
 - A driver can be briefed with no `--slice`; a driver on no slice is no drift in `orchestra status`.
 - The `tests` lens asks which added behaviour no case reaches, and is due on every change but
   Markdown.
@@ -43,8 +43,8 @@ The fixes from the first project session that ran on the plugin.
 
 ### Fixed
 
-- `orchestra diff --tree` checks out a tree whose paths pass Windows' 260 characters, as they do
-  under the desktop app's redirected `AppData\Local`.
+- `orchestra diff --tree` checks out a tree whose paths pass Windows' 260 characters under the
+  state folder, which a repository with long tracked paths reaches.
 
 ## [0.1.0] - 2026-11-18
 
