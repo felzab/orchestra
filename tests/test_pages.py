@@ -61,7 +61,7 @@ BUDGETS = {
         )
     },
     # Its twelfth checklist item, the built-the-right-way questions, outgrew the shared budget.
-    "lenses/essential.md": 1650,
+    "lenses/essential.md": 1600,
     # Its Read first names the per-commit read's command and both of its spans.
     "lenses/disclosure.md": 1550,
 }
