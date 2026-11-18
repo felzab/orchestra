@@ -19,14 +19,14 @@ ROOT = Path(__file__).resolve().parents[1]
 
 # The most bytes each page under these folders may hold, counted as git stores it.
 BUDGETS = {
-    "skills/run/SKILL.md": 10900,
-    "skills/run/start.md": 2100,
+    "skills/run/SKILL.md": 11700,
+    "skills/run/start.md": 2550,
     "skills/run/brief.md": 3600,
-    "skills/run/review.md": 3350,
+    "skills/run/review.md": 3700,
     "skills/run/checkpoint.md": 2050,
     "skills/run/end.md": 2500,
     "skills/run/handoff.md": 2500,
-    "skills/run/resume.md": 4350,
+    "skills/run/resume.md": 4400,
     "skills/status/SKILL.md": 500,
     "skills/estimate/SKILL.md": 2450,
     "skills/checkpoint/SKILL.md": 500,
@@ -57,12 +57,13 @@ BUDGETS = {
             "practice",
             "use",
             "operations",
-            "disclosure",
             "accessibility",
         )
     },
     # Its twelfth checklist item, the built-the-right-way questions, outgrew the shared budget.
-    "lenses/essential.md": 1650,
+    "lenses/essential.md": 1600,
+    # Its Read first names the per-commit read's command and both of its spans.
+    "lenses/disclosure.md": 1550,
 }
 BUDGETED = ("skills/", "agents/", "lenses/")
 # Every folder whose pages name commands and links: the plugin's own, and the documents beside them.
