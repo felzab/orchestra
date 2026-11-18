@@ -3,8 +3,8 @@
 The grammar, each heading once and in this order:
 
     # <NAME> · <type> · round <n>
-    ## Summary              the status line, one sentence, the commit line, for a writer or a driver an
-                            optional `Rows fixed: <id>, <id>.`, one line per finding repeating its
+    ## Summary              the status line, one sentence, the commit line, for a writer an optional
+                            `Rows fixed: <id>, <id>.`, one line per finding repeating its
                             heading, `Not verified: ...`, `Wrong in the brief: ...`
     ## Done
     ## Findings             `### F<n> · <defect or optional> · <silent or loud> · <anchor>`, its first
@@ -55,9 +55,10 @@ TITLE_RE = re.compile(rf"# (?P<name>{model.NAME_RE.pattern}) · (?P<type>\S+) ·
 STATUS_RE = re.compile(r"(?P<status>[A-Z][A-Z-]*)(?:: (?P<reason>\S.*))?")
 COMMITS_RE = re.compile(r"Commits: (?P<count>0|[1-9][0-9]*), tip (?P<tip>[0-9a-f]{7,40})")
 NO_COMMITS = "Commits: none"
-# The optional line after a committing agent's commit line naming the rows its branch fixes, which its
-# landing closes; it stays out of every commit message, since a push publishes those.
+# The optional line after a writer's commit line naming the rows its branch fixes, which its landing closes;
+# it stays out of every commit message, since a push publishes those. A driver's work never lands.
 ROWS_FIXED = "Rows fixed:"
+FIXING = "writer"
 FINDING_RE = re.compile(r"F(?P<n>[1-9][0-9]*) · (?P<kind>defect|optional) · (?P<noise>silent|loud) · (?P<anchor>\S.*)")
 VERDICT_RE = re.compile(rf"(?P<row>{model.ROW_RE.pattern}) · (?P<verdict>{'|'.join(VERDICTS)})")
 HARM_RE = re.compile(r"Harm: \S.* Likelihood: \S.*")
@@ -115,7 +116,7 @@ class Report:
     tip: str | None
     findings: tuple[Finding, ...]
     verdicts: tuple[Verdict, ...]
-    # The rows a writer's or a driver's `Rows fixed:` line names, in its order.
+    # The rows a writer's `Rows fixed:` line names, in its order.
     rows: tuple[str, ...] = ()
 
 
@@ -263,8 +264,8 @@ class _Reader:
         status, reason = self.status(*first)
         count, tip = self.commits(*commits)
         claimed: tuple[str, ...] = ()
-        # Only a type that commits fixes rows; any other's line is faulted below as no item line.
-        if self.type in COMMITTING and middle and middle[0][1].startswith(ROWS_FIXED):
+        # Only a writer's branch lands; any other's line, a driver's included, is faulted below as no item line.
+        if self.type == FIXING and middle and middle[0][1].startswith(ROWS_FIXED):
             claimed = self.fixed(*middle.pop(0))
         return _Summary(status, reason, count, tip, self.named(middle, items), claimed)
 
