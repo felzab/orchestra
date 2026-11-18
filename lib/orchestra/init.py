@@ -155,8 +155,10 @@ def _base(root: Path, given: str | None, folder: Path, configured: str) -> tuple
         base, source = newest.base, f"session {newest.session}'s base"
     else:
         base, source = configured, "the configuration's base"
-    # A clone holding no branch of that name, which no edit of the shared configuration repairs.
-    if config.run_git(root, "rev-parse", "--verify", "--quiet", f"{base}^{{commit}}").returncode != 0:
+    # A clone holding no branch of that name, which no edit of the shared configuration repairs. A local branch
+    # alone, so the record holds its short name, by which `prune` spares the base among the branches it deletes.
+    branch = f"refs/heads/{base}"
+    if config.run_git(root, "rev-parse", "--verify", "--quiet", f"{branch}^{{commit}}").returncode != 0:
         remote = f"refs/remotes/origin/{base}"
         if config.run_git(root, "rev-parse", "--verify", "--quiet", f"{remote}^{{commit}}").returncode == 0:
             raise Refused(
@@ -168,7 +170,7 @@ def _base(root: Path, given: str | None, folder: Path, configured: str) -> tuple
             " or name the branch this session is cut from with `--base <branch>`"
         )
     try:
-        return base, config.git(root, "merge-base", "HEAD", base).strip(), source
+        return base, config.git(root, "merge-base", "HEAD", branch).strip(), source
     except Refused:
         shared = f", or set `base` in {config.CONFIG_FILE.as_posix()} for the project"
         raise Refused(

@@ -155,6 +155,25 @@ def test_init_refuses_a_base_missing_from_the_clone_naming_the_command_that_make
     assert not _state(project).exists()
 
 
+@pytest.mark.parametrize("named", ["refs/heads/follow-up", "origin/follow-up"])
+def test_init_refuses_a_base_named_other_than_by_its_local_branchs_short_name(project: Path, named: str) -> None:
+    """`prune` spares the base by its short name, so a record spelling it otherwise spares no branch."""
+    programme = _programme_branch(project)
+    git(project, "update-ref", "refs/remotes/origin/follow-up", "HEAD")
+    git(project, "switch", "-q", "-c", "s1")
+    done = inprocess("init", "s1", "--base", named, cwd=project)
+    assert done.returncode == 2, done.stdout + done.stderr
+    assert done.stderr == (
+        f"orchestra init: the base {named} (named by --base) is no branch in this clone, nor is origin/{named}:"
+        " fetch it, or name the branch this session is cut from with `--base <branch>`\n"
+    )
+    assert not _state(project).exists()
+    # A tag of the branch's name, which git resolves before the branch (gitrevisions(7)), is not the base.
+    git(project, "tag", "follow-up", "main")
+    session, _, _ = _init_on(project, "s2", "--base", "follow-up")
+    assert (session["base"], session["base_commit"]) == ("follow-up", programme)
+
+
 @pytest.mark.parametrize(
     ("options", "said"),
     [
