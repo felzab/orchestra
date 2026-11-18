@@ -57,7 +57,7 @@ Give no agent a deadline or a token budget, because a model under time pressure 
 
 ## The loop
 
-1. **Brief.** `orchestra brief NAME --type writer --slice <slice>` writes the header; an auditor, a researcher or a verifier takes no `--slice`, since it writes no file of the plan; write the rest as [brief.md](brief.md) says.
+1. **Brief.** `orchestra brief NAME --type writer --slice <slice>` writes the header; an auditor, a researcher, a verifier or a driver takes no `--slice`, since none of them lands a file of the plan; write the rest as [brief.md](brief.md) says.
 2. **Check.** `orchestra brief NAME --check`.
 3. **Dispatch.** Call the Agent tool with `subagent_type: orchestra:<type>` and the agent's NAME alone as the prompt. A writer forks from your `HEAD`, so commit what it needs first. Every later order goes by `SendMessage`, which a hook records; a line `Rows: <row ids>` in it routes those rows to the agent, as a brief's does. Dispatch what is ready before you read a report or reply to the owner. A reply `BLOCKED: the plugin's hooks did not run` means no hook runs in this session, so each further agent goes out with no brief or fence: dispatch nothing more and tell the owner.
 4. **Judge** each report as it arrives.
