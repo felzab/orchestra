@@ -79,9 +79,10 @@ OWN = frozenset({store.PLAN, store.NOW})
 ADDENDA = Path(".claude", "orchestra")
 # The reports judged after the newest saved estimate at which the checkpoint is due again.
 JUDGED = 4
-# The `Lens:` line of a read before a push of what it publishes, which frees no planned work, so its
-# report leaves the checkpoint's count alone.
-PUSH_READ = ("disclosure",)
+# The `Lens:` line of a disclosure-only read, which frees no planned work, so its report leaves the
+# checkpoint's count alone. The brief alone is read, so the read before a push and the review's own
+# disclosure reader are both left out: nothing tells the two apart.
+DISCLOSURE_ONLY = ("disclosure",)
 # When the previous prompt arrived, for the clock line.
 PROMPT = "prompt.json"
 # The reason of a `SessionEnd` that `/clear` caused, whose session id never writes again, and the source
@@ -888,7 +889,7 @@ def _checkpoint(state: Path, entries: list[log.Entry]) -> str | None:
 
     It is due once an agent is dispatched while no estimate is saved, and once `JUDGED` reports are
     judged after the newest saved one, since each report can free work the plan holds back; a report
-    whose brief's `Lens:` line is `PUSH_READ` frees none, so it is not counted.
+    whose brief's `Lens:` line is `DISCLOSURE_ONLY`, a disclosure-only read, frees none, so it is not counted.
     """
     saved = [path.stat().st_mtime for path in (state / store.ESTIMATES).glob("*") if path.is_file()]
     if saved:
@@ -898,7 +899,7 @@ def _checkpoint(state: Path, entries: list[log.Entry]) -> str | None:
         judged = sum(
             entry.kind == log.JUDGE
             and datetime.datetime.fromisoformat(entry.time) >= newest
-            and not _push_read(state, entry.text)
+            and not _disclosure_only(state, entry.text)
             for entry in entries
         )
         if judged < JUDGED:
@@ -918,15 +919,15 @@ def _checkpoint(state: Path, entries: list[log.Entry]) -> str | None:
     return f"{why}, and {lines} unticked: the checkpoint in checkpoint.md is due"
 
 
-def _push_read(state: Path, judged: str) -> bool:
-    """Whether a judge entry's agent read only what a push publishes, by its brief's `Lens:` line.
+def _disclosure_only(state: Path, judged: str) -> bool:
+    """Whether a judge entry's agent made a disclosure-only read, by its brief's `Lens:` line.
 
     The entry opens with the report's stem, `<NAME>` or `<NAME>.<round>` (`report.stem`), then `:`. A
     brief that cannot be read is counted, as the report of any other agent is.
     """
     name = judged.partition(":")[0].partition(".")[0]
     try:
-        return brief.header(state, name).lens == PUSH_READ
+        return brief.header(state, name).lens == DISCLOSURE_ONLY
     except Refused:
         return False
 

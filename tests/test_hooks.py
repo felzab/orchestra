@@ -1011,16 +1011,16 @@ def _judged(project: Path, name: str, kind: str, lens: str = "none") -> None:
     assert judged.returncode == 0, judged.stderr
 
 
-def test_a_read_of_what_a_push_publishes_leaves_the_checkpoint_count_alone(project: Path, state: Path) -> None:
-    """A researcher with `Lens: disclosure` alone reads before each push, which frees no planned work."""
+def test_a_disclosure_only_read_leaves_the_checkpoint_count_alone(project: Path, state: Path) -> None:
+    """A researcher whose `Lens:` names disclosure alone frees no planned work, before a push or in the review."""
     store.write_text(state / store.PLAN, PACED_PLAN)
     saved = state / "estimates" / "first.md"
     saved.write_bytes(b"# Estimate\n")
-    _judged(project, "PUSH", "researcher", lens="disclosure")
+    _judged(project, "DISCLOSE", "researcher", lens="disclosure")
     for k in range(1, 4):
         _judged(project, f"A{k}", "auditor")
     assert _due(project) == []
-    # A lens beside it reads more than the push, so its report counts.
+    # A lens beside it makes the read more than a disclosure-only one, so its report counts.
     _judged(project, "A4", "auditor", lens="disclosure, contract")
     at = datetime.datetime.fromtimestamp(saved.stat().st_mtime).astimezone()
     fourth = f"- 4 reports were judged since the last saved estimate ({at:%H:%M}), and 3 plan lines are unticked"
