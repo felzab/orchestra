@@ -969,10 +969,26 @@ def _due(project: Path) -> list[str]:
     return [] if said is None else [line for line in context_of(said, "Stop").splitlines() if "checkpoint" in line]
 
 
-def test_a_falsely_sequenced_slice_waits_free_and_four_judged_reports_make_the_checkpoint_due(
+def _judged(project: Path, name: str, kind: str, lens: str = "none") -> subprocess.CompletedProcess[str]:
+    """An agent briefed on `lens`, dispatched as its name in lower case, reported and judged, its findings closed."""
+    ident = name.lower()
+    briefed(project, name, kind, lens=lens)
+    dispatched(project, name, kind, ident)
+    report.path(store.state_dir(project), name).write_bytes(text(kind, name).encode())
+    assert hook("SubagentStop", project, inside(project, ident, kind, last_assistant_message="x"))[0] == 0
+    judged = run("judge", name, "F1=close:MOOT:x", "F2=close:MOOT:x", "--verdict", "v", cwd=project)
+    assert judged.returncode == 0, judged.stderr
+    return judged
+
+
+def test_a_falsely_sequenced_slice_waits_free_and_four_judged_reports_not_disclosure_only_make_the_checkpoint_due(
     project: Path, state: Path
 ) -> None:
-    """S2 needs nothing of S1, so the program names it free; the estimate is looked at again every four reports."""
+    """S2 needs nothing of S1, so the program names it free; the estimate is looked at again every four reports.
+
+    A researcher whose `Lens:` names disclosure alone frees no planned work, before a push or in the review, in
+    any round; a report whose brief cannot be read, or whose `Lens:` names another lens beside, counts.
+    """
     store.write_text(state / store.PLAN, PACED_PLAN)
     briefed(project, "W", "writer", owns="lib/a.py")
     free = "waits     slice S2, which no agent took: its files are free"
@@ -986,17 +1002,24 @@ def test_a_falsely_sequenced_slice_waits_free_and_four_judged_reports_make_the_c
     saved = state / "estimates" / "first.md"
     saved.write_bytes(b"# Estimate\n")
     assert _due(project) == []
+    # A disclosure-only read's first round, and its second once resumed for the next push: neither counts.
+    _judged(project, "DISCLOSE", "researcher", lens="disclosure")
+    resume = {"to": "DISCLOSE", "message": "Read the next push."}
+    assert decision(hook("PreToolUse", project, tool_name="SendMessage", tool_input=resume)[1])[0] == "allow"
+    report.path(state, "DISCLOSE", 2).write_bytes(text("researcher", "DISCLOSE", round_=2).encode())
+    stop = inside(project, "disclose", "researcher", last_assistant_message="x")
+    assert hook("SubagentStop", project, stop)[0] == 0
+    second = run("judge", "DISCLOSE", "F1=close:MOOT:x", "F2=close:MOOT:x", "--verdict", "v", cwd=project)
+    assert second.returncode == 0, second.stderr
     at = datetime.datetime.fromtimestamp(saved.stat().st_mtime).astimezone()
     fourth = f"- 4 reports were judged since the last saved estimate ({at:%H:%M}), and 3 plan lines are unticked"
     for k in range(1, 5):
-        name = f"A{k}"
-        briefed(project, name, "auditor")
-        dispatched(project, name, "auditor", f"a{k}")
-        report.path(state, name).write_bytes(text("auditor", name).encode())
-        assert hook("SubagentStop", project, inside(project, f"a{k}", "auditor", last_assistant_message="x"))[0] == 0
-        judged = run("judge", name, "F1=close:MOOT:x", "F2=close:MOOT:x", "--verdict", "v", cwd=project)
-        assert judged.returncode == 0, judged.stderr
+        # A lens beside disclosure makes the read more than a disclosure-only one, so its report counts.
+        judged = _judged(project, f"A{k}", "auditor", lens="disclosure, contract" if k == 4 else "none")
         assert free in judged.stdout.splitlines()
+        if k == 1:
+            # A brief that cannot be read is counted, as the report of any other agent is.
+            (state / "briefs" / "A1.md").unlink()
         assert _due(project) == ([] if k < 4 else [f"{fourth}: the checkpoint in checkpoint.md is due"])
     # A landing closes on what still waits.
     tree = project.parent / "trees" / "agent-w1"
@@ -1007,33 +1030,6 @@ def test_a_falsely_sequenced_slice_waits_free_and_four_judged_reports_make_the_c
     landed = run("land", "W", cwd=project)
     assert landed.returncode == 0, landed.stderr
     assert free in landed.stdout.splitlines()
-
-
-def _judged(project: Path, name: str, kind: str, lens: str = "none") -> None:
-    """An agent briefed on `lens`, dispatched as its name in lower case, reported and judged, its findings closed."""
-    ident = name.lower()
-    briefed(project, name, kind, lens=lens)
-    dispatched(project, name, kind, ident)
-    report.path(store.state_dir(project), name).write_bytes(text(kind, name).encode())
-    assert hook("SubagentStop", project, inside(project, ident, kind, last_assistant_message="x"))[0] == 0
-    judged = run("judge", name, "F1=close:MOOT:x", "F2=close:MOOT:x", "--verdict", "v", cwd=project)
-    assert judged.returncode == 0, judged.stderr
-
-
-def test_a_disclosure_only_read_leaves_the_checkpoint_count_alone(project: Path, state: Path) -> None:
-    """A researcher whose `Lens:` names disclosure alone frees no planned work, before a push or in the review."""
-    store.write_text(state / store.PLAN, PACED_PLAN)
-    saved = state / "estimates" / "first.md"
-    saved.write_bytes(b"# Estimate\n")
-    _judged(project, "DISCLOSE", "researcher", lens="disclosure")
-    for k in range(1, 4):
-        _judged(project, f"A{k}", "auditor")
-    assert _due(project) == []
-    # A lens beside it makes the read more than a disclosure-only one, so its report counts.
-    _judged(project, "A4", "auditor", lens="disclosure, contract")
-    at = datetime.datetime.fromtimestamp(saved.stat().st_mtime).astimezone()
-    fourth = f"- 4 reports were judged since the last saved estimate ({at:%H:%M}), and 3 plan lines are unticked"
-    assert _due(project) == [f"{fourth}: the checkpoint in checkpoint.md is due"]
 
 
 def test_a_compaction_or_a_resume_reads_the_state_back_from_disk(project: Path, state: Path) -> None:
