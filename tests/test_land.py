@@ -213,6 +213,15 @@ def test_a_landing_credits_every_agent_whose_branch_it_brought_in(
     }
     assert [model.read_agent(fleet.state, name).status for name in ("FIXER", "MERGER")] == [after, "pruned"]
     assert out.splitlines()[-1].startswith("landed MERGER, FIXER as ")
+    if after == "pruned":
+        return
+    # Its turn long over and its report judged, the fixer lands by the merge that brought it in.
+    ran(fleet, "b1", minutes=20)
+    model.update_agent(fleet.state, "FIXER", lambda held: replace(held, status="judged"))
+    code, out, err = fleet.run("land", "FIXER")
+    assert code == 0, out + err
+    assert out.splitlines()[-1].startswith("landed FIXER as "), out
+    assert model.read_agent(fleet.state, "FIXER").status == "pruned"
 
 
 def test_a_landing_credits_no_agent_whose_branch_had_landed_before_it(fleet: Fleet) -> None:

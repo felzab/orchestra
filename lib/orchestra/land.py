@@ -288,7 +288,10 @@ def _brought_in(root: Path, session: str, branch: str) -> tuple[str, str] | None
     entry before it is where the session branch stood. A branch with no commit of its own sits on the
     first-parent line too, and its own reflog holds nothing but its creation (git-reflog(1)).
     """
-    line = _git(root, "rev-list", "--first-parent", "--ancestry-path", f"{branch}..HEAD").split()
+    # The line's commits that descend from the branch, by any parent: with `--first-parent`, `--ancestry-path`
+    # walks no second parent, so it misses a branch another agent's merged branch carried in.
+    descends = set(_git(root, "rev-list", "--ancestry-path", f"{branch}..HEAD").split())
+    line = [made for made in _git(root, "rev-list", "--first-parent", f"{branch}..HEAD").split() if made in descends]
     if line and not _ok(root, "merge-base", "--is-ancestor", branch, f"{line[-1]}^1"):
         return f"{line[-1]}^1", line[-1]
     tip = _git(root, "rev-parse", f"refs/heads/{branch}").strip()
