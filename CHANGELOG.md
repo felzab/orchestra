@@ -31,6 +31,8 @@ The fixes from the first project session that ran on the plugin.
 - `orchestra land NAME` closes the rows a writer's latest report names on its summary's
   `Rows fixed:` line, no longer reading commit bodies, so a pushed history names no review row; the
   writer page and the disclosure lens say a commit message names none.
+- `init` refuses, where `--base` is not given, a branch already holding commits its base does not,
+  as a programme's first session cut from the programme's branch does.
 - `init` takes a base only as a local branch's short name, and tells a base this clone has no branch
   of, naming `git branch <base> origin/<base>`, from a base that shares no commit with `HEAD`,
   naming `--base`.

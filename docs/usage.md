@@ -16,6 +16,10 @@ Three settings make a project ready, each in the project's `.claude/settings.jso
   `gate`, `land.steps`, `preflight` and `claude` name too, since `orchestra` runs them.
 - **The plugin enabled at project scope**, which [the install](../README.md#install) writes.
 
+Claude Code applies a project's permission rules only in a folder you have trusted, so start one
+interactive session in a new clone and accept its trust prompt: a headless or Agent SDK session in a
+folder never trusted was seen refusing `orchestra` despite the rule.
+
 ```json
 {
   "worktree": { "baseRef": "head" },
@@ -71,16 +75,20 @@ yourself before its context passes 500,000 tokens, which `/context` shows.
    `orchestra init checkout-rework`, and then writes the session's plan.
 
 `init` refuses outside the primary checkout, on a detached head, and on a branch that already holds
-a session. It takes three options: `--base`, the branch the session is cut from, named by its local
-branch's short name; without it, a session takes the base of its programme's newest session made
-in this checkout, else the configuration's `base`, and the line `init` prints names which, so a
-programme whose sessions branch from a branch of their own, which belongs in no file every
-collaborator shares, names it on its first session alone; `--programme`, the name of the larger
-piece of work
-the session belongs to, which defaults to the primary checkout's folder name, and which `init`
-refuses to default where that programme's folder holds sessions of another checkout, so an unrelated
-clone sharing the folder name gets a programme of its own; and `--rulings-from`, the number the
-programme's first ruling takes, for a programme whose rulings were numbered elsewhere before.
+a session. It takes three options:
+
+- `--base`, the branch the session is cut from, named by its local branch's short name. Without it,
+  a session takes the base of its programme's newest session made in this checkout, else the
+  configuration's `base`, so a programme whose sessions branch from a branch of their own names it
+  on its first session alone. Without it, too, `init` refuses a branch that already holds commits
+  that base does not, as a branch cut from another one does. Its first line names the base, where
+  it came from and its commit, and `orchestra log` keeps that line.
+- `--programme`, the name of the larger piece of work the session belongs to, which defaults to the
+  primary checkout's folder name, and which `init` refuses to default where that programme's folder
+  holds sessions of another checkout, so an unrelated clone sharing the folder name gets a programme
+  of its own.
+- `--rulings-from`, the number the programme's first ruling takes, for a programme whose rulings
+  were numbered elsewhere before.
 
 `init` then runs `orchestra doctor`, which the coordinator can also run at any time. It refuses a
 configuration file that does not parse with exit 2, before any check runs, and exits 1 while a check

@@ -23,7 +23,8 @@ claude --plugin-dir <path to your clone>
 
 This loads the plugin for that session only, without installing it. Run `/reload-plugins` after
 editing its files. The `orchestra` program it puts on the Bash tool's `PATH` needs Python 3.11 or
-newer on your machine.
+newer on your machine. Where the plugin is also installed, a bare `orchestra` was seen running the
+installed copy while the hooks ran the clone's, so run the clone's as `bash <clone>/bin/orchestra`.
 
 ## Checks
 
@@ -85,9 +86,11 @@ TMPDIR="$HOME/t" claude plugin eval . --scaffold --ablation none --max-cost-usd 
 The first run in a clone asks whether to trust the folder, which a run without a terminal cannot
 do: there, pass `--trust-plugin` instead. The case pins its model and runs once, since a run costs
 model usage, and a single run is noisy: confirm a change in its score with `--runs 3` before acting
-on it. The case scores below 1.0 when a grader fails, and the command then exits 1. Two runs with
-Claude Code 2.1.326 took 7 and 10 minutes and cost about $4.80 and $4.40 by the `COST` column,
-which gives each run's own estimate.
+on it. The case scores below 1.0 when a grader fails, and the command then exits 1; each run's
+report is written to `evals/results/<time>/report.html`, and `--keep-temp` keeps its sandbox and
+transcript. Two runs with Claude Code 2.1.326 took 7 and 10 minutes and cost about $4.80 and $4.40
+by the `COST` column, which gives each run's own estimate; a third, with `TMPDIR` under home, took
+8 minutes and $5.47.
 
 ## What the repository publishes
 
