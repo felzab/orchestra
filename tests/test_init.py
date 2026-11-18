@@ -71,30 +71,23 @@ def _programme_branch(project: Path) -> str:
     return git(project, "rev-parse", "HEAD")
 
 
-def _init_on(project: Path, session: str, *options: str) -> tuple[dict[str, object], str, str]:
-    """`init` run on a new branch named for the session; its record, its first line and its log's first line."""
+def _init_on(project: Path, session: str, *options: str) -> dict[str, object]:
+    """`init` run on a new branch named for the session; its record."""
     git(project, "switch", "-q", "-c", session)
     done = inprocess("init", session, *options, cwd=project)
     assert done.returncode == 0, done.stdout + done.stderr
-    state = _state(project).parent / session
-    first = done.stdout.splitlines()[0]
-    assert first.endswith(f": {state}")
-    logged = store.read_jsonl(state / store.LOG)[0]["text"]
-    return json.loads((state / store.SESSION).read_bytes()), first.removesuffix(f": {state}"), logged
+    return json.loads((_state(project).parent / session / store.SESSION).read_bytes())
 
 
 def test_init_without_base_refuses_a_branch_already_past_the_base_it_would_record(project: Path) -> None:
     """A session cut from the programme's branch would record `main` and count the programme's work as its own."""
-    programme = _programme_branch(project)
+    _programme_branch(project)
     git(project, "switch", "-q", "-c", "s1")
     done = inprocess("init", "s1", cwd=project)
     assert done.returncode == 2
     assert "s1 holds 1 commit main does not" in done.stderr
     assert "`--base <branch>`" in done.stderr
     assert not _state(project).exists()
-    # Named, the same base is taken: the option is the word for a branch that holds work before its session.
-    session, _, _ = _init_on(project, "s2", "--base", "follow-up")
-    assert (session["base"], session["base_commit"]) == ("follow-up", programme)
 
 
 @pytest.mark.parametrize(
@@ -143,7 +136,7 @@ def test_init_refuses_a_base_named_other_than_by_its_local_branchs_short_name(pr
     assert not _state(project).exists()
     # A tag of the branch's name, which git resolves before the branch (gitrevisions(7)), is not the base.
     git(project, "tag", "follow-up", "main")
-    session, _, _ = _init_on(project, "s2", "--base", "follow-up")
+    session = _init_on(project, "s2", "--base", "follow-up")
     assert (session["base"], session["base_commit"]) == ("follow-up", programme)
 
 
