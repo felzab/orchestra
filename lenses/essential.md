@@ -17,6 +17,7 @@
 9. Does a comment or document restate what the code says?
 10. Was it added only to close a finding, with no harm named?
 11. What could be deleted with the change still meeting its goal?
+12. Does it add a second way to do a job, a fact kept twice, a fix at a symptom, a switched-off check, or production code only a test calls?
 
 Record a mechanism whose harm is unlikely or already seen as a finding whose repair is its removal: `defect` where the goals rule it out, `optional` otherwise.
 
