@@ -74,6 +74,7 @@ A change to a hook, a setting, a shared manifest or CI alters what every running
 
 - A report's counts are claims: compare them with the commits and files `orchestra land NAME --preview` prints. `orchestra show <NAME>-F1` prints a finding whole.
 - Check a finding about a file its reporter does not own at the branch's tip before you route it.
+- A change to a file every agent loads by itself takes [review.md](review.md) step 7's two-researcher test before `land`.
 - A settled finding goes to the writer whose brief owns the file until that writer lands, then to a new writer or you, since `land` removes its worktree; one arguing that the shape is wrong goes to a fresh auditor, since a shape's writer defends it.
 - Give every finding its disposition in one command, quoting one that holds a space: `orchestra judge NAME F1=route:<agent or queue> "F2=close:NOT A DEFECT:<evidence>" --verdict "<one line>"`. An `optional` or unlikely one closes without a writer; one that may be the owner's call goes to the queue `owner`, which the next checkpoint asks at the latest.
 - A row closes on evidence: `NOT A DEFECT` where it is none or is not worth a fix, `MOOT` where later work removed its subject, `RULED` by a ruling, `HANDOFF` for the next session. The landing closes `FIXED`; your own fix, `orchestra close FIXED "<commit>" <NAME>-F1`.
