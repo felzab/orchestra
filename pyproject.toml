@@ -1,0 +1,102 @@
+[project]
+name = "orchestra"
+version = "0.1.0"
+description = "A Claude Code plugin that runs a fleet of agents from state files one program owns."
+requires-python = ">=3.11"
+# The program runs on the standard library alone, so the plugin needs no install step.
+dependencies = []
+
+[dependency-groups]
+dev = ["pytest==9.2.0", "pytest-xdist==3.8.0", "ruff==0.17.5", "pyright==1.1.414"]
+
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+pythonpath = ["lib"]
+testpaths = ["tests"]
+addopts = ["--strict-markers", "--strict-config"]
+xfail_strict = true
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+src = ["lib", "tests"]
+
+[tool.ruff.lint]
+select = [
+  "E",    # pycodestyle errors
+  "W",    # pycodestyle warnings
+  "F",    # pyflakes
+  "I",    # import order
+  "B",    # bugbear: likely bugs
+  "UP",   # pyupgrade, to the 3.11 floor
+  "SIM",  # simplifications
+  "RUF",  # ruff's own
+  "PTH",  # pathlib over os.path
+  "S",    # bandit: subprocess and temporary-file misuse
+  "BLE",  # a bare `except Exception`
+  "N",    # naming
+  "C4",   # comprehensions
+  "PIE",
+  "PL",   # pylint
+  "TRY",
+  "RET",
+  "ARG",
+  "PT",   # pytest style
+  "FBT",  # boolean positional arguments
+  "DTZ",  # naive datetimes
+  "TID251", # a banned API: every program starts in `orchestra.process`
+]
+ignore = [
+  "N818",    # `Refused` names what the caller meets; an `Error` suffix would call a refusal a fault
+  "PLR0911", # a function reading a value by its type returns from each arm
+  "TRY003",  # a refusal's message is its contract, written where it is raised
+  "S603",    # every subprocess runs an argument list, never a shell
+  "S607",    # git and the configured programs are found on PATH by design
+]
+
+[tool.ruff.lint.per-file-ignores]
+# pytest's own assertion, and a literal compared as the clearest spelling of the expected value.
+"tests/**" = ["S101", "PLR2004", "TID251"]
+"lib/orchestra/process.py" = ["TID251"]
+
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+"subprocess.run".msg = "start a program through `orchestra.process`, which opens no console window on Windows"
+"subprocess.Popen".msg = "start a program through `orchestra.process`, which opens no console window on Windows"
+"subprocess.call".msg = "start a program through `orchestra.process`, which opens no console window on Windows"
+"subprocess.check_call".msg = "start a program through `orchestra.process`, which opens no console window on Windows"
+"subprocess.check_output".msg = "start a program through `orchestra.process`, which opens no console window on Windows"
+"subprocess.getoutput".msg = "start a program through `orchestra.process`, which opens no console window on Windows"
+"subprocess.getstatusoutput".msg = "start a program through `orchestra.process`, which opens no console window on Windows"
+"os.system".msg = "start a program through `orchestra.process`, which opens no console window on Windows"
+"os.popen".msg = "start a program through `orchestra.process`, which opens no console window on Windows"
+"os.startfile".msg = "start a program through `orchestra.process`, which opens no console window on Windows"
+"os.execl".msg = "start a program through `orchestra.process`, which opens no console window on Windows"
+"os.execle".msg = "start a program through `orchestra.process`, which opens no console window on Windows"
+"os.execlp".msg = "start a program through `orchestra.process`, which opens no console window on Windows"
+"os.execlpe".msg = "start a program through `orchestra.process`, which opens no console window on Windows"
+"os.execv".msg = "start a program through `orchestra.process`, which opens no console window on Windows"
+"os.execve".msg = "start a program through `orchestra.process`, which opens no console window on Windows"
+"os.execvp".msg = "start a program through `orchestra.process`, which opens no console window on Windows"
+"os.execvpe".msg = "start a program through `orchestra.process`, which opens no console window on Windows"
+"os.spawnl".msg = "start a program through `orchestra.process`, which opens no console window on Windows"
+"os.spawnle".msg = "start a program through `orchestra.process`, which opens no console window on Windows"
+"os.spawnlp".msg = "start a program through `orchestra.process`, which opens no console window on Windows"
+"os.spawnlpe".msg = "start a program through `orchestra.process`, which opens no console window on Windows"
+"os.spawnv".msg = "start a program through `orchestra.process`, which opens no console window on Windows"
+"os.spawnve".msg = "start a program through `orchestra.process`, which opens no console window on Windows"
+"os.spawnvp".msg = "start a program through `orchestra.process`, which opens no console window on Windows"
+"os.spawnvpe".msg = "start a program through `orchestra.process`, which opens no console window on Windows"
+"os.posix_spawn".msg = "start a program through `orchestra.process`, which opens no console window on Windows"
+"os.posix_spawnp".msg = "start a program through `orchestra.process`, which opens no console window on Windows"
+"asyncio.create_subprocess_exec".msg = "start a program through `orchestra.process`, which opens no console window on Windows"
+"asyncio.create_subprocess_shell".msg = "start a program through `orchestra.process`, which opens no console window on Windows"
+
+[tool.pyright]
+include = ["lib", "tests"]
+extraPaths = ["lib"]
+pythonVersion = "3.11"
+typeCheckingMode = "strict"
+venvPath = "."
+venv = ".venv"

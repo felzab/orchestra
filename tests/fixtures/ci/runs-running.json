@@ -1,0 +1,26 @@
+[
+  {
+    "databaseId": 101,
+    "workflowName": "ci",
+    "status": "in_progress",
+    "conclusion": "",
+    "headSha": "@SHA@",
+    "headBranch": "main",
+    "event": "push",
+    "createdAt": "2025-04-02T08:00:00Z",
+    "startedAt": "2025-04-02T08:00:00Z",
+    "updatedAt": "2025-04-02T08:00:00Z"
+  },
+  {
+    "databaseId": 102,
+    "workflowName": "release",
+    "status": "completed",
+    "conclusion": "success",
+    "headSha": "@SHA@",
+    "headBranch": "main",
+    "event": "push",
+    "createdAt": "2025-04-02T08:00:00Z",
+    "startedAt": "2025-04-02T08:00:00Z",
+    "updatedAt": "2025-04-02T08:04:00Z"
+  }
+]

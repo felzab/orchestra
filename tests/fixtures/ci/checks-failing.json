@@ -1,0 +1,18 @@
+[
+  {
+    "total_count": 1,
+    "check_runs": [
+      {
+        "id": 3,
+        "name": "Code scanning results",
+        "status": "completed",
+        "conclusion": "failure",
+        "started_at": "2025-04-02T08:01:00Z",
+        "completed_at": "2025-04-02T08:05:00Z",
+        "app": {
+          "slug": "github-advanced-security"
+        }
+      }
+    ]
+  }
+]

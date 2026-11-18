@@ -1,0 +1,188 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/felzab/orchestra/main/schema/orchestra.schema.json",
+  "title": "orchestra configuration",
+  "description": "A project's `.claude/orchestra.json`, read from the primary checkout. Every key is optional.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {
+      "description": "This schema's address, so an editor completes the file.",
+      "type": ["string", "null"],
+      "default": null
+    },
+    "stateRoot": {
+      "description": "The folder every programme's state lives under. `~` is the home folder; a relative path is read from the primary checkout. Null is `orchestra` in the platform's folder for a user's application data: %LOCALAPPDATA% on Windows, ~/Library/Application Support on macOS, $XDG_DATA_HOME or ~/.local/share elsewhere. Never under a `.claude` folder, whose files an agent cannot write without a prompt.",
+      "type": ["string", "null"],
+      "default": null
+    },
+    "claude": {
+      "description": "The Claude Code program `orchestra status --measure` runs to read the usage limits, used only where `claude` is not on PATH. `~` is the home folder; a relative path is read from the primary checkout. The desktop app's bundled program lies in a folder named for its version, so a path to it goes stale at each update. Null finds `claude` on PATH alone.",
+      "type": ["string", "null"],
+      "default": null
+    },
+    "base": {
+      "description": "The branch a session branch is cut from.",
+      "type": "string",
+      "default": "main"
+    },
+    "models": {
+      "description": "Model profiles by name; the dispatch hook gives an agent the profile its brief names, `default` otherwise, and none where this holds no `default`.",
+      "type": "object",
+      "default": {},
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["model"],
+        "properties": {
+          "model": {
+            "description": "The model the agent runs on, as an alias: an Agent call takes no full model id.",
+            "enum": ["sonnet", "opus", "haiku", "fable"]
+          },
+          "effort": {
+            "description": "The agent's effort level; the levels a model offers depend on the model.",
+            "enum": ["low", "medium", "high", "xhigh", "max", null],
+            "default": null
+          }
+        }
+      }
+    },
+    "contextCeiling": {
+      "description": "The context, in tokens, past which the dispatch hook refuses to resume an agent, since a resume sends the whole context again. The default is the 200K window a session compacts at where a model holds no 1M context.",
+      "type": "integer",
+      "default": 200000,
+      "exclusiveMinimum": 0
+    },
+    "queues": {
+      "description": "Owners a finding may be routed to besides an agent, beyond the built-in `owner`, `ending` and `handoff`.",
+      "type": "array",
+      "default": [],
+      "items": { "type": "string" }
+    },
+    "preflight": {
+      "description": "Commands `doctor` runs, each of which must exit 0 before a session works.",
+      "type": "array",
+      "default": [],
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["run", "why"],
+        "properties": {
+          "run": { "description": "The command, its program first, one argument an item.", "type": "array", "minItems": 1, "items": { "type": "string" } },
+          "why": { "description": "What fails without it.", "type": "string" }
+        }
+      }
+    },
+    "land": {
+      "description": "What `land` runs after a merge.",
+      "type": "object",
+      "default": {},
+      "additionalProperties": false,
+      "properties": {
+        "steps": {
+          "description": "Each runs where the merge touches a path under one of its `when`: installs first, then regenerations, then checks.",
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["kind", "when", "run"],
+            "properties": {
+              "kind": { "enum": ["install", "regenerate", "check"] },
+              "when": {
+                "description": "Paths from the root, compared as written, so with no `*`; a path ending in `/` names a folder.",
+                "type": "array",
+                "items": { "type": "string", "pattern": "^[^*]*$" }
+              },
+              "run": { "description": "The command, its program first, one argument an item.", "type": "array", "minItems": 1, "items": { "type": "string" } },
+              "cwd": { "description": "The folder it runs in, from the root.", "type": "string", "default": "." },
+              "writes": {
+                "description": "A regeneration's outputs, compared as written, so with no `*`; a conflict in one is answered by running it.",
+                "type": "array",
+                "default": [],
+                "items": { "type": "string", "pattern": "^[^*]*$" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "lenses": {
+      "description": "Which of the review's lenses this project's changes make due, beside the paths each lens's own `**Applies.**` line names.",
+      "type": "object",
+      "default": {},
+      "additionalProperties": false,
+      "properties": {
+        "triggers": {
+          "description": "Each makes its lens due where the change touches a path one of its `when` patterns names. A lens whose `**Applies.**` line says `declared` is due only through one, and prints as undeclared where none names it; a public project declares `disclosure` over `**`.",
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "when"],
+            "properties": {
+              "name": { "description": "The lens, as its file is named under the plugin's lenses/ or .claude/orchestra/lenses/, without `.md`.", "type": "string" },
+              "when": {
+                "description": "Patterns from the root, read as a brief's `Owns:` is: `*` within one folder, `**` any number of folders, a pattern with no `*` itself and every path under it. They add to the paths the lens file names. An empty list makes a `declared` lens due on nothing; a lens whose file says `always` or names paths stays due as the file says.",
+                "type": "array",
+                "items": { "type": "string" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "ci": {
+      "description": "How `ci` waits on a commit's workflow runs, check runs and statuses, and reads the project's own lines in a failed run's log.",
+      "type": "object",
+      "default": {},
+      "additionalProperties": false,
+      "properties": {
+        "workflow": {
+          "description": "The workflow's `name:`, as `gh run list` shows it and not its file name, whose failed log `ci` reads line by line against the expected reds; every other run, check and commit status is read by its conclusion alone.",
+          "type": ["string", "null"],
+          "default": null
+        },
+        "waitMinutes": {
+          "description": "How long `ci --wait` waits for the commit's runs, checks and statuses to appear and conclude.",
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "default": 30
+        },
+        "verdict": {
+          "description": "A regular expression for the project's own summary line of a failed check, its text in a group named `text`.",
+          "type": ["string", "null"],
+          "default": null
+        },
+        "relay": {
+          "description": "A regular expression for an annotation that only points at other jobs, whose lines carry the findings.",
+          "type": ["string", "null"],
+          "default": null
+        },
+        "findings": {
+          "description": "Regular expressions for a test runner's or a checker's line naming one finding, in a group named `text`.",
+          "type": "array",
+          "default": [],
+          "items": { "type": "string" }
+        },
+        "cases": {
+          "description": "Regular expressions for a runner's line naming a failing case, in a group named `name`, whose error follows on the next line.",
+          "type": "array",
+          "default": [],
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "gate": {
+      "description": "The project's whole check, which `ci gate` runs in the primary checkout; null where the project has none.",
+      "type": ["object", "null"],
+      "default": null,
+      "additionalProperties": false,
+      "required": ["run"],
+      "properties": {
+        "run": { "description": "The command, its program first, one argument an item; on Windows a shell script runs as [\"bash\", \"./script.sh\"]. Its exit code alone is the verdict: 0 is green.", "type": "array", "minItems": 1, "items": { "type": "string" } }
+      }
+    }
+  }
+}

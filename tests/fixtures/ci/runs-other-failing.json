@@ -1,0 +1,26 @@
+[
+  {
+    "databaseId": 101,
+    "workflowName": "ci",
+    "status": "completed",
+    "conclusion": "success",
+    "headSha": "@SHA@",
+    "headBranch": "main",
+    "event": "push",
+    "createdAt": "2025-04-02T08:00:00Z",
+    "startedAt": "2025-04-02T08:00:00Z",
+    "updatedAt": "2025-04-02T08:06:00Z"
+  },
+  {
+    "databaseId": 103,
+    "workflowName": "codeql",
+    "status": "completed",
+    "conclusion": "failure",
+    "headSha": "@SHA@",
+    "headBranch": "main",
+    "event": "push",
+    "createdAt": "2025-04-02T08:00:00Z",
+    "startedAt": "2025-04-02T08:00:00Z",
+    "updatedAt": "2025-04-02T08:04:00Z"
+  }
+]

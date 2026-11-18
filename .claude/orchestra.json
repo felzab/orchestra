@@ -1,0 +1,12 @@
+{
+  "$schema": "../schema/orchestra.schema.json",
+  "lenses": {
+    "triggers": [
+      { "name": "disclosure", "when": ["**"] },
+      { "name": "cost", "when": ["hooks/", "bin/orchestra", "lib/orchestra/events.py", "lib/orchestra/hooks.py"] },
+      { "name": "prompt", "when": ["lenses/", "evals/**/*.md"] },
+      { "name": "data", "when": ["lib/"] },
+      { "name": "accessibility", "when": [] }
+    ]
+  }
+}

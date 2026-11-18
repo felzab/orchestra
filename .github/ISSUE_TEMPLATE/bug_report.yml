@@ -1,0 +1,46 @@
+name: Bug report
+description: Something the plugin does wrong.
+labels: ["bug"]
+body:
+  - type: input
+    id: claude-code-version
+    attributes:
+      label: Claude Code version
+      description: What `claude --version` prints.
+    validations:
+      required: true
+  - type: input
+    id: plugin-version
+    attributes:
+      label: Plugin version
+      description: The version `claude plugin list` shows for orchestra.
+    validations:
+      required: true
+  - type: input
+    id: operating-system
+    attributes:
+      label: Operating system
+      placeholder: Windows 11, macOS 15, Ubuntu 24.04
+    validations:
+      required: true
+  - type: textarea
+    id: command
+    attributes:
+      label: Command run
+      description: The slash command or `orchestra` command, with its arguments.
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: Paste any output or error message. Remove tokens, paths and names you would not publish.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true

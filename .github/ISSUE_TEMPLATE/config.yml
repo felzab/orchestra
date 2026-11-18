@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a vulnerability
+    url: https://github.com/felzab/orchestra/security/policy
+    about: Report it privately, as the security policy describes, never in an issue.

@@ -1,0 +1,14 @@
+[
+  {
+    "databaseId": 102,
+    "workflowName": "release",
+    "status": "completed",
+    "conclusion": "success",
+    "headSha": "@SHA@",
+    "headBranch": "main",
+    "event": "push",
+    "createdAt": "2025-04-02T08:00:00Z",
+    "startedAt": "2025-04-02T08:00:00Z",
+    "updatedAt": "2025-04-02T08:04:00Z"
+  }
+]
