@@ -53,9 +53,10 @@ app takes no flag.
 
 Every Claude Code session started at the checkout's root after `init` runs at the window the
 environment or the files set, the desktop app's too, and its agents inherit it; each agent
-definition also sets 500,000, which lowers a larger window an agent would inherit. Claude Code
-reloads a changed settings file in a running session, but does not document whether a new window
-applies there, so count on it from the next session.
+definition also sets 500,000, which lowers a larger window an agent would inherit. The session that
+ran `init` keeps the window it started with: in the desktop app, a session whose `init` wrote the
+window was seen running on toward Claude Code's default, and the next session started there ran at
+500,000. Run `/compact` yourself in that first session.
 
 ## Starting a session
 
@@ -69,10 +70,12 @@ applies there, so count on it from the next session.
    `orchestra init checkout-rework`, and then writes the session's plan.
 
 `init` refuses outside the primary checkout, on a detached head, and on a branch that already holds
-a session. It takes two options: `--programme`, the name of the larger piece of work the session
-belongs to, which defaults to the primary checkout's folder name, and which `init` refuses to
-default where that programme's folder holds sessions of another checkout, so an unrelated clone
-sharing the folder name gets a programme of its own; and `--rulings-from`, the number the
+a session. It takes three options: `--base`, the branch the session is cut from, where it is not the
+configuration's `base`, as for a programme whose sessions branch from a branch of their own, which
+belongs in no file every collaborator shares; `--programme`, the name of the larger piece of work
+the session belongs to, which defaults to the primary checkout's folder name, and which `init`
+refuses to default where that programme's folder holds sessions of another checkout, so an unrelated
+clone sharing the folder name gets a programme of its own; and `--rulings-from`, the number the
 programme's first ruling takes, for a programme whose rulings were numbered elsewhere before.
 
 `init` then runs `orchestra doctor`, which the coordinator can also run at any time. It refuses a
@@ -201,8 +204,9 @@ rate limited, the line says so instead.
 
 It runs `claude` found on PATH, where Claude Code's installers put it, else the program the
 [configuration's `claude` key](#the-configuration-file) names, and the line says which. The
-desktop app keeps its own program in a folder named for its version, so a path to it goes stale at
-each update; the line then says the configured program is missing.
+desktop app puts no `claude` on PATH and keeps its own program in a folder named for its version,
+so a path to it goes stale at each update. There the line reads `usage unknown`, and the
+coordinator reads the same limits from the app's own `get_usage` tool instead.
 
 ## Your commands
 
@@ -279,8 +283,10 @@ does not know is refused, naming its path in the file.
   [where the state lives](#where-the-state-lives) names. `init` refuses the home folder, a folder
   holding it, a file system's root and a folder inside the checkout, and a folder under `.claude`
   makes every agent's report write prompt.
-- **`base`** is the branch a session branch is cut from, `main` by default. `init` records the
-  commit where the session branch leaves it.
+- **`base`** is the branch a session branch is cut from, `main` by default; `init --base` names
+  another for one session. `init` records the commit where the session branch leaves it, and
+  refuses a base this clone has no branch of, naming `git branch <base> origin/<base>` where the
+  remote has it.
 - **`models`** maps a profile's name to a `model` alias (`opus`, `sonnet`, `haiku` or `fable`) and an
   optional `effort` (`low`, `medium`, `high`, `xhigh` or `max`). An agent gets the profile its
   brief's `Model:` line names, such as `Model: mechanical`, and `default` where the brief has no such
@@ -305,7 +311,9 @@ does not know is refused, naming its path in the file.
   as a brief's `Owns:` line reads it: `*` matches within one folder, `**` any number of folders,
   and a path with no `*` names itself and everything under it. Declare the paths holding stored
   state for `data`, the code run on every request or event for `cost`, and the interface for
-  `accessibility`; a project that publishes its tree declares `disclosure` over `**`. An empty
+  `accessibility`; a project that publishes its tree declares `disclosure` over `**`. A trigger's
+  paths are not filtered by the lens's own `except`, so a trigger can make `security` due on the
+  Markdown files that hold a project's agent rules, which that lens's own line leaves out. An empty
   `when` makes a `declared` lens due on nothing, so it no longer prints as `undeclared`. It leaves a
   lens whose own line is `always` or names paths due as that line says: to change such a lens,
   replace its file under `.claude/orchestra/lenses/`. A trigger may name a lens of the project's
