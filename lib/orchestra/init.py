@@ -60,6 +60,12 @@ def add(verb: str, parser: argparse.ArgumentParser) -> None:
         parser.add_argument(
             "--rulings-from", type=int, metavar="N", help="the number the programme's first ruling takes"
         )
+        # A programme's sessions branch from its own branch, which belongs in no file every collaborator shares.
+        parser.add_argument(
+            "--base",
+            metavar="BRANCH",
+            help="the branch the session is cut from, recorded as its base; the configuration's `base` unless given",
+        )
 
 
 def run(args: argparse.Namespace) -> int:
@@ -88,7 +94,7 @@ def init(args: argparse.Namespace) -> int:
         raise Refused(
             f"branch {here.branch} already holds the session {held}: resume it, or cut a new branch for a new session"
         )
-    base = settings.base
+    base = settings.base if args.base is None else args.base
     try:
         base_commit = config.git(here.root, "merge-base", "HEAD", base).strip()
     except Refused:
@@ -135,7 +141,7 @@ def init(args: argparse.Namespace) -> int:
     except BaseException:
         shutil.rmtree(state, ignore_errors=True)
         raise
-    print(f"session {programme}/{session} on {here.branch}: {state}")
+    print(f"session {programme}/{session} on {here.branch}, based on {base} at {base_commit[:9]}: {state}")
     print(said)
     return doctor(args)
 

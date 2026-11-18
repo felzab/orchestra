@@ -47,6 +47,23 @@ def test_init_makes_the_state_the_pointer_and_the_two_skeletons(project: Path) -
     assert done.stdout.splitlines()[-1] == "doctor: every check holds"
 
 
+def test_init_records_the_base_its_option_names_over_the_configurations(project: Path) -> None:
+    """A programme's sessions branch from its own branch, which belongs in no file every collaborator shares."""
+    write_config(project, {"stateRoot": (project.parent / "state").as_posix(), "base": "main"})
+    git(project, "switch", "-q", "-c", "follow-up")
+    git(project, "commit", "-q", "--allow-empty", "-m", "the programme's work")
+    programme = git(project, "rev-parse", "HEAD")
+    git(project, "switch", "-q", "-c", "s1")
+    git(project, "commit", "-q", "--allow-empty", "-m", "the session's work")
+    done = inprocess("init", "s1", "--base", "follow-up", cwd=project)
+    assert done.returncode == 0, done.stdout + done.stderr
+    session = json.loads((_state(project) / store.SESSION).read_bytes())
+    assert (session["base"], session["base_commit"]) == ("follow-up", programme)
+    said = f"session project/s1 on s1, based on follow-up at {programme[:9]}"
+    assert done.stdout.startswith(f"{said}: {_state(project)}\n")
+    assert store.read_jsonl(_state(project) / store.LOG)[0]["text"] == said
+
+
 def test_two_clones_sharing_a_folder_name_never_share_a_programme_unasked(tmp_path: Path, make_repo: MakeRepo) -> None:
     """The default programme is the folder's name, so an unrelated clone would read the other's rulings."""
     shared: dict[str, object] = {"stateRoot": (tmp_path / "state").as_posix()}
