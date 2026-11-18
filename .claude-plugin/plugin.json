@@ -1,6 +1,6 @@
 {
   "name": "orchestra",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Runs a fleet of Claude Code subagents through a session: briefs, findings, landing and CI.",
   "author": { "name": "Felix Zabudkin" },
   "repository": "https://github.com/felzab/orchestra",
