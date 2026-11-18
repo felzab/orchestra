@@ -1,0 +1,20 @@
+lint	Run	﻿2025-04-02T08:03:41.2718281Z ##[error]config.yml:3: key 'timeout' is set twice
+lint	Run	2025-04-02T08:03:41.2718281Z ##[error]notes.txt:7: trailing whitespace
+lint	Run	2025-04-02T08:03:41.2718281Z ^[[31m   ✗^[[0m  lint found 2 problems.
+lint	Run	2025-04-02T08:03:41.2718281Z ##[error]Process completed with exit code 1.
+test-js	Run	﻿2025-04-02T08:03:41.2718281Z       ⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+test-js	Run	2025-04-02T08:03:41.2718281Z        FAIL  |node| src/cart.test.ts > cart totals > adds the tax to every line
+test-js	Run	2025-04-02T08:03:41.2718281Z       AssertionError: expected 118 to be 119 // Object.is equality
+test-js	Run	2025-04-02T08:03:41.2718281Z         at src/cart.test.ts:14:23
+test-js	Run	2025-04-02T08:03:41.2718281Z ##[error]AssertionError: expected 118 to be 119 // Object.is equality
+test-js	Run	2025-04-02T08:03:41.2718281Z ^[[31m   ✗^[[0m  vitest failed.   ^[[2m58s^[[0m
+test-js	Run	2025-04-02T08:03:41.2718281Z ##[error]Process completed with exit code 1.
+test-py	Run	﻿2025-04-02T08:03:41.2718281Z       FAILED tests/test_parser.py::test_empty_input - AssertionError: 2 != 3
+test-py	Run	2025-04-02T08:03:41.2718281Z ##[error]pytest failed.
+test-py	Run	2025-04-02T08:03:41.2718281Z ##[error]pyright reported 1 error.
+typecheck	Run	﻿2025-04-02T08:03:41.2718281Z       src/api.ts(41,9): error TS2339: Property 'total' does not exist on type 'Order'.
+deps	Run	﻿2025-04-02T08:03:41.2718281Z [31m   ✗[0m  the lockfile is out of date.
+build	Run	﻿2025-04-02T08:03:41.2718281Z ##[error]Process completed with exit code 1.
+status	Run	﻿2025-04-02T08:03:41.2718281Z ##[error]Some jobs failed: read each failed job's log.
+status	Run	2025-04-02T08:03:41.2718281Z ##[error]test-py ran 12 min, past its limit of 10 min
+status	Run	2025-04-02T08:03:41.2718281Z ##[error]build ran 9 min, past its limit of 8 min

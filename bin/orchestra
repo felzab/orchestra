@@ -1,0 +1,156 @@
+#!/bin/sh
+# Runs orchestra from this plugin's lib/ with the first Python 3.11 or newer found.
+
+case $0 in
+*/*) lib=${0%/*}/../lib ;;
+*) lib=../lib ;;
+esac
+
+# The names tried before `py -3`, without starting either to choose. On Windows `python3` is often
+# the Store alias, which python.org's installer leaves in place since it ships no `python3`: starting
+# it only prints an install hint and fails, at over a tenth of a second on every hook. Elsewhere
+# `python` may be a Python 2, or absent.
+case ${OS-} in
+Windows_NT) order="python python3" ;;
+*) order="python3 python" ;;
+esac
+tried="${order% *}, ${order#* } and py -3"
+
+# The caller's own values of the three variables set below, `=` and the value where one is set and
+# empty where none is: `orchestra.__main__` puts them back for every program the tool starts.
+ORCHESTRA_CALLER_PYTHONPATH=${PYTHONPATH+=$PYTHONPATH}
+ORCHESTRA_CALLER_MSYS_NO_PATHCONV=${MSYS_NO_PATHCONV+=$MSYS_NO_PATHCONV}
+ORCHESTRA_CALLER_MSYS2_ARG_CONV_EXCL=${MSYS2_ARG_CONV_EXCL+=$MSYS2_ARG_CONV_EXCL}
+export ORCHESTRA_CALLER_PYTHONPATH ORCHESTRA_CALLER_MSYS_NO_PATHCONV ORCHESTRA_CALLER_MSYS2_ARG_CONV_EXCL
+
+# A hook runs on every edit and every prompt of every session with the plugin, so it starts one
+# Python, which checks its own version: below 3.11 it exits 86, a code no shell, no crash and no
+# Python of its own gives, and the next name is tried. `-c` puts the working directory first on
+# sys.path, where a project's own json.py would shadow the standard module, so the program puts lib/
+# there in its place, as `-P`, which a Python below 3.11 refuses, would. A hook's arguments are
+# `hook` and an event's name, so no conversion can rewrite one; lib/'s path, such as `/c/...`, Git
+# Bash must convert, even where the caller's shell turns that off.
+# Where PYTHONDONTWRITEBYTECODE is set, as Claude Code's desktop app sets it for its sessions, every
+# hook would compile the plugin's modules anew, so the program turns bytecode writing back on for its
+# own process (`sys.dont_write_bytecode`). Python then caches each module it compiles under
+# `$CLAUDE_PLUGIN_DATA`, the folder Claude Code gives a plugin's caches and keeps across its updates
+# (the plugins reference, "Environment variables"), as `sys.pycache_prefix` places it. That cache
+# holds the standard library's modules the hook imports too, compiled once, since Python reads no
+# `__pycache__` folder under a prefix. Where the variable is unset, as in a terminal, each module is
+# cached in the `__pycache__` folder beside it (PEP 3147). A folder it cannot write leaves the hook
+# compiling, as before.
+# A fault once the program runs, its import included, prints its trace and exits 4.
+hook='import sys
+if sys.version_info < (3, 11):
+    sys.exit(86)
+if not sys.flags.safe_path:
+    del sys.path[0]
+import os
+sys.path.insert(0, os.path.realpath(sys.argv[1]))
+sys.dont_write_bytecode = False
+if os.environ.get("CLAUDE_PLUGIN_DATA"):
+    sys.pycache_prefix = os.path.join(os.environ["CLAUDE_PLUGIN_DATA"], "pycache")
+try:
+    from orchestra.__main__ import main
+    main(sys.argv[2:])
+except BaseException:
+    import traceback
+    traceback.print_exc()
+    sys.exit(4)'
+
+# 0 is the hook answered, and 4 its fault, which exits 1 so Claude Code shows it as a hook error: a
+# hook's stderr is read only on a non-zero exit. After any other code the next name is tried. One too
+# old (86), Windows' Store alias (49) and a name the shell cannot run (126 or 127) never read stdin,
+# so the next gets the input whole. Any other code is a crash that may have read it: the next then
+# gets what is left, and the program refuses an empty input with 4, so the crash ends in exit 1, as
+# it does where no next name answers. A Windows abort exits 127 in Git Bash, so one after the read,
+# with no next name, passes as a Python that never ran the hook.
+said=
+crashed=
+answer() {
+  "$@" -c "$hook" "$lib" hook "$event"
+  code=$?
+  case $code in
+  0) exit 0 ;;
+  4)
+    echo "orchestra: ${said:+$said; then }$* failed in the hook: its trace is above" >&2
+    exit 1
+    ;;
+  86 | 49 | 126 | 127) ;;
+  *) crashed=1 ;;
+  esac
+  said="${said:+$said; }$* exited $code"
+}
+
+if [ $# -eq 2 ] && [ "$1" = hook ]; then
+  event=$2
+  unset MSYS_NO_PATHCONV MSYS2_ARG_CONV_EXCL
+  for python in $order; do
+    if command -v "$python" >/dev/null; then
+      answer "$python"
+    fi
+  done
+  if command -v py >/dev/null; then
+    answer py -3
+  fi
+  echo "orchestra: no Python 3.11 or newer answered the hook: ${said:-none was found} (tried $tried)" >&2
+  if [ -n "$crashed" ]; then
+    # A Python crashed and may have read stdin first, so the event is not passed off as one none saw.
+    exit 1
+  fi
+  # Each code is one a Python that never ran the hook gives, so, as where none was found, no session's
+  # state was read and none is guarded: the plugin is inert. Never 2, for the reason the end of this
+  # file gives.
+  exit 0
+fi
+
+# Exits 1 below 3.11, else prints lib/ followed by any PYTHONPATH already set. Python joins the
+# two so the separator and the path form are the interpreter's own: joined in Git Bash, a
+# Windows-form PYTHONPATH reaches a native Windows Python mangled.
+prepend='import os, sys
+if sys.version_info < (3, 11):
+    sys.exit(1)
+print(os.pathsep.join([os.path.realpath(sys.argv[1])] + [p for p in [os.environ.get("PYTHONPATH")] if p]))'
+
+# Git Bash must convert lib/'s path for a Windows Python to read it, so the lookup runs with
+# conversion on even where the caller's shell exports a switch turning it off.
+lookup() {
+  (
+    unset MSYS_NO_PATHCONV MSYS2_ARG_CONV_EXCL
+    "$@" -c "$prepend" "$lib"
+  ) 2>/dev/null
+}
+
+# Git Bash would rewrite an argument opening with `/` (a pattern, an API path) into a Windows path
+# with no error; with these set it hands every argument over as typed. Other shells ignore both.
+verbatim() {
+  MSYS_NO_PATHCONV=1
+  MSYS2_ARG_CONV_EXCL='*'
+  export MSYS_NO_PATHCONV MSYS2_ARG_CONV_EXCL
+}
+
+# -P keeps the working directory off sys.path, where a project's own json.py, or any file named
+# like a module the tool imports, would shadow that module.
+for python in $order; do
+  if path=$(lookup "$python"); then
+    PYTHONPATH=$path
+    export PYTHONPATH
+    verbatim
+    exec "$python" -P -m orchestra "$@"
+  fi
+done
+if path=$(lookup py -3); then
+  PYTHONPATH=$path
+  export PYTHONPATH
+  verbatim
+  exec py -3 -P -m orchestra "$@"
+fi
+
+echo "orchestra: no Python 3.11 or newer found (tried $tried)" >&2
+# A hook exiting 2 blocks the prompt or the tool call in every session of the project (Claude Code's
+# hooks.md, "Exit code 2 behavior per event"); without Python no orchestra session exists, so a hook
+# answers nothing, whatever its arguments.
+if [ "${1-}" = hook ]; then
+  exit 0
+fi
+exit 2

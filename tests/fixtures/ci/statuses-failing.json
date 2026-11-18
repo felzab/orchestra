@@ -1,0 +1,22 @@
+[
+  {
+    "state": "failure",
+    "total_count": 2,
+    "statuses": [
+      {
+        "id": 7,
+        "context": "ci/jenkins",
+        "state": "failure",
+        "created_at": "2025-04-02T08:01:00Z",
+        "updated_at": "2025-04-02T08:09:00Z"
+      },
+      {
+        "id": 8,
+        "context": "codecov/patch",
+        "state": "pending",
+        "created_at": "2025-04-02T08:02:00Z",
+        "updated_at": "2025-04-02T08:02:00Z"
+      }
+    ]
+  }
+]

@@ -1,0 +1,6 @@
+{
+  "name": "orchestra",
+  "description": "The orchestra plugin, published from its own repository.",
+  "owner": { "name": "Felix Zabudkin" },
+  "plugins": [{ "name": "orchestra", "source": "./" }]
+}

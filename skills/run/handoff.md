@@ -1,0 +1,53 @@
+# The handoff and the next starter
+
+A handoff tells the next session what this one believed and how much of it was verified. Write it once, from the state and from commands, into the programme's folder, the one holding this session's state. A pause inside a session needs none: `NOW.md` serves it.
+
+## The handoff's sections
+
+```text
+# Handoff: <this session> to <the next>
+
+## Read these, in this order
+<each file and the one question it answers; point at files and restate none>
+
+## Settled, so you do not reopen it
+<each decision and where its argument lives; a ruling by its number>
+
+## The single most important thing
+<one item>
+
+## What bit this session
+<each incident: its mechanism, its cost, the rule it leaves>
+
+## What not to redo
+<each rejected option, its reason, the condition that would reopen it>
+
+## Open, and owed to the owner
+<each unanswered question and what waits behind it; first what must be raised before the next session starts>
+
+## Verified state
+<established by commands between <time> and <time>, each exit code read from its own command>
+- the branch and its commit subjects
+- the gate: its exit code and the commit it ran at
+- each count, with who measured it and when
+- what could not be established, and why
+```
+
+Leave out a figure nobody measured again in the state the next session inherits, a file name a pending fix will change, a question the owner has ruled, and anything the project's CLAUDE.md files and `.claude/rules/`, its addenda, the plan or these pages already say.
+
+## The audit
+
+An auditor with `Lens: prompt` that saw none of the work reads the handoff and the starter cold. Fix what it finds, because a wrong line here is acted on by a session that cannot ask you.
+
+## The starter
+
+The next session's starter is a map, under a page long, that points at the handoff and copies none of it. The owner pastes it after typing `/orchestra:run`.
+
+```text
+- This is session <session> of the programme <programme>.
+- Read <the handoff's path> first, then <the plan's part for this session>.
+- Where the handoff and the project's CLAUDE.md files, `.claude/rules/` or addenda disagree, they win.
+- Your scope is <scope>. It ends when <exit condition>. One pull request.
+- Raise each open question the moment it arises.
+- End by writing the next handoff and having it audited cold.
+```

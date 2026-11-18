@@ -1,0 +1,40 @@
+{
+  "status": "completed",
+  "conclusion": "failure",
+  "workflowName": "ci",
+  "headSha": "@SHA@",
+  "jobs": [
+    {
+      "name": "lint",
+      "conclusion": "failure"
+    },
+    {
+      "name": "test-js",
+      "conclusion": "failure"
+    },
+    {
+      "name": "test-py",
+      "conclusion": "failure"
+    },
+    {
+      "name": "typecheck",
+      "conclusion": "failure"
+    },
+    {
+      "name": "deps",
+      "conclusion": "failure"
+    },
+    {
+      "name": "build",
+      "conclusion": "failure"
+    },
+    {
+      "name": "status",
+      "conclusion": "failure"
+    },
+    {
+      "name": "format",
+      "conclusion": "success"
+    }
+  ]
+}

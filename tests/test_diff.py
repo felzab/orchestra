@@ -1,0 +1,88 @@
+"""`diff`: the session's change captured byte for byte, and a tree that stays at the captured commit."""
+
+from __future__ import annotations
+
+import subprocess
+from pathlib import Path
+
+from conftest import git, inprocess
+from orchestra import diff, log, model, store
+
+
+def commit(root: Path, path: str, data: bytes) -> None:
+    (root / path).parent.mkdir(parents=True, exist_ok=True)
+    (root / path).write_bytes(data)
+    git(root, "add", path)
+    git(root, "commit", "-m", f"change {path}")
+
+
+def test_the_change_from_the_base_to_the_tip_is_captured_whole(project: Path) -> None:
+    assert inprocess("init", "s1", cwd=project).returncode == 0
+    state = store.state_dir(project)
+    base = model.read_session(state).base_commit
+    # Bytes no decoding may touch: Latin-1, a carriage return and a line with no end.
+    commit(project, "docs/latin.txt", b"caf\xe9\r\nline\r\n")
+    commit(project, "lib/a.py", b"x = 1\ny = 2")
+    commit(project, ".gitattributes", b"*.txt diff=upper\n")
+    # A user's colour, external diff tool and text conversion, each of which would rewrite the change.
+    for key, value in (
+        ("color.diff", "always"),
+        ("diff.external", "echo EXTERNAL"),
+        ("diff.upper.textconv", "sed s/line/CONVERTED/"),
+    ):
+        git(project, "config", key, value)
+    done = inprocess("diff", cwd=project)
+    assert done.returncode == 0, done.stderr
+    tip = git(project, "rev-parse", "main")
+    path = state / store.DIFFS / f"{base[:12]}..{tip[:12]}.diff"
+    messages = path.with_suffix(".messages")
+    lines = done.stdout.splitlines()
+    assert lines[:2] == [str(path), str(messages)]
+    assert lines[-1].startswith(f"3 file(s) changed from {base[:9]} to {tip[:9]}; ")
+    plain = ("--no-color", "--no-ext-diff", "--no-textconv", f"{base}..{tip}")
+    expected = subprocess.run(("git", "-C", str(project), "diff", *plain), capture_output=True, check=True).stdout
+    assert b"+caf\xe9\r\n+line\r\n" in expected
+    assert path.read_bytes() == expected
+
+
+def test_the_spans_commits_are_captured_with_their_authors_as_recorded(project: Path) -> None:
+    """What a public push carries beside the diff; a mailmap or a decoration would change what a reader sees."""
+    assert inprocess("init", "s1", cwd=project).returncode == 0
+    state = store.state_dir(project)
+    base = model.read_session(state).base_commit
+    commit(project, "lib/a.py", b"x\n")
+    commit(project, "lib/b.py", b"y\n")
+    (project / ".mailmap").write_bytes(b"Someone Else <else@example.invalid> <fixture@example.invalid>\n")
+    for key, value in (("log.decorate", "full"), ("log.showSignature", "true"), ("log.mailmap", "true")):
+        git(project, "config", key, value)
+    done = inprocess("diff", cwd=project)
+    assert done.returncode == 0, done.stderr
+    tip = git(project, "rev-parse", "main")
+    messages = state / store.DIFFS / f"{base[:12]}..{tip[:12]}.messages"
+    held = messages.read_bytes()
+    assert held.count(b"\ncommit ") + held.startswith(b"commit ") == 2
+    assert held.count(b"Author:     fixture <fixture@example.invalid>\n") == 2
+    assert b"    change lib/a.py\n" in held
+    assert b"    change lib/b.py\n" in held
+    assert b"HEAD" not in held
+
+
+def test_a_tree_stays_at_the_captured_commit_while_the_branch_moves_on(project: Path) -> None:
+    assert inprocess("init", "s1", cwd=project).returncode == 0
+    state = store.state_dir(project)
+    commit(project, "lib/a.py", b"one\n")
+    captured = git(project, "rev-parse", "main")
+    done = inprocess("diff", "--tree", cwd=project)
+    assert done.returncode == 0, done.stderr
+    tree = state / store.TREES / captured
+    assert done.stdout.splitlines()[2] == str(tree)
+    commit(project, "lib/a.py", b"two\n")
+    assert git(tree, "rev-parse", "HEAD") == captured
+    assert (tree / "lib" / "a.py").read_bytes() == b"one\n"
+    assert git(tree, "status", "--porcelain") == ""
+    again = inprocess("diff", "--tree", cwd=project)
+    assert again.stdout.splitlines()[2] == str(state / store.TREES / git(project, "rev-parse", "main"))
+    made = [entry.text for entry in log.entries(state) if entry.kind == diff.KIND]
+    assert made == [str(tree), str(state / store.TREES / git(project, "rev-parse", "main"))]
+    assert inprocess("diff", "--tree", cwd=project).returncode == 0
+    assert len([entry for entry in log.entries(state) if entry.kind == diff.KIND]) == 2

@@ -1,0 +1,13 @@
+test-js	Run	﻿2025-04-02T08:03:41.2718281Z       ━━━ Failed Tests 3 ━━━
+test-js	Run	2025-04-02T08:03:41.2718281Z        FAIL  |node| src/queue.test.ts > a queue: when empty > returns nothing, not null
+test-js	Run	2025-04-02T08:03:41.2718281Z       AssertionError: expected undefined to be null // Object.is equality
+test-js	Run	2025-04-02T08:03:41.2718281Z       - Expected
+test-js	Run	2025-04-02T08:03:41.2718281Z ^[[41m^[[1m FAIL ^[[22m^[[49m ^[[30m^[[43m node ^[[49m^[[39m src/queue.test.ts^[[2m > ^[[22mkeeps the order of two pushes
+test-js	Run	2025-04-02T08:03:41.2718281Z       AssertionError: expected [ 2, 1 ] to deeply equal [ 1, 2 ]
+test-js	Run	2025-04-02T08:03:41.2718281Z        FAIL  |node| src/clock.test.ts [ src/clock.test.ts ]
+test-js	Run	2025-04-02T08:03:41.2718281Z       Error: Cannot find module './tick'
+test-js	Run	2025-04-02T08:03:41.2718281Z        Test Files  2 failed (2)
+test-js	Run	2025-04-02T08:03:41.2718281Z ##[error]AssertionError: expected undefined to be null // Object.is equality
+test-js	Run	2025-04-02T08:03:41.2718281Z ##[error]AssertionError: expected [ 2, 1 ] to deeply equal [ 1, 2 ]
+test-js	Run	2025-04-02T08:03:41.2718281Z ##[error]Error: Cannot find module './tick'
+test-js	Run	2025-04-02T08:03:41.2718281Z ^[[31m   ✗^[[0m  vitest failed.

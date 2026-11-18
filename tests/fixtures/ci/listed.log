@@ -1,0 +1,10 @@
+lint	Run	﻿2025-04-02T08:03:41.2718281Z ▶ lint
+lint	Run	2025-04-02T08:03:41.2718281Z ##[error]a known problem
+lint	Run	2025-04-02T08:03:41.2718281Z ^[[31m   ✗^[[0m  a known problem   ^[[2m0.1s^[[0m
+lint	Run	2025-04-02T08:03:41.2718281Z       FAILED tests/test_rules.py::t_known - assert False
+lint	Run	2025-04-02T08:03:41.2718281Z ##[error]pytest failed
+lint	Run	2025-04-02T08:03:41.2718281Z ^[[31m   ✗^[[0m  pytest failed   ^[[2m0.2s^[[0m
+lint	Run	2025-04-02T08:03:41.2718281Z ##[error]a new problem
+lint	Run	2025-04-02T08:03:41.2718281Z ^[[31m   ✗^[[0m  a new problem
+lint	Run	2025-04-02T08:03:41.2718281Z ^[[31m   ✗^[[0m  lint: 3 of 3 checks failed   ^[[2m1m 2.5s^[[0m
+lint	Run	2025-04-02T08:03:41.2718281Z ##[error]Process completed with exit code 1.

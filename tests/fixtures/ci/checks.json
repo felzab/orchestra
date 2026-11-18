@@ -1,0 +1,29 @@
+[
+  {
+    "total_count": 2,
+    "check_runs": [
+      {
+        "id": 1,
+        "name": "ci / lint",
+        "status": "completed",
+        "conclusion": "failure",
+        "started_at": "2025-04-02T08:01:00Z",
+        "completed_at": "2025-04-02T08:05:00Z",
+        "app": {
+          "slug": "github-actions"
+        }
+      },
+      {
+        "id": 2,
+        "name": "license scan",
+        "status": "completed",
+        "conclusion": "success",
+        "started_at": "2025-04-02T08:01:00Z",
+        "completed_at": "2025-04-02T08:05:00Z",
+        "app": {
+          "slug": "license-scanner"
+        }
+      }
+    ]
+  }
+]
