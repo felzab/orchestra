@@ -454,21 +454,31 @@ def _changed(root: Path, branch: str, ref: str, tree: Path | None) -> set[str]:
 
 
 def _unlanded(root: Path, branch: str, agents: list[model.Agent], name: str) -> dict[str, set[str]]:
-    """Each other worktree's and each live agent's branch's changed paths, by who holds it."""
+    """Each other worktree's and each live agent's branch's changed paths, by who holds it.
+
+    A driver's are left out: it commits nothing and reverts what it plants, so nothing of its worktree lands.
+    """
     owner = {agent.branch: agent.name for agent in agents if agent.branch}
+    planting = {agent.branch for agent in agents if agent.branch and agent.type == "driver"}
     found: dict[str, set[str]] = {}
     seen: set[str] = set()
     # The first is the primary checkout, which holds the session branch itself.
     for tree in config.worktrees(root)[1:]:
         held = tree.get("branch", "")
-        if owner.get(held) == name:
+        if owner.get(held) == name or held in planting:
             continue
         seen.add(held)
         who = f"{owner[held]} ({held})" if held in owner else held or tree["worktree"]
         ref = f"refs/heads/{held}" if held else tree.get("HEAD", "")
         found[who] = _changed(root, branch, ref, Path(tree["worktree"]))
     for agent in agents:
-        if agent.branch and agent.name != name and agent.status not in model.SETTLED and agent.branch not in seen:
+        if (
+            agent.branch
+            and agent.name != name
+            and agent.status not in model.SETTLED
+            and agent.branch not in seen
+            and agent.branch not in planting
+        ):
             try:
                 config.git(root, "rev-parse", "--verify", "--quiet", f"refs/heads/{agent.branch}")
             except Refused:

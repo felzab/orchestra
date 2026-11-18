@@ -243,6 +243,22 @@ def test_a_path_an_unlanded_branch_changes_by_commit_or_by_edit_is_refused(
     assert check(project, "A")[0] == 0
 
 
+def test_a_drivers_worktree_holds_no_path_of_a_writers_brief(project: Path, state: Path, tmp_path: Path) -> None:
+    """A driver commits nothing and reverts each plant, so its worktree's edit is no work a landing would bring."""
+    tree = tmp_path / "tree"
+    git(project, "worktree", "add", "-q", "-b", "worktree-agent-d1", str(tree))
+    (tree / "lib" / "a.py").write_bytes(b"planted\n")
+    briefed(project, "PROBE", kind="driver")
+    model.update_agent(
+        state, "PROBE", lambda held: dataclasses.replace(held, status="running", branch="worktree-agent-d1")
+    )
+    briefed(project, "A", owns="lib/a.py")
+    assert check(project, "A") == (0, [f"A's brief is checked: {state / 'briefs' / 'A.md'}"])
+    # The same worktree a writer's is work that lands.
+    model.update_agent(state, "PROBE", lambda held: dataclasses.replace(held, type="writer"))
+    assert check(project, "A")[1][:-1] == ["lib/a.py is changed by PROBE (worktree-agent-d1), unlanded"]
+
+
 @pytest.mark.skipif(sys.platform != "win32", reason="the 260-character path limit is Windows' alone")
 def test_a_frozen_tree_whose_paths_pass_windows_limit_changes_none_of_them(project: Path, state: Path) -> None:
     """`git status` reads such a path as deleted unless `core.longpaths` is set, and exits 0 all the same."""
