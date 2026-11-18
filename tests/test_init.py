@@ -64,6 +64,50 @@ def test_init_records_the_base_its_option_names_over_the_configurations(project:
     assert store.read_jsonl(_state(project) / store.LOG)[0]["text"] == said
 
 
+@pytest.mark.parametrize(
+    ("remote", "said"),
+    [
+        (
+            "refs/remotes/origin/trunk",
+            "the base trunk is no branch in this clone: make it from origin's with `git branch trunk origin/trunk`,"
+            " and run init again",
+        ),
+        (
+            None,
+            "the base trunk is no branch in this clone, nor is origin/trunk: fetch it, or name the branch this"
+            " session is cut from with `--base <branch>`",
+        ),
+    ],
+    ids=["origin holds it", "origin does not"],
+)
+def test_init_refuses_a_base_missing_from_the_clone_naming_the_command_that_makes_it(
+    project: Path, remote: str | None, said: str
+) -> None:
+    """A single-branch clone lacks the branch, which no edit of the shared configuration repairs."""
+    write_config(project, {"stateRoot": (project.parent / "state").as_posix(), "base": "trunk"})
+    if remote is not None:
+        # As a clone of another branch holds it: origin's branch, and no local one.
+        git(project, "update-ref", remote, "HEAD")
+    done = inprocess("init", "s1", cwd=project)
+    assert done.returncode == 2, done.stdout + done.stderr
+    # Not the shared configuration, whose edit would not make the branch.
+    assert done.stderr == f"orchestra init: {said}\n"
+    assert not _state(project).exists()
+
+
+def test_init_refuses_a_base_sharing_no_commit_with_head_naming_both_ways_to_name_another(project: Path) -> None:
+    git(project, "switch", "-q", "--orphan", "elsewhere")
+    git(project, "commit", "-q", "--allow-empty", "-m", "an unrelated history")
+    git(project, "switch", "-q", "main")
+    done = inprocess("init", "s1", "--base", "elsewhere", cwd=project)
+    assert done.returncode == 2, done.stdout + done.stderr
+    assert done.stderr == (
+        "orchestra init: the base elsewhere shares no commit with HEAD here: name the branch this session is cut"
+        " from with `--base <branch>`, or set `base` in .claude/orchestra.json for every session of the project\n"
+    )
+    assert not _state(project).exists()
+
+
 def test_two_clones_sharing_a_folder_name_never_share_a_programme_unasked(tmp_path: Path, make_repo: MakeRepo) -> None:
     """The default programme is the folder's name, so an unrelated clone would read the other's rulings."""
     shared: dict[str, object] = {"stateRoot": (tmp_path / "state").as_posix()}

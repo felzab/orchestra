@@ -95,11 +95,24 @@ def init(args: argparse.Namespace) -> int:
             f"branch {here.branch} already holds the session {held}: resume it, or cut a new branch for a new session"
         )
     base = settings.base if args.base is None else args.base
+    # A clone holding no branch of that name, which no edit of the shared configuration repairs.
+    if config.run_git(here.root, "rev-parse", "--verify", "--quiet", f"{base}^{{commit}}").returncode != 0:
+        remote = f"refs/remotes/origin/{base}"
+        if config.run_git(here.root, "rev-parse", "--verify", "--quiet", f"{remote}^{{commit}}").returncode == 0:
+            raise Refused(
+                f"the base {base} is no branch in this clone: make it from origin's with"
+                f" `git branch {base} origin/{base}`, and run init again"
+            )
+        raise Refused(
+            f"the base {base} is no branch in this clone, nor is origin/{base}: fetch it,"
+            " or name the branch this session is cut from with `--base <branch>`"
+        )
     try:
         base_commit = config.git(here.root, "merge-base", "HEAD", base).strip()
     except Refused:
         raise Refused(
-            f"`base` is {base}, which shares no commit with HEAD here: set `base` in {config.CONFIG_FILE.as_posix()}"
+            f"the base {base} shares no commit with HEAD here: name the branch this session is cut from with"
+            f" `--base <branch>`, or set `base` in {config.CONFIG_FILE.as_posix()} for every session of the project"
         ) from None
     state = _state_root(settings.state_root_path(here.root), here.root, Path(programme, session))
     if args.programme is None and (others := _other_checkouts(state.parent, here.root)):
