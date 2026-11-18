@@ -143,7 +143,7 @@ them there.
 | `conformance`   | is every ruling and plan item met, every closed row closed  |
 | `use`           | can a newcomer carry out a plain request with it            |
 | `data`          | can two writes, a retry or a crash leave stored state wrong |
-| `tests`         | can each check fail                                         |
+| `tests`         | can each check fail, and does one hold each added behaviour |
 | `necessity`     | does each test case guard a harm nothing else guards        |
 | `prompt`        | will a model holding only this page do the right thing      |
 | `document`      | is each claim of a page a person reads true                 |

@@ -2,7 +2,7 @@
 
 **Question.** Can each new or changed check fail, and does it test what its name claims?
 
-**Read first.** The cases, guards and assertions the change adds or alters, then the code each one exercises.
+**Read first.** The behaviour the change adds, the cases, guards and assertions it adds or alters, then the code each exercises.
 
 **Checklist.**
 
@@ -22,6 +22,6 @@
 
 **Silent.** Yes: a case that cannot fail is green forever.
 
-**Applies.** paths `**/tests/**`, `**/test/**`, `**/test_*`, `**/*_test.*`, `**/*.test.*`, `**/*.spec.*`.
+**Applies.** paths `**` except `**/*.md`.
 
 **Run by.** driver.
