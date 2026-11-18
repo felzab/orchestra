@@ -31,11 +31,12 @@ The fixes from the first project session that ran on the plugin.
 - `init` takes a base only as a local branch's short name, and tells a base this clone has no branch
   of, naming `git branch <base> origin/<base>`, from a base that shares no commit with `HEAD`,
   naming `--base`.
-- `orchestra status` marks a row for a re-plan once it has gone to three distinct agents, and no
-  longer counts routes to a queue or repeated routes to one agent.
+- `orchestra status` marks a row for a re-plan once it has gone to three distinct agents, a row
+  routed again after it closed included, and no longer counts routes to a queue or repeated routes
+  to one agent.
 - The turn-end hook leaves a report whose brief's `Lens:` names `disclosure` alone out of the
   reports that make a checkpoint due, and plain notes out of the log entries that make `NOW.md`
-  stale.
+  stale; a note opening `Decision:` still counts.
 - The coordinator's pages:
   - Read the estimate's steps and run them before the first dispatch.
   - Ask the owner before cutting a branch where another live session shares the checkout, sync the
@@ -59,7 +60,10 @@ The fixes from the first project session that ran on the plugin.
 ### Fixed
 
 - `orchestra diff --tree` checks out a tree whose paths pass Windows' 260 characters under the
-  state folder, which a repository with long tracked paths reaches.
+  state folder, which a repository with long tracked paths reaches, and refuses a tree folder its
+  log never recorded, such as a checkout stopped half-way, naming `git worktree remove --force`.
+- `orchestra brief NAME --check` reads a frozen tree with `core.longpaths`, so a path past 260
+  characters is no false change that refuses a brief.
 
 ## [0.1.0] - 2026-11-18
 
