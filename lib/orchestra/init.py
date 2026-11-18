@@ -101,7 +101,7 @@ def init(args: argparse.Namespace) -> int:
             f" {', '.join(others)}, or of this one before it moved: give this project a programme of its own"
             f" with `--programme <name>`, or join that one with `--programme {programme}`"
         )
-    base, base_commit, source = _base(here.root, args.base, settings.base)
+    base, base_commit, source = _base(here.root, here.branch, args.base, settings.base)
     state.parent.mkdir(parents=True, exist_ok=True)
     try:
         state.mkdir()
@@ -139,11 +139,11 @@ def init(args: argparse.Namespace) -> int:
     return doctor(args)
 
 
-def _base(root: Path, given: str | None, configured: str) -> tuple[str, str, str]:
+def _base(root: Path, head: str, given: str | None, configured: str) -> tuple[str, str, str]:
     """The session's base, the commit where HEAD leaves it, and where the base was named; refused where unusable.
 
-    `given` is `--base`; without it, the configuration's `base`, and a branch holding commits that base lacks,
-    as one cut from a programme's branch does, is refused below, naming `--base`.
+    `head` is the branch checked out. `given` is `--base`; without it, the configuration's `base`, and a branch
+    holding commits that base lacks, as one cut from a programme's branch does, is refused below, naming `--base`.
     """
     if given is not None:
         base, source = given, "named by --base"
@@ -176,7 +176,6 @@ def _base(root: Path, given: str | None, configured: str) -> tuple[str, str, str
     # recorded here would count that branch's work as the session's own; only `--base` names such a base.
     ahead = 0 if given is not None else int(config.git(root, "rev-list", "--count", f"{base_commit}..HEAD"))
     if ahead:
-        head = config.git(root, "rev-parse", "--abbrev-ref", "HEAD").strip()
         raise Refused(
             f"{head} holds {ahead} commit{'s' if ahead > 1 else ''} {base} does not, so a session based on {base}"
             f" ({source}) would count them as its own: name the branch it was cut from with `--base <branch>`,"
