@@ -79,23 +79,25 @@ def test_the_header_is_filled_from_the_state_and_git(project: Path, state: Path)
     assert "exists, and what is written in it would be lost" in again.stderr
 
 
-def test_a_reader_is_briefed_outside_the_plan_with_no_slice_and_a_writer_is_not(project: Path, state: Path) -> None:
-    """A reader changes no file a slice owns, so a review or a question needs no slice made up for it."""
-    done = inprocess("brief", "READER", "--type", "auditor", cwd=project)
-    assert done.returncode == 0, done.stderr
-    assert brief.header(state, "READER").slice == "none"
-    assert "agent READER: on no slice" not in inprocess("status", cwd=project).stdout
+def test_a_reader_or_a_driver_is_briefed_outside_the_plan_with_no_slice_and_a_writer_on_none_is_drift(
+    project: Path, state: Path
+) -> None:
+    """A reader changes no file a slice owns, and a driver plants in its own worktree and lands nothing, so a
+    review, a question or a probe needs no slice made up for it; a writer's commits land, so it needs one."""
+    for name, kind in (("READER", "auditor"), ("PROBE", "driver")):
+        done = inprocess("brief", name, "--type", kind, cwd=project)
+        assert done.returncode == 0, done.stderr
+        assert brief.header(state, name).slice == "none"
     refused = inprocess("brief", "WRITER", "--type", "writer", cwd=project)
     assert refused.returncode == 2
     assert "a new brief needs --type, and --slice for a writer; `--check` checks one written" in refused.stderr
-
-
-def test_a_driver_is_briefed_outside_the_plan_with_no_slice(project: Path, state: Path) -> None:
-    """A driver plants in its own worktree and lands nothing, so the review's `use` driver needs no slice."""
-    done = inprocess("brief", "PROBE", "--type", "driver", cwd=project)
-    assert done.returncode == 0, done.stderr
-    assert brief.header(state, "PROBE").slice == "none"
-    assert done.stdout.splitlines()[1].startswith("PROBE briefed as a driver on none:")
+    loose = inprocess("brief", "LOOSE", "--type", "writer", "--slice", "none", cwd=project)
+    assert loose.returncode == 0, loose.stderr
+    # LOOSE's line shows the drift check ran over READER and PROBE too.
+    lines = inprocess("status", cwd=project).stdout.splitlines()
+    assert [line for line in lines if line.startswith("drift     agent ")] == [
+        "drift     agent LOOSE: on no slice of PLAN.md (its slice is 'none')"
+    ]
 
 
 def test_a_whole_brief_is_stamped_and_an_edit_unstamps_it(project: Path, state: Path) -> None:
