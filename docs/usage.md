@@ -71,9 +71,12 @@ yourself before its context passes 500,000 tokens, which `/context` shows.
    `orchestra init checkout-rework`, and then writes the session's plan.
 
 `init` refuses outside the primary checkout, on a detached head, and on a branch that already holds
-a session. It takes three options: `--base`, the branch the session is cut from, where it is not the
-configuration's `base`, as for a programme whose sessions branch from a branch of their own, which
-belongs in no file every collaborator shares; `--programme`, the name of the larger piece of work
+a session. It takes three options: `--base`, the branch the session is cut from, named by its local
+branch's short name; without it, a session takes the base of its programme's newest session made
+in this checkout, else the configuration's `base`, and the line `init` prints names which, so a
+programme whose sessions branch from a branch of their own, which belongs in no file every
+collaborator shares, names it on its first session alone; `--programme`, the name of the larger
+piece of work
 the session belongs to, which defaults to the primary checkout's folder name, and which `init`
 refuses to default where that programme's folder holds sessions of another checkout, so an unrelated
 clone sharing the folder name gets a programme of its own; and `--rulings-from`, the number the
@@ -285,10 +288,10 @@ does not know is refused, naming its path in the file.
   [where the state lives](#where-the-state-lives) names. `init` refuses the home folder, a folder
   holding it, a file system's root and a folder inside the checkout, and a folder under `.claude`
   makes every agent's report write prompt.
-- **`base`** is the branch a session branch is cut from, `main` by default; `init --base` names
-  another for one session. `init` records the commit where the session branch leaves it, and
-  refuses a base this clone has no branch of, naming `git branch <base> origin/<base>` where
-  `origin` has it.
+- **`base`** is the branch a session branch is cut from, `main` by default, where neither
+  `init --base` nor an earlier session of the programme in this checkout names one. `init` records
+  the commit where the session branch leaves it, and refuses a base this clone has no local branch
+  of, naming `git branch <base> origin/<base>` where `origin` has it.
 - **`models`** maps a profile's name to a `model` alias (`opus`, `sonnet`, `haiku` or `fable`) and an
   optional `effort` (`low`, `medium`, `high`, `xhigh` or `max`). An agent gets the profile its
   brief's `Model:` line names, such as `Model: mechanical`, and `default` where the brief has no such
