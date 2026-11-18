@@ -1,6 +1,6 @@
 # Lens: tests
 
-**Question.** Can each new or changed check fail, and does it test what its name claims?
+**Question.** Can each new or changed check fail, does it test what its name claims, and does a case reach each added behaviour?
 
 **Read first.** The behaviour the change adds, the cases, guards and assertions it adds or alters, then the code each exercises.
 
