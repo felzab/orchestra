@@ -185,7 +185,7 @@ def declined(state: Path) -> dict[str, str]:
     return {
         match["name"]: match["reason"]
         for entry in log.entries(state)
-        if entry.kind == "note" and (match := DECLINED_RE.fullmatch(entry.text))
+        if entry.kind == log.NOTE and (match := DECLINED_RE.fullmatch(entry.text))
     }
 
 

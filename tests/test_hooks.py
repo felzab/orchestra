@@ -777,24 +777,33 @@ def test_the_turn_continues_once_with_what_is_undone(project: Path, state: Path)
     assert hook("Stop", project, stop_hook_active=True, background_tasks=[]) == (0, None)
 
 
-def test_notes_after_now_md_leave_it_current_and_as_many_other_entries_do_not(project: Path, state: Path) -> None:
+def test_notes_after_now_md_leave_it_current_and_as_many_decisions_or_other_entries_do_not(
+    project: Path, state: Path
+) -> None:
     """A note logs a fault or an observation and moves no next action; a waiting note names what is waited on."""
     start = datetime.datetime.now().astimezone().replace(microsecond=0) + datetime.timedelta(hours=1)
     os.utime(state / store.NOW, (start.timestamp(), start.timestamp()))
 
-    def logged(*kinds: str) -> list[str]:
-        """The turn's `NOW.md` line once `kinds` are logged after NOW.md, a second apart; none where it is current."""
-        stamps = [start + datetime.timedelta(seconds=k) for k in range(len(kinds))]
+    def logged(*entries: tuple[str, str]) -> list[str]:
+        """The turn's `NOW.md` line once `entries`, each a kind and a text, are logged after NOW.md, a second apart."""
+        stamps = [start + datetime.timedelta(seconds=k) for k in range(len(entries))]
         store.write_text(state / store.LOG, "")
         store.append_jsonl(
             state / store.LOG,
-            *({"time": t.isoformat(), "kind": kind, "text": "x"} for t, kind in zip(stamps, kinds, strict=True)),
+            *(
+                {"time": t.isoformat(), "kind": kind, "text": text}
+                for t, (kind, text) in zip(stamps, entries, strict=True)
+            ),
         )
         said = hook("Stop", project, stop_hook_active=False, background_tasks=[])[1]
         return [] if said is None else [line for line in context_of(said, "Stop").splitlines() if "NOW.md" in line]
 
-    assert logged(*["note"] * 8) == []
-    assert logged("waiting", "judge", "land", "ci", "resume") == ["- NOW.md predates the last 5 log entries"]
+    stale = ["- NOW.md predates the last 5 log entries"]
+    assert logged(*[("note", "x")] * 8) == []
+    others = [(kind, "x") for kind in ("waiting", "judge", "land", "ci")]
+    assert logged(*others, ("resume", "x")) == stale
+    # A decision taken while nobody could be asked moves the next action, so its note counts.
+    assert logged(*others, ("note", "Decision: kept the cap at 20; reversing costs one commit")) == stale
 
 
 def test_an_idle_turn_continues_only_while_nobody_watches(project: Path, state: Path) -> None:
