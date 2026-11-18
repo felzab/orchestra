@@ -63,12 +63,17 @@ and signed in there. The sandbox refuses to start where:
   link inside it, as Docker Desktop's WSL integration makes in `~/.docker/contexts`: keep its
   contents in one plain folder;
 - `TMPDIR` is a long path: the sandbox, which puts its sockets under it, failed with one of 52
-  characters and started with one of 28, so leave it unset or short, such as `/tmp`.
+  characters and started with one of 28;
+- `TMPDIR` is unset or under `/tmp`: the run's folder then sits under `/tmp`, which the sandbox the
+  harness writes denies, so every shell command fails on a read-only file system and the session
+  never starts (score 0.10, $0.00, a few seconds). Point it at a short folder of your home that
+  exists, such as `~/t`.
 
 From the clone's root:
 
 ```sh
-claude plugin eval . --scaffold --ablation none --max-cost-usd 30 --allow-tools Bash Write Edit SendMessage
+mkdir -p ~/t
+TMPDIR="$HOME/t" claude plugin eval . --scaffold --ablation none --max-cost-usd 30 --allow-tools Bash Write Edit SendMessage
 ```
 
 - `--scaffold` runs each case's `fixture.sh`, which builds the project the session works on.
