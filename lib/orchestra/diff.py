@@ -242,6 +242,9 @@ def tree(state: Path, root: Path, commit: str) -> Path:
     path = state / store.TREES / commit
     if not path.exists():
         path.parent.mkdir(parents=True, exist_ok=True)
-        config.git(root, "worktree", "add", "--detach", str(path), commit)
+        # The state's folder is long on Windows, so a deep tracked path passes 260 characters under it, which Git
+        # for Windows refuses ("Filename too long") unless `core.longpaths` is set, whatever Windows' own setting;
+        # other platforms ignore the key.
+        config.git(root, "-c", "core.longpaths=true", "worktree", "add", "--detach", str(path), commit)
         log.record(state, KIND, str(path))
     return path
