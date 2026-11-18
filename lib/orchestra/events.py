@@ -68,6 +68,9 @@ REF_RE = re.compile(r"\s*\[[^\]]*\]$")
 STALE_MINUTES = 30
 # Log entries newer than NOW.md past which it no longer says where the session stands.
 NOW_EVENTS = 5
+# The kind `orchestra note` writes without `--waiting` (`log.run`): a fault or an observation logged,
+# which moves no next action, so NOW.md's count leaves it out.
+NOTE = "note"
 # The most an `additionalContext` carries before Claude Code moves it to a file.
 CONTEXT_CHARS = 10_000
 # The coordinator's own files in the state; every other file there is written by commands and hooks.
@@ -870,7 +873,7 @@ def stop(where: Where) -> str | None:
     if now.is_file():
         # Compared at the log's own precision, the second: an entry of NOW.md's second may follow it.
         written = datetime.datetime.fromtimestamp(now.stat().st_mtime).astimezone().replace(microsecond=0)
-        later = sum(datetime.datetime.fromisoformat(entry.time) >= written for entry in entries)
+        later = sum(entry.kind != NOTE and datetime.datetime.fromisoformat(entry.time) >= written for entry in entries)
         if later >= NOW_EVENTS:
             undone.append(f"NOW.md predates the last {later} log entries")
     if due := _checkpoint(state, entries):

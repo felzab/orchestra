@@ -763,7 +763,7 @@ def test_the_turn_continues_once_with_what_is_undone(project: Path, state: Path)
     # second alone, so the entry of NOW.md's own second counts as later.
     start = datetime.datetime.now().astimezone().replace(microsecond=0) + datetime.timedelta(hours=1)
     stamps = [start + datetime.timedelta(seconds=k) for k in range(5)]
-    store.append_jsonl(state / store.LOG, *({"time": t.isoformat(), "kind": "note", "text": "x"} for t in stamps))
+    store.append_jsonl(state / store.LOG, *({"time": t.isoformat(), "kind": "resume", "text": "x"} for t in stamps))
     written = start.timestamp() + 0.5
     os.utime(state / store.NOW, (written, written))
     code, said = hook("Stop", project, stop_hook_active=False, background_tasks=[])
@@ -775,6 +775,26 @@ def test_the_turn_continues_once_with_what_is_undone(project: Path, state: Path)
         "- NOW.md predates the last 5 log entries",
     ]
     assert hook("Stop", project, stop_hook_active=True, background_tasks=[]) == (0, None)
+
+
+def test_notes_after_now_md_leave_it_current_and_as_many_other_entries_do_not(project: Path, state: Path) -> None:
+    """A note logs a fault or an observation and moves no next action; a waiting note names what is waited on."""
+    start = datetime.datetime.now().astimezone().replace(microsecond=0) + datetime.timedelta(hours=1)
+    os.utime(state / store.NOW, (start.timestamp(), start.timestamp()))
+
+    def logged(*kinds: str) -> list[str]:
+        """The turn's `NOW.md` line once `kinds` are logged after NOW.md, a second apart; none where it is current."""
+        stamps = [start + datetime.timedelta(seconds=k) for k in range(len(kinds))]
+        store.write_text(state / store.LOG, "")
+        store.append_jsonl(
+            state / store.LOG,
+            *({"time": t.isoformat(), "kind": kind, "text": "x"} for t, kind in zip(stamps, kinds, strict=True)),
+        )
+        said = hook("Stop", project, stop_hook_active=False, background_tasks=[])[1]
+        return [] if said is None else [line for line in context_of(said, "Stop").splitlines() if "NOW.md" in line]
+
+    assert logged(*["note"] * 8) == []
+    assert logged("waiting", "judge", "land", "ci", "resume") == ["- NOW.md predates the last 5 log entries"]
 
 
 def test_an_idle_turn_continues_only_while_nobody_watches(project: Path, state: Path) -> None:
