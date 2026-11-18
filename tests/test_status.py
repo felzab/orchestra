@@ -174,18 +174,32 @@ def test_a_row_is_marked_for_a_re_plan_once_routed_to_three_agents_and_never_for
         # A configured queue is a queue as the built-in ones are.
         "REVIEW-F2": ("review", "owner", "handoff", "A", "HELD"),
         "REVIEW-F3": ("ending", "A", "B", "ending", "HELD"),
+        # Three routes to one agent are no bounce: the agents are counted, not the events.
+        "REVIEW-F4": ("HELD", "HELD", "HELD"),
     }
+    # A fix that lands closes its row FIXED, so the next fixer receives it by a `reopen` event.
+    bounced = [
+        model.FindingEvent("REVIEW-F5", "route", "ROUTED", owner="A"),
+        model.FindingEvent("REVIEW-F5", "close", "FIXED", owner="A", evidence="abc1234"),
+        model.FindingEvent("REVIEW-F5", "reopen", "ROUTED", owner="B"),
+        model.FindingEvent("REVIEW-F5", "close", "FIXED", owner="B", evidence="def5678"),
+        model.FindingEvent("REVIEW-F5", "reopen", "ROUTED", owner="HELD"),
+    ]
     model.write_findings(
         built,
         lambda _: [
-            model.FindingEvent(row, "route", "ROUTED", owner=owner)
-            for row, owners in routes.items()
-            for owner in owners
+            *[
+                model.FindingEvent(row, "route", "ROUTED", owner=owner)
+                for row, owners in routes.items()
+                for owner in owners
+            ],
+            *bounced,
         ],
     )
     lines = _lines(inprocess("status", cwd=project))
     marked = "(routed to 3 agents: re-plan it)"
-    assert f"unclosed  HELD: DONE-F2 {marked}, DONE-F3, REVIEW-F1, REVIEW-F2, REVIEW-F3 {marked}" in lines
+    held = f"DONE-F2 {marked}, DONE-F3, REVIEW-F1, REVIEW-F2, REVIEW-F3 {marked}, REVIEW-F4, REVIEW-F5 {marked}"
+    assert f"unclosed  HELD: {held}" in lines
 
 
 def test_a_driver_on_no_slice_is_no_drift_and_a_writer_on_none_is(project: Path, built: Path) -> None:
