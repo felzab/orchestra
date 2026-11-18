@@ -980,6 +980,33 @@ def test_a_falsely_sequenced_slice_waits_free_and_four_judged_reports_make_the_c
     assert free in landed.stdout.splitlines()
 
 
+def _judged(project: Path, name: str, kind: str, lens: str = "none") -> None:
+    """An agent briefed on `lens`, dispatched as its name in lower case, reported and judged, its findings closed."""
+    ident = name.lower()
+    briefed(project, name, kind, lens=lens)
+    dispatched(project, name, kind, ident)
+    report.path(store.state_dir(project), name).write_bytes(text(kind, name).encode())
+    assert hook("SubagentStop", project, inside(project, ident, kind, last_assistant_message="x"))[0] == 0
+    judged = run("judge", name, "F1=close:MOOT:x", "F2=close:MOOT:x", "--verdict", "v", cwd=project)
+    assert judged.returncode == 0, judged.stderr
+
+
+def test_a_read_of_what_a_push_publishes_leaves_the_checkpoint_count_alone(project: Path, state: Path) -> None:
+    """A researcher with `Lens: disclosure` alone reads before each push, which frees no planned work."""
+    store.write_text(state / store.PLAN, PACED_PLAN)
+    saved = state / "estimates" / "first.md"
+    saved.write_bytes(b"# Estimate\n")
+    _judged(project, "PUSH", "researcher", lens="disclosure")
+    for k in range(1, 4):
+        _judged(project, f"A{k}", "auditor")
+    assert _due(project) == []
+    # A lens beside it reads more than the push, so its report counts.
+    _judged(project, "A4", "auditor", lens="disclosure, contract")
+    at = datetime.datetime.fromtimestamp(saved.stat().st_mtime).astimezone()
+    fourth = f"- 4 reports were judged since the last saved estimate ({at:%H:%M}), and 3 plan lines are unticked"
+    assert _due(project) == [f"{fourth}: the checkpoint in checkpoint.md is due"]
+
+
 def test_a_compaction_or_a_resume_reads_the_state_back_from_disk(project: Path, state: Path) -> None:
     briefed(project, "A", "auditor")
     dispatched(project, "A", "auditor", "a1")
