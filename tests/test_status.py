@@ -144,7 +144,7 @@ def test_the_overview_says_what_runs_what_waits_and_what_drifted(project: Path, 
     assert "due       #1 (when reported:DONE) judge DONE's report" in lines
     assert not any("#2" in line for line in lines)
     assert "unclosed  nobody (OPEN): DONE-F1" in lines
-    assert "unclosed  HELD: DONE-F2 (routed 3 times: re-plan it), DONE-F3" in lines
+    assert "unclosed  HELD: DONE-F2 (routed to 3 agents: re-plan it), DONE-F3" in lines
     assert "drift     docs/stray.md: changed since the base, and no landed brief or ticked slice owns it" in lines
     # A driver whose branch nothing names may hold commits, so it is never read as done.
     model.update_agent(built, "HELD", lambda held: dataclasses.replace(held, branch=None))
@@ -162,6 +162,30 @@ def test_the_overview_says_what_runs_what_waits_and_what_drifted(project: Path, 
     assert not any("slice S1" in line or "slice S2" in line for line in lines)
     assert "now       Next action:" in lines
     assert lines[-1] == "status: 3 running (2 suspect), 3 to judge, 1 to resume, 1 due, 3 unclosed, 2 drift"
+
+
+def test_a_row_is_marked_for_a_re_plan_once_routed_to_three_agents_and_never_for_its_queues(
+    project: Path, built: Path
+) -> None:
+    """The review routes a row to `ending`, to `ending` again with a correction, then to its fixer: no bounce."""
+    write_config(project, {"stateRoot": (project.parent / "state").as_posix(), "queues": ["review"]})
+    routes = {
+        "REVIEW-F1": ("ending", "ending", "HELD"),
+        # A configured queue is a queue as the built-in ones are.
+        "REVIEW-F2": ("review", "owner", "handoff", "A", "HELD"),
+        "REVIEW-F3": ("ending", "A", "B", "ending", "HELD"),
+    }
+    model.write_findings(
+        built,
+        lambda _: [
+            model.FindingEvent(row, "route", "ROUTED", owner=owner)
+            for row, owners in routes.items()
+            for owner in owners
+        ],
+    )
+    lines = _lines(inprocess("status", cwd=project))
+    marked = "(routed to 3 agents: re-plan it)"
+    assert f"unclosed  HELD: DONE-F2 {marked}, DONE-F3, REVIEW-F1, REVIEW-F2, REVIEW-F3 {marked}" in lines
 
 
 def test_a_running_record_the_harness_contradicts_is_suspect_with_its_reason(project: Path, built: Path) -> None:

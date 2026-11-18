@@ -44,8 +44,8 @@ from orchestra import (
 from orchestra.model import plan_lines
 from orchestra.store import Record
 
-# The round, or the number of routings, at which an agent or a row is re-planned with a fresh agent
-# or a new slice rather than sent again: past it, rounds stop converging.
+# The round, or the number of distinct agents a row was routed to, at which an agent or a row is
+# re-planned with a fresh agent or a new slice rather than sent again: past it, rounds stop converging.
 REPEATS = 3
 # The size past which NOW.md has taken what belongs in PLAN.md or the log.
 NOW_BYTES = 3000
@@ -232,7 +232,7 @@ def overview(snap: Snapshot, *, now: bool = True, caller: str | None = None) -> 
             lines.append(_row(status, ", ".join(agent.name for agent in by[status])))
     due, due_count = _guarded("due", lambda: [_row("due", _item(item)) for item in queue.due(snap.state)])
     try:
-        unclosed, findings = _findings(snap.state)
+        unclosed, findings = _findings(snap.state, snap.root)
     except Refused as refused:
         unclosed, findings = None, [_row("unclosed", f"unknown: {refused}")]
     ci, _ = _guarded("CI", lambda: _ci(snap))
@@ -271,21 +271,26 @@ def _item(item: model.QueueItem) -> str:
     return f"#{item.number} (when {when}) {item.text}"
 
 
-def _findings(state: Path) -> tuple[int, list[str]]:
-    """The count of unclosed rows, and one line per owner naming each, a row routed three times marked."""
-    routes: dict[str, int] = {}
+def _findings(state: Path, root: Path) -> tuple[int, list[str]]:
+    """The count of unclosed rows, and one line per owner naming each, a row routed to three agents marked.
+
+    Only the distinct agents count: the review's own flow routes a row to a queue, to it again with a
+    verifier's correction, then to its fixer, and none of that bounces the row between agents.
+    """
+    queues = {*model.QUEUES, *config.load(root).queues}
+    routes: dict[str, set[str]] = {}
     for record in store.read_jsonl(state / store.FINDINGS):
-        if record.get("kind") == "route":
-            row = str(record.get("row"))
-            routes[row] = routes.get(row, 0) + 1
+        owner = record.get("owner")
+        if record.get("kind") == "route" and owner not in queues:
+            routes.setdefault(str(record.get("row")), set()).add(str(owner))
     owners: dict[str, list[str]] = {}
     unclosed = 0
     for row, event in model.read_findings(state).items():
         if event.status in model.CLOSED:
             continue
         unclosed += 1
-        routed = routes.get(row, 0)
-        said = f"{row} (routed {routed} times: re-plan it)" if routed >= REPEATS else row
+        routed = len(routes.get(row, ()))
+        said = f"{row} (routed to {routed} agents: re-plan it)" if routed >= REPEATS else row
         owners.setdefault(event.owner or "nobody (OPEN)", []).append(said)
     return unclosed, [_row("unclosed", f"{owner}: {', '.join(rows)}") for owner, rows in owners.items()]
 
