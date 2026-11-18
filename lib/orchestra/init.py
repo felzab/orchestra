@@ -8,7 +8,6 @@ while one remains.
 from __future__ import annotations
 
 import argparse
-import datetime
 import json
 import os
 import re
@@ -65,8 +64,7 @@ def add(verb: str, parser: argparse.ArgumentParser) -> None:
         parser.add_argument(
             "--base",
             metavar="BRANCH",
-            help="the branch the session is cut from, recorded as its base; unless given, the base of the"
-            " programme's newest session made in this checkout, else the configuration's `base`",
+            help="the branch the session is cut from, recorded as its base; the configuration's `base` unless given",
         )
 
 
@@ -103,7 +101,7 @@ def init(args: argparse.Namespace) -> int:
             f" {', '.join(others)}, or of this one before it moved: give this project a programme of its own"
             f" with `--programme <name>`, or join that one with `--programme {programme}`"
         )
-    base, base_commit, source = _base(here.root, args.base, state.parent, settings.base)
+    base, base_commit, source = _base(here.root, args.base, settings.base)
     state.parent.mkdir(parents=True, exist_ok=True)
     try:
         state.mkdir()
@@ -141,18 +139,14 @@ def init(args: argparse.Namespace) -> int:
     return doctor(args)
 
 
-def _base(root: Path, given: str | None, folder: Path, configured: str) -> tuple[str, str, str]:
+def _base(root: Path, given: str | None, configured: str) -> tuple[str, str, str]:
     """The session's base, the commit where HEAD leaves it, and where the base was named; refused where unusable.
 
-    `given` is `--base`; without it, the base of the programme's newest session in this checkout, since a
-    programme's sessions branch from one base, which the configuration's would otherwise replace silently: that
-    branch shares history, so nothing below refuses it. The configuration's `base` is read where neither names one.
+    `given` is `--base`; without it, the configuration's `base`, and a branch holding commits that base lacks,
+    as one cut from a programme's branch does, is refused below, naming `--base`.
     """
-    newest = None if given is not None else _newest_session(folder, root)
     if given is not None:
         base, source = given, "named by --base"
-    elif newest is not None:
-        base, source = newest.base, f"session {newest.session}'s base"
     else:
         base, source = configured, "the configuration's base"
     # A clone holding no branch of that name, which no edit of the shared configuration repairs. A local branch
@@ -175,10 +169,10 @@ def _base(root: Path, given: str | None, folder: Path, configured: str) -> tuple
         shared = f", or set `base` in {config.CONFIG_FILE.as_posix()} for the project"
         raise Refused(
             f"the base {base} ({source}) shares no commit with HEAD here: name the branch this session is cut from"
-            f" with `--base <branch>`{shared if given is None and newest is None else ''}"
+            f" with `--base <branch>`{shared if given is None else ''}"
         ) from None
     # A session's branch is cut from its base just before `init`, so it holds nothing the base does not. One that
-    # does was cut from another branch, a programme's first session without `--base` above all, and the base
+    # does was cut from another branch, as a programme's session is from the programme's branch, and the base
     # recorded here would count that branch's work as the session's own; only `--base` names such a base.
     ahead = 0 if given is not None else int(config.git(root, "rev-list", "--count", f"{base_commit}..HEAD"))
     if ahead:
@@ -211,27 +205,6 @@ def _other_checkouts(folder: Path, root: Path) -> list[str]:
         if not any(config.identical(Path(held), Path(named)) for named in others):
             others.append(held)
     return others
-
-
-def _newest_session(folder: Path, root: Path) -> model.Session | None:
-    """The programme's newest session made in `root`, or in a checkout an earlier build named none; None for none.
-
-    Another checkout's sessions are left out, as `_other_checkouts` tells checkouts apart: a clone joining the
-    programme may branch from a base of its own. `created` is compared as a moment, since its offset changes
-    with the clocks; a session that cannot be read is judged where it is used.
-    """
-    newest: tuple[datetime.datetime, model.Session] | None = None
-    for path in folder.glob(f"*/{store.SESSION}"):
-        try:
-            held = model.read_session(path.parent)
-        except Refused:
-            continue
-        if held.checkout is not None and not config.identical(Path(held.checkout), root):
-            continue
-        made = datetime.datetime.fromisoformat(held.created)
-        if newest is None or made > newest[0]:
-            newest = (made, held)
-    return None if newest is None else newest[1]
 
 
 def _state_root(folder: Path, root: Path, session: Path) -> Path:
