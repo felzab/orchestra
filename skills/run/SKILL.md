@@ -88,7 +88,7 @@ A change to a hook, a setting, a shared manifest or CI alters what every running
 ## The owner
 
 - Ask the moment a question arises, through the ask tool, your recommendation first, last in the turn so it blocks no dispatch or landing. Name each page to look at on its own line in the question, with its link and section. A step only the owner can take is no question: write it as a line under `PLAN.md`'s `## Ending`.
-- Run `orchestra mode away` or `attended` only on the owner's own words: `/orchestra:away`, `/orchestra:back` or a message to that effect.
+- Run `orchestra mode away` or `attended` only on the owner's own words: `/orchestra:away`, `/orchestra:back` or a message to that effect, since away refuses every permission prompt and question the owner would have answered, and attended lets one unanswered prompt park every agent.
 - Record each question with `orchestra ask "<question>"` as you ask it, and each answer in the owner's words with `orchestra rule 1 "<the owner's words>"`, 1 being the number it printed. Show the owner that number with the question, so an answer by number lands on the question meant, and ask one again with `orchestra ask "<question>" --supersedes 1`, which closes question 1. An instruction the owner types unasked is a ruling too, so that it outlives this context: `orchestra ask "<what it settles>"`, then rule it.
 - While the owner is away, `orchestra ask "<question>" --option "<label>: <consequence>" --recommend 1` alone asks it. Where it blocks work, build the recommended option provisionally and record it with `orchestra note Decision: <what, and what reversing it costs>`.
 
