@@ -47,7 +47,8 @@ def make_fleet(root: Path, settings: dict[str, object] | None = None) -> Fleet:
     (root / ".gitignore").write_bytes(IGNORED)
     git(root, "add", "-A")
     git(root, "commit", "-q", "-m", "Repo: The configuration")
-    done = inprocess("init", "s", cwd=root)
+    # The configuration is committed on whichever branch is checked out, so the base is named rather than read.
+    done = inprocess("init", "s", "--base", "main", cwd=root)
     assert done.returncode in (0, 1), done.stderr
     return Fleet(root, store.state_dir(root))
 

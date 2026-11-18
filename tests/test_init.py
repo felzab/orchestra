@@ -108,6 +108,20 @@ def test_base_overrides_the_inherited_one_and_the_newest_session_is_judged_by_it
     assert said == f"session project/s3 on s3, based on follow-up (session s1's base) at {programme[:9]}"
 
 
+def test_init_without_base_refuses_a_branch_already_past_the_base_it_would_record(project: Path) -> None:
+    """A programme's first session cut from its branch would record `main` and count the programme's work as its own."""
+    programme = _programme_branch(project)
+    git(project, "switch", "-q", "-c", "s1")
+    done = inprocess("init", "s1", cwd=project)
+    assert done.returncode == 2
+    assert "s1 holds 1 commit main does not" in done.stderr
+    assert "`--base <branch>`" in done.stderr
+    assert not _state(project).exists()
+    # Named, the same base is taken: the option is the word for a branch that holds work before its session.
+    session, _, _ = _init_on(project, "s2", "--base", "follow-up")
+    assert (session["base"], session["base_commit"]) == ("follow-up", programme)
+
+
 def test_a_checkout_joining_a_programme_takes_its_own_configurations_base(tmp_path: Path, make_repo: MakeRepo) -> None:
     """Another clone's sessions may branch from a base this clone has no branch of, or from another base."""
     first, second = make_repo(tmp_path / "a" / "proj"), make_repo(tmp_path / "b" / "proj")

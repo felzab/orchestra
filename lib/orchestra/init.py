@@ -170,13 +170,25 @@ def _base(root: Path, given: str | None, folder: Path, configured: str) -> tuple
             " or name the branch this session is cut from with `--base <branch>`"
         )
     try:
-        return base, config.git(root, "merge-base", "HEAD", branch).strip(), source
+        base_commit = config.git(root, "merge-base", "HEAD", branch).strip()
     except Refused:
         shared = f", or set `base` in {config.CONFIG_FILE.as_posix()} for the project"
         raise Refused(
             f"the base {base} ({source}) shares no commit with HEAD here: name the branch this session is cut from"
             f" with `--base <branch>`{shared if given is None and newest is None else ''}"
         ) from None
+    # A session's branch is cut from its base just before `init`, so it holds nothing the base does not. One that
+    # does was cut from another branch, a programme's first session without `--base` above all, and the base
+    # recorded here would count that branch's work as the session's own; only `--base` names such a base.
+    ahead = 0 if given is not None else int(config.git(root, "rev-list", "--count", f"{base_commit}..HEAD"))
+    if ahead:
+        head = config.git(root, "rev-parse", "--abbrev-ref", "HEAD").strip()
+        raise Refused(
+            f"{head} holds {ahead} commit{'s' if ahead > 1 else ''} {base} does not, so a session based on {base}"
+            f" ({source}) would count them as its own: name the branch it was cut from with `--base <branch>`,"
+            f" or `--base {base}` to keep it"
+        )
+    return base, base_commit, source
 
 
 def _other_checkouts(folder: Path, root: Path) -> list[str]:
