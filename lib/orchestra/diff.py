@@ -245,13 +245,14 @@ def tree(state: Path, root: Path, commit: str) -> Path:
         if not any(entry.kind == KIND and Path(entry.text) == path for entry in log.entries(state)):
             raise Refused(
                 f"{path} exists, but no `{KIND}` log entry records it made, so its checkout may have stopped"
-                f' part-way: remove it with `git worktree remove --force "{path.as_posix()}"`, then run this again'
+                " part-way: remove it with"
+                f' `git -c core.longpaths=true worktree remove --force "{path.as_posix()}"`, then run this again'
             )
         return path
     path.parent.mkdir(parents=True, exist_ok=True)
     # The state's folder is long on Windows, so a deep tracked path passes 260 characters under it, which Git
     # for Windows refuses ("Filename too long") unless `core.longpaths` is set, whatever Windows' own setting;
-    # other platforms ignore the key.
+    # other platforms ignore the key. The removal the refusal above names needs it alike.
     config.git(root, "-c", "core.longpaths=true", "worktree", "add", "--detach", str(path), commit)
     log.record(state, KIND, str(path))
     return path
