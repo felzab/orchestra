@@ -52,6 +52,7 @@ Give no agent a deadline or a token budget, because a model under time pressure 
 ## When an agent is worth dispatching
 
 - An agent buys a fresh reader, breadth you cannot cover, or hours of tool runs. An edit you can already spell out you make yourself.
+- The Bash tool can turn a typed `\\` into `\` silently: write text holding a backslash with the Write tool and pass it by file, as `git commit -F <file>`.
 - Several small edits of one shape go to one agent, because each agent rebuilds the context and reruns the checks.
 - Drive your own edit's test red as [writer.md](../../agents/writer.md)'s "Red before closed" says, since the review gives it a fresh reader. A driver, not you, plants in an agent's work, and wherever you cannot judge a plant's result alone.
 
