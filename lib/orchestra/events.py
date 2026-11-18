@@ -358,7 +358,7 @@ def _dispatch(where: Where, given: Record) -> str | None:
     elif not model.NAME_RE.fullmatch(name):
         why = "an orchestra dispatch's prompt is the agent's name alone, as `orchestra brief NAME` wrote its brief"
     elif not model.has_agent(state, name):
-        sliced = " --slice S" if kind in report.COMMITTING else ""
+        sliced = " --slice S" if kind == brief.SLICED else ""
         why = f"no agent {name} in this session: `orchestra brief {name} --type {kind}{sliced}` writes its brief"
     else:
         return _start(where, given, model.read_agent(state, name), root)

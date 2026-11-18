@@ -344,8 +344,8 @@ def _drift(snap: Snapshot) -> list[str]:
         except Refused as refused:
             lines.append(_row("drift", f"agent {agent.name}: its brief cannot be read ({refused})"))
             continue
-        # A reader briefed with no slice works outside the plan, which is no drift.
-        if header.slice not in planned and not (header.slice == brief.NONE and agent.type not in report.COMMITTING):
+        # A reader or a driver briefed with no slice works outside the plan, which is no drift: neither lands work.
+        if header.slice not in planned and not (header.slice == brief.NONE and agent.type != brief.SLICED):
             lines.append(_row("drift", f"agent {agent.name}: on no slice of PLAN.md (its slice is {header.slice!r})"))
         if agent.status in model.SETTLED:
             owned += header.owns

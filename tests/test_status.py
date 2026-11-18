@@ -188,6 +188,15 @@ def test_a_row_is_marked_for_a_re_plan_once_routed_to_three_agents_and_never_for
     assert f"unclosed  HELD: DONE-F2 {marked}, DONE-F3, REVIEW-F1, REVIEW-F2, REVIEW-F3 {marked}" in lines
 
 
+def test_a_driver_on_no_slice_is_no_drift_and_a_writer_on_none_is(project: Path, built: Path) -> None:
+    """A driver plants in its own worktree and lands nothing, so it works outside the plan as a reader does."""
+    _agent(built, model.Agent("PROBE", "driver", "briefed"), slice_="none")
+    _agent(built, model.Agent("LOOSE", "writer", "briefed"), slice_="none")
+    lines = _lines(inprocess("status", cwd=project))
+    assert "drift     agent LOOSE: on no slice of PLAN.md (its slice is 'none')" in lines
+    assert not any("agent PROBE" in line for line in lines)
+
+
 def test_a_running_record_the_harness_contradicts_is_suspect_with_its_reason(project: Path, built: Path) -> None:
     lines = _lines(inprocess("status", cwd=project))
     assert "suspect   QUIET (writer, round 1): running, but its transcript is silent 20 min mid-turn, past 15" in lines
