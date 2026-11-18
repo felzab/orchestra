@@ -47,6 +47,134 @@ def test_init_makes_the_state_the_pointer_and_the_two_skeletons(project: Path) -
     assert done.stdout.splitlines()[-1] == "doctor: every check holds"
 
 
+def test_init_records_the_base_its_option_names_over_the_configurations(project: Path) -> None:
+    """A programme's sessions branch from its own branch, which belongs in no file every collaborator shares."""
+    write_config(project, {"stateRoot": (project.parent / "state").as_posix(), "base": "main"})
+    git(project, "switch", "-q", "-c", "follow-up")
+    git(project, "commit", "-q", "--allow-empty", "-m", "the programme's work")
+    programme = git(project, "rev-parse", "HEAD")
+    git(project, "switch", "-q", "-c", "s1")
+    git(project, "commit", "-q", "--allow-empty", "-m", "the session's work")
+    done = inprocess("init", "s1", "--base", "follow-up", cwd=project)
+    assert done.returncode == 0, done.stdout + done.stderr
+    session = json.loads((_state(project) / store.SESSION).read_bytes())
+    assert (session["base"], session["base_commit"]) == ("follow-up", programme)
+    said = f"session project/s1 on s1, based on follow-up (named by --base) at {programme[:9]}"
+    assert done.stdout.startswith(f"{said}: {_state(project)}\n")
+    assert store.read_jsonl(_state(project) / store.LOG)[0]["text"] == said
+
+
+def _programme_branch(project: Path) -> str:
+    """The programme's branch `follow-up`, one commit past `main`, checked out; its commit."""
+    git(project, "switch", "-q", "-c", "follow-up")
+    git(project, "commit", "-q", "--allow-empty", "-m", "the programme's work")
+    return git(project, "rev-parse", "HEAD")
+
+
+def _init_on(project: Path, session: str, *options: str) -> dict[str, object]:
+    """`init` run on a new branch named for the session; its record."""
+    git(project, "switch", "-q", "-c", session)
+    done = inprocess("init", session, *options, cwd=project)
+    assert done.returncode == 0, done.stdout + done.stderr
+    return json.loads((_state(project).parent / session / store.SESSION).read_bytes())
+
+
+def test_init_without_base_refuses_a_branch_already_past_the_base_it_would_record(project: Path) -> None:
+    """A session cut from the programme's branch would record `main` and count the programme's work as its own."""
+    _programme_branch(project)
+    git(project, "switch", "-q", "-c", "s1")
+    done = inprocess("init", "s1", cwd=project)
+    assert done.returncode == 2
+    assert "s1 holds 1 commit main does not" in done.stderr
+    assert "`--base <branch>`" in done.stderr
+    assert not _state(project).exists()
+
+
+@pytest.mark.parametrize(
+    ("remote", "said"),
+    [
+        (
+            "refs/remotes/origin/trunk",
+            "the base trunk (the configuration's base) is no branch in this clone: make it from origin's with"
+            " `git branch trunk origin/trunk`, and run init again",
+        ),
+        (
+            None,
+            "the base trunk (the configuration's base) is no branch in this clone, nor is origin/trunk: fetch it,"
+            " or name the branch this session is cut from with `--base <branch>`",
+        ),
+    ],
+    ids=["origin holds it", "origin does not"],
+)
+def test_init_refuses_a_base_missing_from_the_clone_naming_the_command_that_makes_it(
+    project: Path, remote: str | None, said: str
+) -> None:
+    """A single-branch clone lacks the branch, which no edit of the shared configuration repairs."""
+    write_config(project, {"stateRoot": (project.parent / "state").as_posix(), "base": "trunk"})
+    if remote is not None:
+        # As a clone of another branch holds it: origin's branch, and no local one.
+        git(project, "update-ref", remote, "HEAD")
+    done = inprocess("init", "s1", cwd=project)
+    assert done.returncode == 2, done.stdout + done.stderr
+    # Not the shared configuration, whose edit would not make the branch.
+    assert done.stderr == f"orchestra init: {said}\n"
+    assert not _state(project).exists()
+
+
+@pytest.mark.parametrize("named", ["refs/heads/follow-up", "origin/follow-up", "follow-up~0", "follow-up^"])
+def test_init_refuses_a_base_named_other_than_by_its_local_branchs_short_name(project: Path, named: str) -> None:
+    """`prune` spares the base by its short name, so a record spelling it otherwise, or naming a commit from it by a
+    revision's suffix (gitrevisions(7)), spares no branch."""
+    programme = _programme_branch(project)
+    git(project, "update-ref", "refs/remotes/origin/follow-up", "HEAD")
+    git(project, "switch", "-q", "-c", "s1")
+    done = inprocess("init", "s1", "--base", named, cwd=project)
+    assert done.returncode == 2, done.stdout + done.stderr
+    assert done.stderr == (
+        f"orchestra init: the base {named} (named by --base) is no branch in this clone, nor is origin/{named}:"
+        " fetch it, or name the branch this session is cut from with `--base <branch>`\n"
+    )
+    assert not _state(project).exists()
+    if named != "origin/follow-up":
+        # The arm below reads no parameter, so one runs it.
+        return
+    # A tag of the branch's name, which git resolves before the branch (gitrevisions(7)), is not the base.
+    git(project, "tag", "follow-up", "main")
+    session = _init_on(project, "s2", "--base", "follow-up")
+    assert (session["base"], session["base_commit"]) == ("follow-up", programme)
+
+
+@pytest.mark.parametrize(
+    ("options", "said"),
+    [
+        (
+            (),
+            " (the configuration's base) shares no commit with HEAD here: name the branch this session is cut"
+            " from with `--base <branch>`, or set `base` in .claude/orchestra.json for the project",
+        ),
+        (
+            ("--base", "elsewhere"),
+            " (named by --base) shares no commit with HEAD here: name the branch this session is cut from with"
+            " `--base <branch>`",
+        ),
+    ],
+    ids=["the configuration's", "--base's"],
+)
+def test_init_refuses_a_base_sharing_no_commit_with_head_naming_each_way_to_name_another(
+    project: Path, options: tuple[str, ...], said: str
+) -> None:
+    """The configuration's `base` reaches only a session `--base` gives none."""
+    git(project, "switch", "-q", "--orphan", "elsewhere")
+    git(project, "commit", "-q", "--allow-empty", "-m", "an unrelated history")
+    git(project, "switch", "-q", "main")
+    if not options:
+        write_config(project, {"stateRoot": (project.parent / "state").as_posix(), "base": "elsewhere"})
+    done = inprocess("init", "s1", *options, cwd=project)
+    assert done.returncode == 2, done.stdout + done.stderr
+    assert done.stderr == f"orchestra init: the base elsewhere{said}\n"
+    assert not _state(project).exists()
+
+
 def test_two_clones_sharing_a_folder_name_never_share_a_programme_unasked(tmp_path: Path, make_repo: MakeRepo) -> None:
     """The default programme is the folder's name, so an unrelated clone would read the other's rulings."""
     shared: dict[str, object] = {"stateRoot": (tmp_path / "state").as_posix()}

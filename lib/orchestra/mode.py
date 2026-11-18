@@ -24,8 +24,6 @@ from orchestra import DONE, REMAINS, Refused, cli, events, log, model, rulings, 
 from orchestra.store import Record
 
 MODES = ("attended", "away", "stop", "takeover")
-# A note opening with this is a decision taken while nobody could be asked, which the return lists.
-DECISION = "Decision:"
 # The longest `takeover --wait` waits for a holder still writing, and the most it sleeps between tries:
 # a holder's agents writing on put the quiet period off, and a resume should not wait on them for good.
 WAIT_SECONDS = 15 * 60
@@ -119,7 +117,7 @@ def _attended(args: argparse.Namespace, state: Path) -> int:
         store.remove(path)
     waiting = rulings.open_questions(state)
     lines += [line for question in waiting for line in rulings.shown(question)]
-    decisions = sum(entry.kind == "note" and entry.text.startswith(DECISION) for entry in passed)
+    decisions = sum(entry.kind == log.NOTE and entry.text.startswith(log.DECISION) for entry in passed)
     log.record(state, "mode", "attended")
     summary = (
         f"attended; {len(passed)} log line(s) since away, {decisions} decision(s) taken alone,"

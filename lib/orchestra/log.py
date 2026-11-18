@@ -14,6 +14,8 @@ from orchestra import DONE, Refused, cli, model, store
 
 # The kind of a note naming what the coordinator waits on, which the turn's-end check reads.
 WAITING = "waiting"
+# The kind of every other note, and the opening of one recording a decision taken while nobody could be asked.
+NOTE, DECISION = "note", "Decision:"
 # The kinds of a judge and a dispatch, which the turn's-end check counts to find the checkpoint due.
 JUDGE, DISPATCH = "judge", "dispatch"
 
@@ -56,6 +58,6 @@ def run(args: argparse.Namespace) -> int:
     text = cli.one_line(cli.given(args.text))
     if not text:
         raise Refused("a note needs words: give them as arguments, or `-` and the text on stdin")
-    entry = record(state, WAITING if args.waiting else "note", text)
+    entry = record(state, WAITING if args.waiting else NOTE, text)
     cli.emit(args, [], line(entry))
     return DONE

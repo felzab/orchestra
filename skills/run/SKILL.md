@@ -57,38 +57,43 @@ Give no agent a deadline or a token budget, because a model under time pressure 
 
 ## The loop
 
-1. **Brief.** `orchestra brief NAME --type writer --slice <slice>` writes the header; an auditor, a researcher or a verifier takes no `--slice`, since it writes no file of the plan; write the rest as [brief.md](brief.md) says.
+1. **Brief.** `orchestra brief NAME --type writer --slice <slice>` writes the header; an auditor, a researcher, a verifier or a driver takes no `--slice`, since none of them lands a file of the plan; write the rest as [brief.md](brief.md) says.
 2. **Check.** `orchestra brief NAME --check`.
 3. **Dispatch.** Call the Agent tool with `subagent_type: orchestra:<type>` and the agent's NAME alone as the prompt. A writer forks from your `HEAD`, so commit what it needs first. Every later order goes by `SendMessage`, which a hook records; a line `Rows: <row ids>` in it routes those rows to the agent, as a brief's does. Dispatch what is ready before you read a report or reply to the owner. A reply `BLOCKED: the plugin's hooks did not run` means no hook runs in this session, so each further agent goes out with no brief or fence: dispatch nothing more and tell the owner.
 4. **Judge** each report as it arrives.
-5. **Land** in the turn you judge: `orchestra land NAME` merges the branch and closes the rows its commits name. A stopped landing or a false commit body goes back to the agent, which alone can change its commits; a fix to landed work is a new commit.
-6. **Push once a wave.** A push cancels the CI run before it, so landings made during a run wait for one push. Before each push run `orchestra diff`; where it prints `disclosure` due, a researcher with `Lens: disclosure` reads its capture and the push waits on its report, since a push cannot be taken back. A hit in a commit not yet pushed goes to the owner, since a later commit leaves it in the history the push publishes. With the first push, open the draft pull request. Where `git remote` prints nothing, skip every push, CI and pull-request step.
-7. **Read CI.** Run `orchestra ci --wait` in the background and read its output whole: each line it marks NEW is a defect, as is each failed run or check it reads no lines of, sent at once to the writer whose brief owns the file. Where an agent still to land clears one, `orchestra ci expect RUN --cleared-by NAME` records that run's NEW lines as expected reds.
+5. **Land** in the turn you judge: `orchestra land NAME` merges the branch and closes the rows its report names fixed. A stopped landing goes back to the agent, which alone can change its commits; a row a false `Rows fixed:` line closed is reopened with `orchestra route <its next fixer, or ending> <row>`; a fix to landed work is a new commit.
+6. **Push once a wave.** A push cancels the CI run before it, so landings made during a run wait for one push. Before each push run `orchestra diff`; where it prints `disclosure` due, a researcher with `Lens: disclosure`, briefed before anything more lands, reads what this push publishes and the push waits on its report, since a push cannot be taken back. Push that brief's `Base:` commit, since a landing after the read is unread, or `HEAD` where none is due: `git push origin <commit>:refs/heads/<branch>`; at the first push, also `git branch -u origin/<branch>`, which the lens's `@{upstream}` reads. A hit in a commit not yet pushed goes to the owner, since a later commit leaves it in the history the push publishes. With the first push, open the draft pull request. Where `git remote` prints nothing, skip every push, CI and pull-request step.
+7. **Read CI.** Run `orchestra ci --wait` in the background and read its output whole: each line it marks NEW is a defect, as is each failed run or check it reads no lines of, sent at once to the file's fixer, as "Judging a report" says. Where an agent still to land clears one, `orchestra ci expect RUN --cleared-by NAME` records that run's NEW lines as expected reds.
 
 `orchestra queue add --when landed:NAME <what to do>` holds an action until NAME lands (`reported:NAME`, until its next report; `ci`, until the next CI reading), and `orchestra queue done 1` ends it.
+
+Inside double quotes the Bash tool reads a typed `\\` as `\`: put text holding a backslash in single quotes, or write it with the Write tool and pass it by file (`git commit -F <file>`) or on stdin (`orchestra note -`, `orchestra rule 1 -`).
 
 A change to a hook, a setting, a shared manifest or CI alters what every running agent may do: land it alone in its push, and tell each running agent what changed.
 
 ## Judging a report
 
-- A report's counts are claims: compare them with the commits and files `orchestra land NAME --preview` prints. `orchestra show <NAME>-F1` prints a finding whole.
+- A report's counts and its `Rows fixed:` line are claims: compare them with the commits and files `orchestra land NAME --preview` prints, and send a row no commit answers back to the agent before `land`. `orchestra show <NAME>-F1` prints a finding whole.
 - Check a finding about a file its reporter does not own at the branch's tip before you route it.
-- A settled finding goes to the writer whose brief owns the file; one arguing that the shape is wrong goes to a fresh auditor, since a shape's writer defends it.
+- A change to a file an agent loads by itself takes [review.md](review.md) step 7's two-researcher test before `land`.
+- A settled finding goes to the writer whose brief owns the file until that writer lands, then to a new writer or you, since `land` removes its worktree; one arguing that the shape is wrong goes to a fresh auditor, since a shape's writer defends it.
 - Give every finding its disposition in one command, quoting one that holds a space: `orchestra judge NAME F1=route:<agent or queue> "F2=close:NOT A DEFECT:<evidence>" --verdict "<one line>"`. An `optional` or unlikely one closes without a writer; one that may be the owner's call goes to the queue `owner`, which the next checkpoint asks at the latest.
-- A row closes on evidence: `NOT A DEFECT` where it is none or is not worth a fix, `MOOT` where later work removed its subject, `RULED` by a ruling, `HANDOFF` for the next session. The landing closes `FIXED`; your own fix, `orchestra close FIXED "<commit>" <NAME>-F1`.
+- A row closes on evidence: `NOT A DEFECT` where it is none or is not worth a fix, `MOOT` where later work removed its subject, `RULED` by a ruling, `HANDOFF` for the next session. The landing closes `FIXED`; your own fix, `orchestra close FIXED "<commit>" <NAME>-F1`, its message naming no row id, since a push publishes it.
 - Judging banks numbered findings alone, so in that turn name each item under `## Outside the scope` to the owner or put it to `orchestra ask`, send each `## Not verified` command to a driver or say why none is needed, and correct each `## Wrong in the brief` premise in the briefs still to come.
 
 ## Full speed
 
 - Every ready agent goes out, attended or not; full speed shortens no brief, check or review.
-- Tell the owner at once when a weekly `usage` row of `orchestra status --measure` names a severity, since only the owner lifts it.
+- Tell the owner at once when a weekly `usage` row of `orchestra status --measure` names a severity, since only the owner lifts it. Where it reads `usage unknown`, read the desktop app's `get_usage` tool where you have it.
+- Wait on no agent or background command with a blocking read or a sleep loop: end the turn, and its notice resumes you.
 - Where a hook refuses wrongly, `orchestra override "<reason>"` lets your next refused hook call through once, logging the reason; `orchestra override --agent NAME "<reason>"`, for that agent's.
 
 ## The owner
 
-- Ask the moment a question arises, through the ask tool, your recommendation first, last in the turn so it blocks no dispatch or landing. A step only the owner can take is no question: write it as a line under `PLAN.md`'s `## Ending`.
+- Ask the moment a question arises, through the ask tool, your recommendation first, last in the turn so it blocks no dispatch or landing. Name each page to look at on its own line in the question, with its link and section. A step only the owner can take is no question: write it as a line under `PLAN.md`'s `## Ending`.
+- Run `orchestra mode away` or `attended` only on the owner's own words: `/orchestra:away`, `/orchestra:back` or a message to that effect, since away refuses every permission prompt and question the owner would have answered, and attended lets one unanswered prompt park every agent.
 - Record each question with `orchestra ask "<question>"` as you ask it, and each answer in the owner's words with `orchestra rule 1 "<the owner's words>"`, 1 being the number it printed. Show the owner that number with the question, so an answer by number lands on the question meant, and ask one again with `orchestra ask "<question>" --supersedes 1`, which closes question 1. An instruction the owner types unasked is a ruling too, so that it outlives this context: `orchestra ask "<what it settles>"`, then rule it.
-- While the owner is away, `orchestra ask "<question>" --option "<label>: <consequence>" --recommend 1` alone asks it. Where it blocks work, build the recommended option provisionally and record it with `orchestra note Decision: <what, and what reversing it costs>`. Their message saying they are back is their word ending the away: run `orchestra mode attended`.
+- While the owner is away, `orchestra ask "<question>" --option "<label>: <consequence>" --recommend 1` alone asks it. Where it blocks work, build the recommended option provisionally and record it with `orchestra note Decision: <what, and what reversing it costs>`.
 
 ## Now
 

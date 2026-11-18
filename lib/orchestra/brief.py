@@ -34,6 +34,9 @@ DEFAULT = "default"
 SECTIONS = ("GOAL", "WORK", "PREMISES", "TRAPS")
 NONE = "none"
 NEW = "(new)"
+# The one type whose brief needs a slice of the plan: a writer's commits land. A reader changes no file,
+# and a driver plants in its own worktree and lands nothing, so either may work outside the plan.
+SLICED = "writer"
 
 FIRST_RE = re.compile(
     r"^Agent:[ \t]*(?P<agent>\S*)[ \t]+Type:[ \t]*(?P<type>\S*)[ \t]+Slice:[ \t]*(?P<slice>.*?)[ \t]*$"
@@ -262,7 +265,11 @@ def add(_verb: str, parser: argparse.ArgumentParser) -> None:
     parser.add_argument("name", help="the agent's name: upper-case letters, digits and hyphens")
     parser.add_argument("--type", choices=typing.get_args(model.AgentType), help="the agent's type")
     parser.add_argument(
-        "--slice", help=f"the plan's slice the agent works on; a reader's is `{NONE}` unless given, a slice of no plan"
+        "--slice",
+        help=(
+            f"the plan's slice the agent works on; a reader's or a driver's is `{NONE}` unless given,"
+            " a slice of no plan"
+        ),
     )
     parser.add_argument(
         "--check", action="store_true", help="check the brief and stamp it, or refuse naming each fault"
@@ -276,10 +283,9 @@ def run(args: argparse.Namespace) -> int:
         if args.type or args.slice:
             raise Refused("--check takes the name alone: the header already names the type and the slice")
         return check(args, state, here.root, args.name)
-    # A reader changes no file a slice owns, so it may run outside the plan, as a review or a question does.
-    slice_ = args.slice if args.slice is not None or args.type in report.COMMITTING else NONE
+    slice_ = args.slice if args.slice is not None or args.type == SLICED else NONE
     if not args.type or not slice_ or not slice_.strip():
-        raise Refused("a new brief needs --type, and --slice for a writer or a driver; `--check` checks one written")
+        raise Refused("a new brief needs --type, and --slice for a writer; `--check` checks one written")
     return write(state, here.root, args.name, args.type, cli.one_line(slice_))
 
 
@@ -434,7 +440,11 @@ def _changed(root: Path, branch: str, ref: str, tree: Path | None) -> set[str]:
     except Refused:
         paths |= set(config.git(root, "diff", "-z", "--name-only", f"refs/heads/{branch}...{ref}").split("\0"))
     if tree is not None and tree.is_dir():
-        entries = iter(config.git(tree, "status", "--porcelain", "-z", "--untracked-files=all").split("\0"))
+        # Without `core.longpaths`, Git for Windows with the `core.fscache` its installer sets reads a path past 260
+        # characters, as a frozen tree under the state's long folder holds, as deleted and still exits 0; other
+        # platforms ignore the key.
+        listed = config.git(tree, "-c", "core.longpaths=true", "status", "--porcelain", "-z", "--untracked-files=all")
+        entries = iter(listed.split("\0"))
         for entry in entries:
             paths.add(entry[3:])
             # A rename or a copy names its source in the entry after it.
@@ -444,21 +454,31 @@ def _changed(root: Path, branch: str, ref: str, tree: Path | None) -> set[str]:
 
 
 def _unlanded(root: Path, branch: str, agents: list[model.Agent], name: str) -> dict[str, set[str]]:
-    """Each other worktree's and each live agent's branch's changed paths, by who holds it."""
+    """Each other worktree's and each live agent's branch's changed paths, by who holds it.
+
+    A driver's are left out: it commits nothing and reverts what it plants, so nothing of its worktree lands.
+    """
     owner = {agent.branch: agent.name for agent in agents if agent.branch}
+    planting = {agent.branch for agent in agents if agent.branch and agent.type == "driver"}
     found: dict[str, set[str]] = {}
     seen: set[str] = set()
     # The first is the primary checkout, which holds the session branch itself.
     for tree in config.worktrees(root)[1:]:
         held = tree.get("branch", "")
-        if owner.get(held) == name:
+        if owner.get(held) == name or held in planting:
             continue
         seen.add(held)
         who = f"{owner[held]} ({held})" if held in owner else held or tree["worktree"]
         ref = f"refs/heads/{held}" if held else tree.get("HEAD", "")
         found[who] = _changed(root, branch, ref, Path(tree["worktree"]))
     for agent in agents:
-        if agent.branch and agent.name != name and agent.status not in model.SETTLED and agent.branch not in seen:
+        if (
+            agent.branch
+            and agent.name != name
+            and agent.status not in model.SETTLED
+            and agent.branch not in seen
+            and agent.branch not in planting
+        ):
             try:
                 config.git(root, "rev-parse", "--verify", "--quiet", f"refs/heads/{agent.branch}")
             except Refused:
@@ -546,8 +566,8 @@ def _read(state: Path, name: str) -> bytes:
         return store.read_bytes(path)
     except FileNotFoundError:
         raise Refused(
-            f"{name} has no brief at {path}: `orchestra brief {name} --type T`, with `--slice S` for a writer"
-            " or a driver, writes one"
+            f"{name} has no brief at {path}: `orchestra brief {name} --type T`, with `--slice S` for a writer,"
+            " writes one"
         ) from None
 
 

@@ -3,8 +3,9 @@
 The grammar, each heading once and in this order:
 
     # <NAME> · <type> · round <n>
-    ## Summary              the status line, one sentence, the commit line, one line per finding
-                            repeating its heading, `Not verified: ...`, `Wrong in the brief: ...`
+    ## Summary              the status line, one sentence, the commit line, for a writer an optional
+                            `Rows fixed: <id>, <id>.`, one line per finding repeating its
+                            heading, `Not verified: ...`, `Wrong in the brief: ...`
     ## Done
     ## Findings             `### F<n> · <defect or optional> · <silent or loud> · <anchor>`, its first
                             line `Harm: ... Likelihood: ...`; or the line `none`
@@ -54,6 +55,10 @@ TITLE_RE = re.compile(rf"# (?P<name>{model.NAME_RE.pattern}) · (?P<type>\S+) ·
 STATUS_RE = re.compile(r"(?P<status>[A-Z][A-Z-]*)(?:: (?P<reason>\S.*))?")
 COMMITS_RE = re.compile(r"Commits: (?P<count>0|[1-9][0-9]*), tip (?P<tip>[0-9a-f]{7,40})")
 NO_COMMITS = "Commits: none"
+# The optional line after a writer's commit line naming the rows its branch fixes, which its landing closes;
+# it stays out of every commit message, since a push publishes those. A driver's work never lands.
+ROWS_FIXED = "Rows fixed:"
+FIXING = "writer"
 FINDING_RE = re.compile(r"F(?P<n>[1-9][0-9]*) · (?P<kind>defect|optional) · (?P<noise>silent|loud) · (?P<anchor>\S.*)")
 VERDICT_RE = re.compile(rf"(?P<row>{model.ROW_RE.pattern}) · (?P<verdict>{'|'.join(VERDICTS)})")
 HARM_RE = re.compile(r"Harm: \S.* Likelihood: \S.*")
@@ -111,6 +116,8 @@ class Report:
     tip: str | None
     findings: tuple[Finding, ...]
     verdicts: tuple[Verdict, ...]
+    # The rows a writer's `Rows fixed:` line names, in its order.
+    rows: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -138,6 +145,7 @@ class _Summary:
     tip: str | None = None
     # Each item line by the id it opens with: its index and its text.
     named: dict[str, tuple[int, str]] = field(default_factory=dict[str, tuple[int, str]])
+    rows: tuple[str, ...] = ()
 
 
 def path(state: Path, name: str, round_: int = 1) -> Path:
@@ -234,8 +242,12 @@ class _Reader:
     def summary(self, start: int, end: int, items: re.Pattern[str]) -> _Summary:
         """The summary's parts, each line of it read in its place."""
         rows = self.filled(start + 1, end)
-        # Only the lines around the findings count, so a review with many findings still fits.
-        fixed = "\n".join(line for _, line in rows if not items.fullmatch(line))
+        # Only the lines around the findings count, so a review with many findings still fits; a writer's
+        # `Rows fixed:` line grows with its branch's rows as they do, so it is left out too.
+        listed = self.type == FIXING
+        fixed = "\n".join(
+            line for _, line in rows if not items.fullmatch(line) and not (listed and line.startswith(ROWS_FIXED))
+        )
         if (size := len(fixed.encode("utf-8"))) > SUMMARY_BYTES:
             self.fault(
                 start, f"the summary's fixed lines hold {size} bytes, over {SUMMARY_BYTES}: keep each to its part"
@@ -255,7 +267,23 @@ class _Reader:
                 self.fault(k, f"the summary's line here is `{tail}<one line, or nothing>`")
         status, reason = self.status(*first)
         count, tip = self.commits(*commits)
-        return _Summary(status, reason, count, tip, self.named(middle, items))
+        claimed: tuple[str, ...] = ()
+        # Only a writer's branch lands; any other's line, a driver's included, is faulted below as no item line.
+        if listed and middle and middle[0][1].startswith(ROWS_FIXED):
+            claimed = self.fixed(*middle.pop(0))
+        return _Summary(status, reason, count, tip, self.named(middle, items), claimed)
+
+    def fixed(self, k: int, line: str) -> tuple[str, ...]:
+        """The row ids a `Rows fixed:` line names, each token that is none faulted."""
+        # A row id never ends in `.`, so the line's closing full stop comes off its last token.
+        split = re.split(r"[,\s]+", line.removeprefix(ROWS_FIXED))
+        tokens = [token for token in (part.rstrip(".") for part in split) if token]
+        if not tokens:
+            self.fault(k, f"names no row: `{ROWS_FIXED} <id>, <id>.`, or leave the line out")
+        for token in tokens:
+            if not model.ROW_RE.fullmatch(token):
+                self.fault(k, f"`{token}` is no row id: <NAME>-F<n>, or <NAME>.<round>-F<n> from the second round")
+        return tuple(dict.fromkeys(token for token in tokens if model.ROW_RE.fullmatch(token)))
 
     def status(self, k: int, line: str) -> tuple[Status, str | None]:
         held = STATUS_RE.fullmatch(line)
@@ -400,7 +428,7 @@ def parse(
         )
     if reader.said:
         return None, reader.said
-    held = (parts.status, parts.reason, parts.count, parts.tip, tuple(found), tuple(verdicts))
+    held = (parts.status, parts.reason, parts.count, parts.tip, tuple(found), tuple(verdicts), parts.rows)
     return Report(named, reader.type or "", round_, *held), []
 
 

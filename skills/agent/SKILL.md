@@ -26,6 +26,7 @@ Your dispatch prompt names your brief, its messages file, your report and the pr
 - What the harness, a tool or a hook permits is established by attempting it, since a definition says what was intended. What you cannot attempt is "not established", with the command that would settle it.
 - A hash, a figure or a quotation in your report is copied from a command's output or a source, where a recalled one is often wrong.
 - Where a change leaves one file contradicting its siblings, the siblings are evidence the change is wrong.
+- The Bash tool can turn a typed `\\` into `\` silently: write such text with the Write tool and pass it by file, as `git commit -F <file>`.
 - Where you hold a shell: run each check unfiltered and read its exit code from the command itself, because a filter drops the line naming the error and a pipe reports its last command's code. Start nothing on a fixed port, and act only on processes, containers and files you created: every agent shares the machine. To compare two timings, run the two variants alternately in one sitting and report the ratio with its spread, since the machine's load drifts. Stop each background command or monitor you started, with `TaskStop`, before your final message, since it outlives you.
 
 ## The report

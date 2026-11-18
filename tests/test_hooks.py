@@ -763,7 +763,7 @@ def test_the_turn_continues_once_with_what_is_undone(project: Path, state: Path)
     # second alone, so the entry of NOW.md's own second counts as later.
     start = datetime.datetime.now().astimezone().replace(microsecond=0) + datetime.timedelta(hours=1)
     stamps = [start + datetime.timedelta(seconds=k) for k in range(5)]
-    store.append_jsonl(state / store.LOG, *({"time": t.isoformat(), "kind": "note", "text": "x"} for t in stamps))
+    store.append_jsonl(state / store.LOG, *({"time": t.isoformat(), "kind": "resume", "text": "x"} for t in stamps))
     written = start.timestamp() + 0.5
     os.utime(state / store.NOW, (written, written))
     code, said = hook("Stop", project, stop_hook_active=False, background_tasks=[])
@@ -775,6 +775,35 @@ def test_the_turn_continues_once_with_what_is_undone(project: Path, state: Path)
         "- NOW.md predates the last 5 log entries",
     ]
     assert hook("Stop", project, stop_hook_active=True, background_tasks=[]) == (0, None)
+
+
+def test_notes_after_now_md_leave_it_current_and_as_many_decisions_or_other_entries_do_not(
+    project: Path, state: Path
+) -> None:
+    """A note logs a fault or an observation and moves no next action; a waiting note names what is waited on."""
+    start = datetime.datetime.now().astimezone().replace(microsecond=0) + datetime.timedelta(hours=1)
+    os.utime(state / store.NOW, (start.timestamp(), start.timestamp()))
+
+    def logged(*entries: tuple[str, str]) -> list[str]:
+        """The turn's `NOW.md` line once `entries`, each a kind and a text, are logged after NOW.md, a second apart."""
+        stamps = [start + datetime.timedelta(seconds=k) for k in range(len(entries))]
+        store.write_text(state / store.LOG, "")
+        store.append_jsonl(
+            state / store.LOG,
+            *(
+                {"time": t.isoformat(), "kind": kind, "text": text}
+                for t, (kind, text) in zip(stamps, entries, strict=True)
+            ),
+        )
+        said = hook("Stop", project, stop_hook_active=False, background_tasks=[])[1]
+        return [] if said is None else [line for line in context_of(said, "Stop").splitlines() if "NOW.md" in line]
+
+    stale = ["- NOW.md predates the last 5 log entries"]
+    assert logged(*[("note", "x")] * 8) == []
+    others = [(kind, "x") for kind in ("waiting", "judge", "land", "ci")]
+    assert logged(*others, ("resume", "x")) == stale
+    # A decision taken while nobody could be asked moves the next action, so its note counts.
+    assert logged(*others, ("note", "Decision: kept the cap at 20; reversing costs one commit")) == stale
 
 
 def test_an_idle_turn_continues_only_while_nobody_watches(project: Path, state: Path) -> None:
@@ -940,10 +969,26 @@ def _due(project: Path) -> list[str]:
     return [] if said is None else [line for line in context_of(said, "Stop").splitlines() if "checkpoint" in line]
 
 
-def test_a_falsely_sequenced_slice_waits_free_and_four_judged_reports_make_the_checkpoint_due(
+def _judged(project: Path, name: str, kind: str, lens: str = "none") -> subprocess.CompletedProcess[str]:
+    """An agent briefed on `lens`, dispatched as its name in lower case, reported and judged, its findings closed."""
+    ident = name.lower()
+    briefed(project, name, kind, lens=lens)
+    dispatched(project, name, kind, ident)
+    report.path(store.state_dir(project), name).write_bytes(text(kind, name).encode())
+    assert hook("SubagentStop", project, inside(project, ident, kind, last_assistant_message="x"))[0] == 0
+    judged = run("judge", name, "F1=close:MOOT:x", "F2=close:MOOT:x", "--verdict", "v", cwd=project)
+    assert judged.returncode == 0, judged.stderr
+    return judged
+
+
+def test_a_falsely_sequenced_slice_waits_free_and_four_judged_reports_not_disclosure_only_make_the_checkpoint_due(
     project: Path, state: Path
 ) -> None:
-    """S2 needs nothing of S1, so the program names it free; the estimate is looked at again every four reports."""
+    """S2 needs nothing of S1, so the program names it free; the estimate is looked at again every four reports.
+
+    A researcher whose `Lens:` names disclosure alone frees no planned work, before a push or in the review, in
+    any round; a report whose brief cannot be read, or whose `Lens:` names another lens beside, counts.
+    """
     store.write_text(state / store.PLAN, PACED_PLAN)
     briefed(project, "W", "writer", owns="lib/a.py")
     free = "waits     slice S2, which no agent took: its files are free"
@@ -957,17 +1002,24 @@ def test_a_falsely_sequenced_slice_waits_free_and_four_judged_reports_make_the_c
     saved = state / "estimates" / "first.md"
     saved.write_bytes(b"# Estimate\n")
     assert _due(project) == []
+    # A disclosure-only read's first round, and its second once resumed for the next push: neither counts.
+    _judged(project, "DISCLOSE", "researcher", lens="disclosure")
+    resume = {"to": "DISCLOSE", "message": "Read the next push."}
+    assert decision(hook("PreToolUse", project, tool_name="SendMessage", tool_input=resume)[1])[0] == "allow"
+    report.path(state, "DISCLOSE", 2).write_bytes(text("researcher", "DISCLOSE", round_=2).encode())
+    stop = inside(project, "disclose", "researcher", last_assistant_message="x")
+    assert hook("SubagentStop", project, stop)[0] == 0
+    second = run("judge", "DISCLOSE", "F1=close:MOOT:x", "F2=close:MOOT:x", "--verdict", "v", cwd=project)
+    assert second.returncode == 0, second.stderr
     at = datetime.datetime.fromtimestamp(saved.stat().st_mtime).astimezone()
     fourth = f"- 4 reports were judged since the last saved estimate ({at:%H:%M}), and 3 plan lines are unticked"
     for k in range(1, 5):
-        name = f"A{k}"
-        briefed(project, name, "auditor")
-        dispatched(project, name, "auditor", f"a{k}")
-        report.path(state, name).write_bytes(text("auditor", name).encode())
-        assert hook("SubagentStop", project, inside(project, f"a{k}", "auditor", last_assistant_message="x"))[0] == 0
-        judged = run("judge", name, "F1=close:MOOT:x", "F2=close:MOOT:x", "--verdict", "v", cwd=project)
-        assert judged.returncode == 0, judged.stderr
+        # A lens beside disclosure makes the read more than a disclosure-only one, so its report counts.
+        judged = _judged(project, f"A{k}", "auditor", lens="disclosure, contract" if k == 4 else "none")
         assert free in judged.stdout.splitlines()
+        if k == 1:
+            # A brief that cannot be read is counted, as the report of any other agent is.
+            (state / "briefs" / "A1.md").unlink()
         assert _due(project) == ([] if k < 4 else [f"{fourth}: the checkpoint in checkpoint.md is due"])
     # A landing closes on what still waits.
     tree = project.parent / "trees" / "agent-w1"

@@ -23,6 +23,15 @@ Three settings make a project ready, each in the project's `.claude/settings.jso
 }
 ```
 
+Claude Code applies the `allow` rules of a project's `.claude/settings.json` only in a folder you
+have trusted, and a headless or Agent SDK session shows no trust prompt (the
+[permissions page](https://code.claude.com/docs/en/permissions), "Project allow rules and workspace
+trust"), so start one interactive session in a new clone and accept its trust prompt.
+
+On Windows, run `git config --global core.longpaths true` once: the frozen tree `diff --tree` makes
+sits deep under the state folder, and a git command an agent runs there without the key reads a
+path past 260 characters as deleted, with exit code 0.
+
 Add `.claude/worktrees/` to `.gitignore`: Claude Code puts the agents' worktrees there. Commit
 `.claude/settings.json` and `.gitignore` before the first session, and keep
 `.claude/settings.local.json` out of git: `init` adds it to the clone's `.git/info/exclude`
@@ -53,9 +62,11 @@ app takes no flag.
 
 Every Claude Code session started at the checkout's root after `init` runs at the window the
 environment or the files set, the desktop app's too, and its agents inherit it; each agent
-definition also sets 500,000, which lowers a larger window an agent would inherit. Claude Code
-reloads a changed settings file in a running session, but does not document whether a new window
-applies there, so count on it from the next session.
+definition also sets 500,000, which lowers a larger window an agent would inherit. In the desktop
+app, a session whose `init` wrote the window was seen running on toward Claude Code's default,
+and the next session started there ran at 500,000; Claude Code's settings page says most edits
+reach a running session, so this is a sighting, not a rule. In that first session, run `/compact`
+yourself before its context passes 500,000 tokens, which `/context` shows.
 
 ## Starting a session
 
@@ -69,11 +80,19 @@ applies there, so count on it from the next session.
    `orchestra init checkout-rework`, and then writes the session's plan.
 
 `init` refuses outside the primary checkout, on a detached head, and on a branch that already holds
-a session. It takes two options: `--programme`, the name of the larger piece of work the session
-belongs to, which defaults to the primary checkout's folder name, and which `init` refuses to
-default where that programme's folder holds sessions of another checkout, so an unrelated clone
-sharing the folder name gets a programme of its own; and `--rulings-from`, the number the
-programme's first ruling takes, for a programme whose rulings were numbered elsewhere before.
+a session. It takes three options:
+
+- `--base`, the branch the session is cut from, named by its local branch's short name. Without it,
+  a session takes the configuration's `base`, and `init` refuses a branch that already holds
+  commits that base does not, as a branch cut from another one does, so a programme whose sessions
+  branch from a branch of their own names it on each session. `init`'s first line names the base,
+  where it came from and its commit, and `orchestra log` keeps that line.
+- `--programme`, the name of the larger piece of work the session belongs to, which defaults to the
+  primary checkout's folder name, and which `init` refuses to default where that programme's folder
+  holds sessions of another checkout, so an unrelated clone sharing the folder name gets a programme
+  of its own.
+- `--rulings-from`, the number the programme's first ruling takes, for a programme whose rulings
+  were numbered elsewhere before.
 
 `init` then runs `orchestra doctor`, which the coordinator can also run at any time. It refuses a
 configuration file that does not parse with exit 2, before any check runs, and exits 1 while a check
@@ -140,7 +159,7 @@ them there.
 | `conformance`   | is every ruling and plan item met, every closed row closed  |
 | `use`           | can a newcomer carry out a plain request with it            |
 | `data`          | can two writes, a retry or a crash leave stored state wrong |
-| `tests`         | can each check fail                                         |
+| `tests`         | can each check fail, does a case reach each added behaviour |
 | `necessity`     | does each test case guard a harm nothing else guards        |
 | `prompt`        | will a model holding only this page do the right thing      |
 | `document`      | is each claim of a page a person reads true                 |
@@ -201,8 +220,10 @@ rate limited, the line says so instead.
 
 It runs `claude` found on PATH, where Claude Code's installers put it, else the program the
 [configuration's `claude` key](#the-configuration-file) names, and the line says which. The
-desktop app keeps its own program in a folder named for its version, so a path to it goes stale at
-each update; the line then says the configured program is missing.
+desktop app puts no `claude` on PATH and keeps its own program in a folder named for its version,
+so a path to it goes stale at each update. There, unless the `claude` key names the app's current
+program, the `usage` line reads unknown with its reason, and the coordinator reads the same limits
+from the app's own `get_usage` tool instead.
 
 ## Your commands
 
@@ -279,8 +300,10 @@ does not know is refused, naming its path in the file.
   [where the state lives](#where-the-state-lives) names. `init` refuses the home folder, a folder
   holding it, a file system's root and a folder inside the checkout, and a folder under `.claude`
   makes every agent's report write prompt.
-- **`base`** is the branch a session branch is cut from, `main` by default. `init` records the
-  commit where the session branch leaves it.
+- **`base`** is the branch a session branch is cut from, `main` by default;
+  [`init`'s `--base`](#starting-a-session) names another for one session. `init` records
+  the commit where the session branch leaves it, and refuses a base this clone has no local branch
+  of, naming `git branch <base> origin/<base>` where `origin` has it.
 - **`models`** maps a profile's name to a `model` alias (`opus`, `sonnet`, `haiku` or `fable`) and an
   optional `effort` (`low`, `medium`, `high`, `xhigh` or `max`). An agent gets the profile its
   brief's `Model:` line names, such as `Model: mechanical`, and `default` where the brief has no such
@@ -305,7 +328,9 @@ does not know is refused, naming its path in the file.
   as a brief's `Owns:` line reads it: `*` matches within one folder, `**` any number of folders,
   and a path with no `*` names itself and everything under it. Declare the paths holding stored
   state for `data`, the code run on every request or event for `cost`, and the interface for
-  `accessibility`; a project that publishes its tree declares `disclosure` over `**`. An empty
+  `accessibility`; a project that publishes its tree declares `disclosure` over `**`. A trigger's
+  paths are not filtered by the lens's own `except`, so a trigger can make `security` due on the
+  Markdown files that hold a project's agent rules, which that lens's own line leaves out. An empty
   `when` makes a `declared` lens due on nothing, so it no longer prints as `undeclared`. It leaves a
   lens whose own line is `always` or names paths due as that line says: to change such a lens,
   replace its file under `.claude/orchestra/lenses/`. A trigger may name a lens of the project's

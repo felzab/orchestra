@@ -79,15 +79,25 @@ def test_the_header_is_filled_from_the_state_and_git(project: Path, state: Path)
     assert "exists, and what is written in it would be lost" in again.stderr
 
 
-def test_a_reader_is_briefed_outside_the_plan_with_no_slice_and_a_writer_is_not(project: Path, state: Path) -> None:
-    """A reader changes no file a slice owns, so a review or a question needs no slice made up for it."""
-    done = inprocess("brief", "READER", "--type", "auditor", cwd=project)
-    assert done.returncode == 0, done.stderr
-    assert brief.header(state, "READER").slice == "none"
-    assert "agent READER: on no slice" not in inprocess("status", cwd=project).stdout
+def test_a_reader_or_a_driver_is_briefed_outside_the_plan_with_no_slice_and_a_writer_on_none_is_drift(
+    project: Path, state: Path
+) -> None:
+    """A reader changes no file a slice owns, and a driver plants in its own worktree and lands nothing, so a
+    review, a question or a probe needs no slice made up for it; a writer's commits land, so it needs one."""
+    for name, kind in (("READER", "auditor"), ("PROBE", "driver")):
+        done = inprocess("brief", name, "--type", kind, cwd=project)
+        assert done.returncode == 0, done.stderr
+        assert brief.header(state, name).slice == "none"
     refused = inprocess("brief", "WRITER", "--type", "writer", cwd=project)
     assert refused.returncode == 2
-    assert "a new brief needs --type, and --slice for a writer or a driver" in refused.stderr
+    assert "a new brief needs --type, and --slice for a writer; `--check` checks one written" in refused.stderr
+    loose = inprocess("brief", "LOOSE", "--type", "writer", "--slice", "none", cwd=project)
+    assert loose.returncode == 0, loose.stderr
+    # LOOSE's line shows the drift check ran over READER and PROBE too.
+    lines = inprocess("status", cwd=project).stdout.splitlines()
+    assert [line for line in lines if line.startswith("drift     agent ")] == [
+        "drift     agent LOOSE: on no slice of PLAN.md (its slice is 'none')"
+    ]
 
 
 def test_a_whole_brief_is_stamped_and_an_edit_unstamps_it(project: Path, state: Path) -> None:
@@ -231,6 +241,45 @@ def test_a_path_an_unlanded_branch_changes_by_commit_or_by_edit_is_refused(
     git(project, "merge", "-q", "worktree-agent-a1")
     (tree / "lib" / "edit.py").unlink()
     assert check(project, "A")[0] == 0
+
+
+def test_a_drivers_worktree_holds_no_path_of_a_writers_brief(project: Path, state: Path, tmp_path: Path) -> None:
+    """A driver commits nothing and reverts each plant, so its worktree's edit is no work a landing would bring."""
+    tree = tmp_path / "tree"
+    git(project, "worktree", "add", "-q", "-b", "worktree-agent-d1", str(tree))
+    (tree / "lib" / "a.py").write_bytes(b"planted\n")
+    briefed(project, "PROBE", kind="driver")
+    model.update_agent(
+        state, "PROBE", lambda held: dataclasses.replace(held, status="running", branch="worktree-agent-d1")
+    )
+    briefed(project, "A", owns="lib/a.py")
+    assert check(project, "A") == (0, [f"A's brief is checked: {state / 'briefs' / 'A.md'}"])
+    # The same worktree a writer's is work that lands.
+    model.update_agent(state, "PROBE", lambda held: dataclasses.replace(held, type="writer"))
+    assert check(project, "A")[1][:-1] == ["lib/a.py is changed by PROBE (worktree-agent-d1), unlanded"]
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="the 260-character path limit is Windows' alone")
+def test_a_frozen_tree_whose_paths_pass_windows_limit_changes_none_of_them(project: Path, state: Path) -> None:
+    """`git status` reads such a path as deleted unless `core.longpaths` is set, and exits 0 all the same."""
+    # Git for Windows' installer sets `core.fscache` in the system configuration, which the suite leaves out; with
+    # it, a path too long to read is reported missing rather than skipped with a warning.
+    git(project, "config", "core.fscache", "true")
+    # As deep as the checkout takes without long paths, as test_diff's long-path case builds it.
+    room = 240 - len(str(project)) - 1
+    segments = (room - 12) // 10
+    deep = "/".join(["deep12345"] * segments) + "/" + "f" * (room - segments * 10 - 4) + ".txt"
+    (project / deep).parent.mkdir(parents=True)
+    (project / deep).write_bytes(b"deep\n")
+    git(project, "add", deep)
+    git(project, "commit", "-m", "deep")
+    frozen = inprocess("diff", "--tree", cwd=project)
+    assert frozen.returncode == 0, frozen.stderr
+    tree = state / store.TREES / git(project, "rev-parse", "main")
+    assert len(str(tree / deep)) > 260, len(str(tree / deep))
+    briefed(project, "A", owns=deep)
+    code, lines = check(project, "A")
+    assert code == 0, lines
 
 
 def test_a_row_routed_to_a_live_agent_or_in_a_checked_brief_is_refused(project: Path, state: Path) -> None:

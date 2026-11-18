@@ -24,7 +24,7 @@ TRAPS     The tests share one fake clock: advance it, since a sleep makes the su
 ## The header
 
 - `Owns:` lists every path the agent may write: a file, a folder, or a glob where `*` stays within a folder and `**` crosses folders. A file still to be made is written `<path> (new)`, which `--check` otherwise refuses.
-- `Rows:` lists the rows a writer's commits answer, which the dispatch routes to it so that its landing closes them, and `none` otherwise. A verifier's rows are named in its `WORK`.
+- `Rows:` lists the rows a writer's commits answer, which the dispatch routes to it so that its landing closes those its report names fixed, and `none` otherwise. A verifier's rows are named in its `WORK`.
 - `Writes:` lists paths outside the checkout and the state that a researcher, auditor or verifier may write besides its report and its scratch folder.
 - `Lens:` names lenses. The agent reads each file, so paste none.
 - `Model:` is a line you may add, naming a profile of the project's `models`; without it the agent gets `default`.

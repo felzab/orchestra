@@ -22,7 +22,7 @@
       "default": null
     },
     "base": {
-      "description": "The branch a session branch is cut from.",
+      "description": "The branch a session branch is cut from; `orchestra init --base <branch>` names another for one session.",
       "type": "string",
       "default": "main"
     },

@@ -76,6 +76,10 @@ OWN = frozenset({store.PLAN, store.NOW})
 ADDENDA = Path(".claude", "orchestra")
 # The reports judged after the newest saved estimate at which the checkpoint is due again.
 JUDGED = 4
+# The `Lens:` line of a disclosure-only read, which frees no planned work, so its report leaves the
+# checkpoint's count alone. The brief alone is read, so the read before a push and the review's own
+# disclosure reader are both left out: nothing tells the two apart.
+DISCLOSURE_ONLY = ("disclosure",)
 # When the previous prompt arrived, for the clock line.
 PROMPT = "prompt.json"
 # The reason of a `SessionEnd` that `/clear` caused, whose session id never writes again, and the source
@@ -358,7 +362,7 @@ def _dispatch(where: Where, given: Record) -> str | None:
     elif not model.NAME_RE.fullmatch(name):
         why = "an orchestra dispatch's prompt is the agent's name alone, as `orchestra brief NAME` wrote its brief"
     elif not model.has_agent(state, name):
-        sliced = " --slice S" if kind in report.COMMITTING else ""
+        sliced = " --slice S" if kind == brief.SLICED else ""
         why = f"no agent {name} in this session: `orchestra brief {name} --type {kind}{sliced}` writes its brief"
     else:
         return _start(where, given, model.read_agent(state, name), root)
@@ -867,7 +871,13 @@ def stop(where: Where) -> str | None:
     if now.is_file():
         # Compared at the log's own precision, the second: an entry of NOW.md's second may follow it.
         written = datetime.datetime.fromtimestamp(now.stat().st_mtime).astimezone().replace(microsecond=0)
-        later = sum(datetime.datetime.fromisoformat(entry.time) >= written for entry in entries)
+        # A note logs a fault or an observation, which moves no next action, so it is left out; a decision
+        # taken while nobody could be asked does move one.
+        later = sum(
+            (entry.kind != log.NOTE or entry.text.startswith(log.DECISION))
+            and datetime.datetime.fromisoformat(entry.time) >= written
+            for entry in entries
+        )
         if later >= NOW_EVENTS:
             undone.append(f"NOW.md predates the last {later} log entries")
     if due := _checkpoint(state, entries):
@@ -881,14 +891,19 @@ def _checkpoint(state: Path, entries: list[log.Entry]) -> str | None:
     """A line where the checkpoint is due and a plan line is unticked; None where it is not.
 
     It is due once an agent is dispatched while no estimate is saved, and once `JUDGED` reports are
-    judged after the newest saved one, since each report can free work the plan holds back.
+    judged after the newest saved one, since each report can free work the plan holds back; a report
+    whose brief's `Lens:` line is `DISCLOSURE_ONLY`, a disclosure-only read, frees none, so it is not counted.
     """
     saved = [path.stat().st_mtime for path in (state / store.ESTIMATES).glob("*") if path.is_file()]
     if saved:
         # Compared at the log's own precision, the second, as NOW.md is.
         newest = datetime.datetime.fromtimestamp(max(saved)).astimezone().replace(microsecond=0)
+        # The brief is read last, so only an entry judged since the estimate costs a read.
         judged = sum(
-            entry.kind == log.JUDGE and datetime.datetime.fromisoformat(entry.time) >= newest for entry in entries
+            entry.kind == log.JUDGE
+            and datetime.datetime.fromisoformat(entry.time) >= newest
+            and not _disclosure_only(state, entry.text)
+            for entry in entries
         )
         if judged < JUDGED:
             return None
@@ -905,6 +920,19 @@ def _checkpoint(state: Path, entries: list[log.Entry]) -> str | None:
         return None
     lines = "1 plan line is" if unticked == 1 else f"{unticked} plan lines are"
     return f"{why}, and {lines} unticked: the checkpoint in checkpoint.md is due"
+
+
+def _disclosure_only(state: Path, judged: str) -> bool:
+    """Whether a judge entry's agent made a disclosure-only read, by its brief's `Lens:` line.
+
+    The entry opens with the report's stem, `<NAME>` or `<NAME>.<round>` (`report.stem`), then `:`. A
+    brief that cannot be read is counted, as the report of any other agent is.
+    """
+    name = judged.partition(":")[0].partition(".")[0]
+    try:
+        return brief.header(state, name).lens == DISCLOSURE_ONLY
+    except Refused:
+        return False
 
 
 def _waits(agents: list[model.Agent], entries: list[log.Entry]) -> bool:

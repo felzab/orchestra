@@ -40,13 +40,6 @@ EXITS = {
 }
 ORDER = {"install": 0, "regenerate": 1, "check": 2}
 FAILED = {"install": 5, "regenerate": 4, "check": 5}
-# A row id as a body writes it; `model.ROW_RE` judges each.
-ROW_ID = r"[A-Z][A-Z0-9.-]*-F\d+"
-# A body wraps its `Rows fixed:` line like the rest of its prose, so the line runs on through every
-# following line made of row ids alone; prose after it, a row id mentioned in it included, closes nothing.
-ROWS_FIXED_RE = re.compile(
-    rf"^Rows fixed:[ \t]*(?P<rows>.+(?:\n[ \t]*{ROW_ID}(?:[,.]?[ \t]+{ROW_ID})*[,.]?[ \t]*$)*)", re.MULTILINE
-)
 # The most lines of a failing command's output a stop quotes, and the most changed paths it names.
 TAIL = 15
 SHOWN = 5
@@ -80,10 +73,22 @@ def _names(root: Path, *args: str, code: int = 2) -> list[str]:
     return [path for path in _git(root, *args, "-z", code=code).split("\0") if path]
 
 
-def fixed_rows(bodies: str) -> list[str]:
-    """Every row id the commit bodies' `Rows fixed:` lines name, their wrapped continuations included."""
-    tokens = (token.rstrip(".,") for found in ROWS_FIXED_RE.findall(bodies) for token in re.split(r"[,\s]+", found))
-    return sorted({token for token in tokens if model.ROW_RE.fullmatch(token)})
+def fixed_rows(state: Path, names: list[str]) -> list[str]:
+    """Every row the agents' latest reports name on their summary's `Rows fixed:` line.
+
+    The latest round alone speaks, since it names every row the branch fixes: an earlier round's claim
+    on a row routed back since would otherwise close it again. A report that does not read names
+    nothing, since a stopped agent's broken report does not hold its landing back; the rows it would
+    have named are then printed as still routed.
+    """
+    named: set[str] = set()
+    for name in names:
+        agent = model.read_agent(state, name)
+        try:
+            named.update(report.read(report.path(state, name, max(agent.reports, default=1)), agent.type).rows)
+        except Refused:
+            continue
+    return sorted(named)
 
 
 def preflight(root: Path, branch: str) -> None:
@@ -233,15 +238,19 @@ def _abort(root: Path, branch: str, stop: Stop, written: list[str], others: list
     return stop
 
 
-def credit(state: Path, names: list[str], bodies: str, merge: str) -> list[str]:
-    """Each row a `Rows fixed:` line names that is routed to an agent landed here closed FIXED; what is left named."""
-    named = fixed_rows(bodies)
+def credit(state: Path, names: list[str], merge: str) -> list[str]:
+    """Each row a landed agent's report names fixed that is routed to an agent landed here closed FIXED;
+    what is left named."""
+    named = fixed_rows(state, names)
     said: list[str] = []
 
     def close(rows: dict[str, model.FindingEvent]) -> list[model.FindingEvent]:
         closed: list[model.FindingEvent] = []
         for row in named:
             held = rows.get(row)
+            if held is not None and held.status == "FIXED" and held.owner in names:
+                # Closed by an earlier landing of the same agent, whose later report names it again.
+                continue
             if held is not None and held.status == "ROUTED" and held.owner in names:
                 closed.append(model.FindingEvent(row, "close", "FIXED", owner=held.owner, evidence=merge))
                 said.append(f"FIXED {row} by {merge}")
@@ -256,7 +265,9 @@ def credit(state: Path, names: list[str], bodies: str, merge: str) -> list[str]:
             row for row, held in rows.items() if held.status == "ROUTED" and held.owner in landed and row not in named
         ]
         if left:
-            said.append(f"still routed to {', '.join(names)} with no `Rows fixed:` line naming them: {', '.join(left)}")
+            said.append(
+                f"still routed to {', '.join(names)} that no report's `Rows fixed:` line names: {', '.join(left)}"
+            )
         return closed
 
     model.write_findings(state, close)
@@ -277,7 +288,10 @@ def _brought_in(root: Path, session: str, branch: str) -> tuple[str, str] | None
     entry before it is where the session branch stood. A branch with no commit of its own sits on the
     first-parent line too, and its own reflog holds nothing but its creation (git-reflog(1)).
     """
-    line = _git(root, "rev-list", "--first-parent", "--ancestry-path", f"{branch}..HEAD").split()
+    # The line's commits that descend from the branch, by any parent: with `--first-parent`, `--ancestry-path`
+    # walks no second parent, so it misses a branch another agent's merged branch carried in.
+    descends = set(_git(root, "rev-list", "--ancestry-path", f"{branch}..HEAD").split())
+    line = [made for made in _git(root, "rev-list", "--first-parent", f"{branch}..HEAD").split() if made in descends]
     if line and not _ok(root, "merge-base", "--is-ancestor", branch, f"{line[-1]}^1"):
         return f"{line[-1]}^1", line[-1]
     tip = _git(root, "rev-parse", f"refs/heads/{branch}").strip()
@@ -309,29 +323,28 @@ def _settle(
         and _ok(root, "merge-base", "--is-ancestor", other, after)
     ]
     names = [name, *carried]
-    lines = credit(state, names, _git(root, "log", "--format=%B", f"{before}..{after}", code=10), short)
-    working: list[str] = []
-
-    def landed(held: model.Agent) -> model.Agent:
-        # An agent still at work keeps its record: its stop reports, and landing it then settles it.
-        if held.status in findings.LIVE:
-            working.append(
-                f"{held.name} is {held.status} and has not reported, so its record stays: land it again then"
-            )
-            return held
-        if why := context.working(held):
-            working.append(f"{held.name} may still be working ({why}), so its record stays: land it again then")
-            return held
-        # A carried agent's report not yet judged keeps its record too, so `judge` can still bank it.
-        if waits := findings.waiting(state, held):
-            working.append(f"{waits}; its record stays: land it again then")
-            return held
-        return replace(held, status="landed")
-
+    # Each agent is judged once, before any row closes: one whose record stays is credited nothing, since its
+    # report may still change or be refused, and its rows are credited when it lands itself.
+    kept = {each: why for each in names if (why := _kept(state, model.read_agent(state, each)))}
+    lines = credit(state, [each for each in names if each not in kept], short)
     for each in names:
-        model.update_agent(state, each, landed)
+        if each not in kept:
+            model.update_agent(state, each, lambda held: replace(held, status="landed"))
     log.record(state, "land", f"{', '.join(names)} landed as {short}")
-    return names, [*lines, *working], prune.prune(here, state, set(names))
+    return names, [*lines, *kept.values()], prune.prune(here, state, set(names))
+
+
+def _kept(state: Path, agent: model.Agent) -> str | None:
+    """Why a landing leaves the agent's record as it is, said so; None where the agent lands."""
+    # An agent still at work keeps its record: its stop reports, and landing it then settles it.
+    if agent.status in findings.LIVE:
+        return f"{agent.name} is {agent.status} and has not reported, so its record stays: land it again then"
+    if why := context.working(agent):
+        return f"{agent.name} may still be working ({why}), so its record stays: land it again then"
+    # A carried agent's report not yet judged keeps its record too, so `judge` can still bank it.
+    if waits := findings.waiting(state, agent):
+        return f"{waits}; its record stays: land it again then"
+    return None
 
 
 def _finish(

@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import subprocess
+import sys
 from pathlib import Path
 
+import pytest
+
 from conftest import git, inprocess
-from orchestra import diff, log, model, store
+from orchestra import diff, log, model, prune, store
 
 
 def commit(root: Path, path: str, data: bytes) -> None:
@@ -86,3 +89,44 @@ def test_a_tree_stays_at_the_captured_commit_while_the_branch_moves_on(project: 
     assert made == [str(tree), str(state / store.TREES / git(project, "rev-parse", "main"))]
     assert inprocess("diff", "--tree", cwd=project).returncode == 0
     assert len([entry for entry in log.entries(state) if entry.kind == diff.KIND]) == 2
+
+
+def test_a_tree_folder_no_log_entry_names_is_refused_naming_its_removal(project: Path) -> None:
+    """A checkout stopped part-way leaves the folder with files missing; only a whole tree is logged."""
+    assert inprocess("init", "s1", cwd=project).returncode == 0
+    state = store.state_dir(project)
+    # An earlier commit's tree logged, so only an entry for this folder's own path vouches for it.
+    assert inprocess("diff", "--tree", cwd=project).returncode == 0
+    commit(project, "lib/a.py", b"one\n")
+    tree = state / store.TREES / git(project, "rev-parse", "main")
+    git(project, "worktree", "add", "--detach", str(tree), "main")
+    (tree / "lib" / "a.py").unlink()
+    refused = inprocess("diff", "--tree", cwd=project)
+    assert refused.returncode == 2
+    # With `core.longpaths`, as the add takes it, since a deep tracked path under the state's folder needs it.
+    assert f'`git -c core.longpaths=true worktree remove --force "{tree.as_posix()}"`' in refused.stderr
+    # The command it names clears the folder, and the tree is then made whole.
+    git(project, "-c", "core.longpaths=true", "worktree", "remove", "--force", tree.as_posix())
+    done = inprocess("diff", "--tree", cwd=project)
+    assert done.returncode == 0, done.stderr
+    assert (tree / "lib" / "a.py").read_bytes() == b"one\n"
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="the 260-character path limit is Windows' alone")
+def test_a_tree_is_made_whole_where_its_paths_pass_windows_limit(project: Path) -> None:
+    """A tracked path short enough in the checkout runs past 260 characters under the state's longer `trees/`."""
+    assert inprocess("init", "s1", cwd=project).returncode == 0
+    state = store.state_dir(project)
+    # As deep as the checkout takes without long paths, 240 leaving a folder under the 248 Windows makes.
+    room = 240 - len(str(project)) - 1
+    segments = (room - 12) // 10
+    deep = "/".join(["deep12345"] * segments) + "/" + "f" * (room - segments * 10 - 4) + ".txt"
+    commit(project, deep, b"deep\n")
+    done = inprocess("diff", "--tree", cwd=project)
+    assert done.returncode == 0, done.stderr
+    tree = state / store.TREES / git(project, "rev-parse", "main")
+    assert done.stdout.splitlines()[2] == str(tree)
+    held = tree / deep
+    assert len(str(held)) > 260, len(str(held))
+    # Read in the long form, so the assertion holds whatever the machine's own long-path setting.
+    assert Path(prune.long_form(held)).read_bytes() == b"deep\n"

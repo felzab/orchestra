@@ -122,13 +122,13 @@ def test_a_branch_lands_whole_as_one_merge_through_the_hooks_and_its_tree_goes(f
     wait_gone(fleet.root / ".claude" / "worktrees" / TRASH)
 
 
-def test_a_landing_closes_only_the_rows_routed_to_its_agent_that_a_rows_fixed_line_names(fleet: Fleet) -> None:
+def test_a_landing_closes_only_the_rows_routed_to_its_agent_that_its_report_names_fixed(fleet: Fleet) -> None:
     tree = agent(fleet)
     for row, owner in (("A-F1", "WORKER"), ("A-F2", "OTHER"), ("A-F4", "WORKER"), ("A.2-F11", "WORKER")):
         route(fleet, row, owner)
     model.write_findings(fleet.state, lambda _: [model.FindingEvent("A-F3", "bank", "OPEN")])
-    body = "Rows fixed: A.2-F11.\nRows fixed: A-F2, A-F3.\n\nA-F4 stays open, unlike A-F1."
-    commit(tree, f"Docs: A note\n\n{body}", {"notes.txt": "second\n"})
+    write(fleet.state, "reports/WORKER.md", text("writer", "WORKER", fixed="A.2-F11, A-F2, A-F3."))
+    commit(tree, "Docs: A note", {"notes.txt": "second\n"})
     code, out, err = fleet.run("land", "WORKER")
     assert code == 0, err
     merge = git(fleet.root, "rev-parse", "--short", "HEAD")
@@ -137,22 +137,41 @@ def test_a_landing_closes_only_the_rows_routed_to_its_agent_that_a_rows_fixed_li
     assert (rows["A.2-F11"].status, rows["A.2-F11"].evidence) == ("FIXED", merge)
     assert f"A-F3 is named fixed while OPEN: `orchestra close FIXED {merge} A-F3` if it is" in out
     assert "A-F2 is named fixed and is ROUTED OTHER, so it stands as it is" in out
-    assert "still routed to WORKER with no `Rows fixed:` line naming them: A-F1, A-F4" in out
+    assert "still routed to WORKER that no report's `Rows fixed:` line names: A-F1, A-F4" in out
     assert [rows[row].status for row in ("A-F1", "A-F2", "A-F3", "A-F4")] == ["ROUTED", "ROUTED", "OPEN", "ROUTED"]
     # The rows still routed to it keep its tree for a later round.
     assert f"kept {tree} (WORKER): rows are routed to it: A-F1, A-F4" in out
     assert model.read_agent(fleet.state, "WORKER").status == "landed"
+    # The register's row ids stay out of the history a push publishes.
+    assert not model.ROW_RE.search(git(fleet.root, "log", "--format=%B", "main"))
 
 
-def test_a_rows_fixed_line_wrapped_like_its_body_names_every_row() -> None:
-    from orchestra import land  # noqa: PLC0415
-
-    body = (
-        "Docs: A note\n\nThe pages read the built tree.\n\n"
-        "Rows fixed: A-F23, A-F24,\nA-F25, B.2-F6.\n\n"
-        "Verified. A-F9 is mentioned here and closes nothing.\nRows fixed: A-F1\nA-F2 stays open."
+def test_a_row_routed_back_after_a_landing_is_closed_by_the_latest_report_alone(fleet: Fleet) -> None:
+    """A row an earlier round named fixed, routed back to its agent since, stays routed unless the latest round
+    names it; a row the earlier landing closed is named again without a line."""
+    tree = agent(fleet)
+    for row in ("A-F1", "A-F2", "A-F3"):
+        route(fleet, row, "WORKER")
+    write(fleet.state, "reports/WORKER.md", text("writer", "WORKER", fixed="A-F1, A-F2."))
+    commit(tree, "Docs: A note", {"notes.txt": "second\n"})
+    # A-F3, still routed to it, keeps its tree for the second round.
+    assert fleet.run("land", "WORKER")[0] == 0
+    # The coordinator finds A-F1's claim false and routes it back; the agent runs a second round.
+    route(fleet, "A-F1", "WORKER")
+    model.update_agent(
+        fleet.state,
+        "WORKER",
+        lambda held: replace(held, status="judged", reports={1: "reports/WORKER.md", 2: "reports/WORKER.2.md"}),
     )
-    assert land.fixed_rows(body) == ["A-F1", "A-F23", "A-F24", "A-F25", "B.2-F6"]
+    write(fleet.state, "reports/WORKER.2.md", text("writer", "WORKER", round_=2, fixed="A-F2, A-F3."))
+    commit(tree, "Docs: Another file", {"other.txt": "new\n"})
+    code, out, err = fleet.run("land", "WORKER")
+    assert code == 0, err
+    rows = model.read_findings(fleet.state)
+    assert [rows[row].status for row in ("A-F1", "A-F2", "A-F3")] == ["ROUTED", "FIXED", "FIXED"]
+    assert f"FIXED A-F3 by {git(fleet.root, 'rev-parse', '--short', 'HEAD')}" in out
+    assert "still routed to WORKER that no report's `Rows fixed:` line names: A-F1" in out
+    assert "A-F2" not in out
 
 
 @pytest.mark.parametrize(
@@ -169,8 +188,9 @@ def test_a_rows_fixed_line_wrapped_like_its_body_names_every_row() -> None:
 def test_a_landing_credits_every_agent_whose_branch_it_brought_in(
     fleet: Fleet, status: model.AgentStatus, turn: str, after: model.AgentStatus
 ) -> None:
-    """A merge agent's branch carries a fixer's commits: both rows close, and the fixer lands unless it still runs
-    or its report waits to be judged, a stopped one's that reads included.
+    """A merge agent's branch carries a fixer's commits: the fixer lands and its row closes unless it still runs or
+    its report waits to be judged, a stopped one's that reads included, since that report may still change or be
+    refused; its row closes when it lands itself.
     """
     fixer = agent(fleet, "FIXER", "b1")
     model.update_agent(fleet.state, "FIXER", lambda held: replace(held, status=status))
@@ -178,21 +198,32 @@ def test_a_landing_credits_every_agent_whose_branch_it_brought_in(
     # One with no transcript found is still running all the same, which only its record says.
     if turn != "unseen":
         ran(fleet, "b1", ended=turn != "mid-turn", minutes=20 if turn == "silent" else None)
-    write(fleet.state, "reports/FIXER.md", text("writer", "FIXER"))
-    commit(fixer, "Docs: A note\n\nRows fixed: A-F1.", {"notes.txt": "second\n"})
+    write(fleet.state, "reports/FIXER.md", text("writer", "FIXER", fixed="A-F1."))
+    commit(fixer, "Docs: A note", {"notes.txt": "second\n"})
     merger = agent(fleet, "MERGER", "b2")
     git(merger, "merge", "-q", "--no-ff", "worktree-agent-b1", "-m", "Merge the fixer")
-    commit(merger, "Docs: Another file\n\nRows fixed: A-F2.", {"other.txt": "new\n"})
+    write(fleet.state, "reports/MERGER.md", text("writer", "MERGER", fixed="A-F2."))
+    commit(merger, "Docs: Another file", {"other.txt": "new\n"})
     route(fleet, "A-F1", "FIXER")
     route(fleet, "A-F2", "MERGER")
     code, out, err = fleet.run("land", "MERGER")
     assert code == 0, err
     assert {row: event.status for row, event in model.read_findings(fleet.state).items()} == {
-        "A-F1": "FIXED",
+        "A-F1": "FIXED" if after == "pruned" else "ROUTED",
         "A-F2": "FIXED",
     }
     assert [model.read_agent(fleet.state, name).status for name in ("FIXER", "MERGER")] == [after, "pruned"]
     assert out.splitlines()[-1].startswith("landed MERGER, FIXER as ")
+    if after == "pruned":
+        return
+    # Its turn long over and its report judged, the fixer lands by the merge that brought it in, closing its row.
+    ran(fleet, "b1", minutes=20)
+    model.update_agent(fleet.state, "FIXER", lambda held: replace(held, status="judged"))
+    code, out, err = fleet.run("land", "FIXER")
+    assert code == 0, out + err
+    assert out.splitlines()[-1].startswith("landed FIXER as "), out
+    assert model.read_agent(fleet.state, "FIXER").status == "pruned"
+    assert model.read_findings(fleet.state)["A-F1"].status == "FIXED", out
 
 
 def test_a_landing_credits_no_agent_whose_branch_had_landed_before_it(fleet: Fleet) -> None:
@@ -202,7 +233,8 @@ def test_a_landing_credits_no_agent_whose_branch_had_landed_before_it(fleet: Fle
     route(fleet, "A-F2", "FIRST")
     assert fleet.run("land", "FIRST")[0] == 0
     second = agent(fleet, "SECOND", "c2")
-    commit(second, "Docs: Another file\n\nRows fixed: A-F2.", {"other.txt": "new\n"})
+    write(fleet.state, "reports/SECOND.md", text("writer", "SECOND", fixed="A-F2."))
+    commit(second, "Docs: Another file", {"other.txt": "new\n"})
     code, out, err = fleet.run("land", "SECOND")
     assert code == 0, err
     assert model.read_findings(fleet.state)["A-F2"].status == "ROUTED"
@@ -215,7 +247,8 @@ def test_a_branch_merged_before_its_bookkeeping_is_settled_by_landing_it_again(f
     agent(fleet, "EMPTY", "e1")
     route(fleet, "A-F3", "EMPTY")
     tree = agent(fleet)
-    commit(tree, "Docs: A note\n\nRows fixed: A-F1, A-F3.", {"notes.txt": "second\n"})
+    write(fleet.state, "reports/WORKER.md", text("writer", "WORKER", fixed="A-F1, A-F3."))
+    commit(tree, "Docs: A note", {"notes.txt": "second\n"})
     route(fleet, "A-F1", "WORKER")
     git(fleet.root, "merge", "-q", "--no-ff", "worktree-agent-a1", "-m", "Merge by hand")
     git(fleet.root, "commit", "-q", "--allow-empty", "-m", "Repo: A later landing")
@@ -232,7 +265,8 @@ def test_a_branch_merged_before_its_bookkeeping_is_settled_by_landing_it_again(f
     assert out.splitlines()[-1] == "nothing to land: the session branch already holds worktree-agent-e1"
     assert model.read_findings(fleet.state)["A-F3"].status == "ROUTED"
     fast = agent(fleet, "FAST", "f1")
-    tip = git(fleet.root, "rev-parse", "--short", commit(fast, "Docs: B\n\nRows fixed: A-F2.", {"other.txt": "b\n"}))
+    write(fleet.state, "reports/FAST.md", text("writer", "FAST", fixed="A-F2."))
+    tip = git(fleet.root, "rev-parse", "--short", commit(fast, "Docs: B", {"other.txt": "b\n"}))
     route(fleet, "A-F2", "FAST")
     git(fleet.root, "merge", "-q", "--ff-only", "worktree-agent-f1")
     code, out, err = fleet.run("land", "FAST")

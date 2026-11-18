@@ -1,8 +1,8 @@
 # Lens: tests
 
-**Question.** Can each new or changed check fail, and does it test what its name claims?
+**Question.** Can each new or changed check fail, does it test what its name claims, and does a case reach each added behaviour?
 
-**Read first.** The cases, guards and assertions the change adds or alters, then the code each one exercises.
+**Read first.** The behaviour the change adds, the cases, guards and assertions it adds or alters, then the code each exercises.
 
 **Checklist.**
 
@@ -16,11 +16,12 @@
 8. Was a timeout, retry count or tolerance raised, or a case skipped, to make it pass?
 9. Does a guard or lint rule match the violation in every spelling the tree uses?
 10. Does a changed behaviour leave an old case asserting the former one?
+11. Which added behaviour would break unnoticed with no case reaching it?
 
 **Not its business.** Whether the tested behaviour is right (`data`, `security`, `contract`), whether a case is needed (`necessity`).
 
 **Silent.** Yes: a case that cannot fail is green forever.
 
-**Applies.** paths `**/tests/**`, `**/test/**`, `**/test_*`, `**/*_test.*`, `**/*.test.*`, `**/*.spec.*`.
+**Applies.** paths `**` except `**/*.md`.
 
 **Run by.** driver.

@@ -14,9 +14,10 @@
 6. A test case is `necessity`'s to judge; judge here a test helper or fixture.
 7. Is an abstraction drawn from fewer than three real instances?
 8. Does a documented standard way replace something hand-built here?
-9. Does a comment or document restate what the code says?
+9. Is a fact kept twice, as a comment or document restating the code?
 10. Was it added only to close a finding, with no harm named?
 11. What could be deleted with the change still meeting its goal?
+12. Does it add a second way to do a job, a fix at a symptom rather than its cause, a switched-off check, or production code only a test calls?
 
 Record a mechanism whose harm is unlikely or already seen as a finding whose repair is its removal: `defect` where the goals rule it out, `optional` otherwise.
 

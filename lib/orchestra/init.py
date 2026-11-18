@@ -60,6 +60,12 @@ def add(verb: str, parser: argparse.ArgumentParser) -> None:
         parser.add_argument(
             "--rulings-from", type=int, metavar="N", help="the number the programme's first ruling takes"
         )
+        # A programme's sessions branch from its own branch, which belongs in no file every collaborator shares.
+        parser.add_argument(
+            "--base",
+            metavar="BRANCH",
+            help="the branch the session is cut from, recorded as its base; the configuration's `base` unless given",
+        )
 
 
 def run(args: argparse.Namespace) -> int:
@@ -88,13 +94,6 @@ def init(args: argparse.Namespace) -> int:
         raise Refused(
             f"branch {here.branch} already holds the session {held}: resume it, or cut a new branch for a new session"
         )
-    base = settings.base
-    try:
-        base_commit = config.git(here.root, "merge-base", "HEAD", base).strip()
-    except Refused:
-        raise Refused(
-            f"`base` is {base}, which shares no commit with HEAD here: set `base` in {config.CONFIG_FILE.as_posix()}"
-        ) from None
     state = _state_root(settings.state_root_path(here.root), here.root, Path(programme, session))
     if args.programme is None and (others := _other_checkouts(state.parent, here.root)):
         raise Refused(
@@ -102,6 +101,7 @@ def init(args: argparse.Namespace) -> int:
             f" {', '.join(others)}, or of this one before it moved: give this project a programme of its own"
             f" with `--programme <name>`, or join that one with `--programme {programme}`"
         )
+    base, base_commit, source = _base(here.root, here.branch, args.base, settings.base)
     state.parent.mkdir(parents=True, exist_ok=True)
     try:
         state.mkdir()
@@ -125,9 +125,8 @@ def init(args: argparse.Namespace) -> int:
         model.write_session(state, facts)
         store.write_text(state / store.PLAN, "# Plan\n\n" + "\n\n".join(PLAN_HEADINGS) + "\n")
         store.write_text(state / store.NOW, "# Now\n\n" + "\n".join(NOW_LABELS) + "\n")
-        log.record(
-            state, "init", f"session {programme}/{session} on {here.branch}, based on {base} at {base_commit[:9]}"
-        )
+        started = f"session {programme}/{session} on {here.branch}, based on {base} ({source}) at {base_commit[:9]}"
+        log.record(state, "init", started)
         # The programme's folder alone: a grant of the whole root would open every other project's state too.
         # Before the pointer, so a grant that faults leaves no session and `init` runs again.
         said = grant(here.root, state.parent)
@@ -135,9 +134,56 @@ def init(args: argparse.Namespace) -> int:
     except BaseException:
         shutil.rmtree(state, ignore_errors=True)
         raise
-    print(f"session {programme}/{session} on {here.branch}: {state}")
+    print(f"{started}: {state}")
     print(said)
     return doctor(args)
+
+
+def _base(root: Path, head: str, given: str | None, configured: str) -> tuple[str, str, str]:
+    """The session's base, the commit where HEAD leaves it, and where the base was named; refused where unusable.
+
+    `head` is the branch checked out. `given` is `--base`; without it, the configuration's `base`, and a branch
+    holding commits that base lacks, as one cut from a programme's branch does, is refused below, naming `--base`.
+    """
+    if given is not None:
+        base, source = given, "named by --base"
+    else:
+        base, source = configured, "the configuration's base"
+    # A clone holding no branch of that name, which no edit of the shared configuration repairs. A local branch
+    # alone, so the record holds its short name, by which `prune` spares the base among the branches it deletes:
+    # `show-ref --verify` takes an exact ref path (git-show-ref(1)), where `rev-parse` reads a suffix such as
+    # `~0` or `^` after it as another commit (gitrevisions(7)).
+    branch = f"refs/heads/{base}"
+    if config.run_git(root, "show-ref", "--verify", "--quiet", branch).returncode != 0:
+        remote = f"refs/remotes/origin/{base}"
+        if config.run_git(root, "show-ref", "--verify", "--quiet", remote).returncode == 0:
+            raise Refused(
+                f"the base {base} ({source}) is no branch in this clone: make it from origin's with"
+                f" `git branch {base} origin/{base}`, and run init again"
+            )
+        raise Refused(
+            f"the base {base} ({source}) is no branch in this clone, nor is origin/{base}: fetch it,"
+            " or name the branch this session is cut from with `--base <branch>`"
+        )
+    try:
+        base_commit = config.git(root, "merge-base", "HEAD", branch).strip()
+    except Refused:
+        shared = f", or set `base` in {config.CONFIG_FILE.as_posix()} for the project"
+        raise Refused(
+            f"the base {base} ({source}) shares no commit with HEAD here: name the branch this session is cut from"
+            f" with `--base <branch>`{shared if given is None else ''}"
+        ) from None
+    # A session's branch is cut from its base just before `init`, so it holds nothing the base does not. One that
+    # does was cut from another branch, as a programme's session is from the programme's branch, and the base
+    # recorded here would count that branch's work as the session's own; only `--base` names such a base.
+    ahead = 0 if given is not None else int(config.git(root, "rev-list", "--count", f"{base_commit}..HEAD"))
+    if ahead:
+        raise Refused(
+            f"{head} holds {ahead} commit{'s' if ahead > 1 else ''} {base} does not, so a session based on {base}"
+            f" ({source}) would count them as its own: name the branch it was cut from with `--base <branch>`,"
+            f" or `--base {base}` to keep it"
+        )
+    return base, base_commit, source
 
 
 def _other_checkouts(folder: Path, root: Path) -> list[str]:
