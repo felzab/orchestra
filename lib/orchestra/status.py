@@ -281,7 +281,8 @@ def _findings(state: Path, root: Path) -> tuple[int, list[str]]:
     routes: dict[str, set[str]] = {}
     for record in store.read_jsonl(state / store.FINDINGS):
         owner = record.get("owner")
-        if record.get("kind") == "route" and owner not in queues:
+        # The status, not the kind: a row closed FIXED goes to its next fixer by a `reopen` event.
+        if record.get("status") == "ROUTED" and owner not in queues:
             routes.setdefault(str(record.get("row")), set()).add(str(owner))
     owners: dict[str, list[str]] = {}
     unclosed = 0

@@ -283,7 +283,6 @@ def run(args: argparse.Namespace) -> int:
         if args.type or args.slice:
             raise Refused("--check takes the name alone: the header already names the type and the slice")
         return check(args, state, here.root, args.name)
-    # A reader or a driver lands no file a slice owns, so it may run outside the plan, as a review or a probe does.
     slice_ = args.slice if args.slice is not None or args.type == SLICED else NONE
     if not args.type or not slice_ or not slice_.strip():
         raise Refused("a new brief needs --type, and --slice for a writer; `--check` checks one written")
@@ -441,7 +440,11 @@ def _changed(root: Path, branch: str, ref: str, tree: Path | None) -> set[str]:
     except Refused:
         paths |= set(config.git(root, "diff", "-z", "--name-only", f"refs/heads/{branch}...{ref}").split("\0"))
     if tree is not None and tree.is_dir():
-        entries = iter(config.git(tree, "status", "--porcelain", "-z", "--untracked-files=all").split("\0"))
+        # Without `core.longpaths`, Git for Windows with the `core.fscache` its installer sets reads a path past 260
+        # characters, as a frozen tree under the state's long folder holds, as deleted and still exits 0; other
+        # platforms ignore the key.
+        listed = config.git(tree, "-c", "core.longpaths=true", "status", "--porcelain", "-z", "--untracked-files=all")
+        entries = iter(listed.split("\0"))
         for entry in entries:
             paths.add(entry[3:])
             # A rename or a copy names its source in the entry after it.
