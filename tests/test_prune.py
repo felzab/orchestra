@@ -161,7 +161,7 @@ def test_each_agent_is_judged_by_its_record_its_rows_its_branch_and_its_tree(fle
 
     code, out, err = fleet.run("prune")
 
-    assert code == 0, err
+    assert code == 0, (out, err)
     assert f"removed {landed} and worktree-agent-a1 (LANDED)" in out
     assert f"removed {empty} and worktree-agent-b2 (EMPTY)" in out
     # A crashed session's agent reads as working until the time named, so the coordinator waits for it.
@@ -195,7 +195,7 @@ def test_the_caller_returns_before_a_large_tree_is_gone(fleet: Fleet) -> None:
     trash = fleet.root / ".claude" / "worktrees" / TRASH
     # Read before anything else: a caller that deleted the tree itself would find no entry here.
     held = [entry.name for entry in trash.iterdir()] if trash.is_dir() else []
-    assert code == 0, err
+    assert code == 0, (out, err)
     assert not tree.exists()
     assert len(held) == 1, held
     assert held[0].startswith("agent-b1-"), held
@@ -209,8 +209,8 @@ def test_a_read_only_file_in_a_tree_is_deleted(fleet: Fleet) -> None:
     tree = add_agent(fleet, "LOCKED", "c1", "landed")
     path = write(tree, "node_modules/x/read-only.js", "x")
     path.chmod(stat.S_IREAD)
-    code, _, err = fleet.run("prune")
-    assert code == 0, err
+    code, out, err = fleet.run("prune")
+    assert code == 0, (out, err)
     trash = fleet.root / ".claude" / "worktrees" / TRASH
     wait_gone(trash)
     assert not tree.exists()
@@ -243,7 +243,7 @@ def test_a_folder_git_no_longer_lists_goes_unless_its_agent_runs(fleet: Fleet) -
     unknown = fleet.tree("e3")
     write(unknown, "file.txt", "x")
     code, out, err = fleet.run("prune")
-    assert code == 0, err
+    assert code == 0, (out, err)
     assert f"removed {gone} and worktree-agent-e1 (HALF)" in out
     assert f"kept {live} (LIVE): its transcript is mid-turn, written 0 min ago" in out
     assert f"left {unknown} git lists none: no agent of this session holds it" in out
@@ -261,7 +261,7 @@ def test_the_frozen_trees_of_lens_rounds_go_at_the_ending(fleet: Fleet) -> None:
     assert f"left {frozen} detached at {head[:9]}" in out
     assert frozen.exists()
     code, out, err = fleet.run("prune", "--ending")
-    assert code == 0, err
+    assert code == 0, (out, err)
     assert f"removed {frozen}: the frozen tree of a lens round" in out
     assert out.splitlines()[-1] == "prune: removed 1, kept 0"
     assert not frozen.exists()
@@ -289,8 +289,8 @@ def test_a_junction_in_a_tree_is_unlinked_and_its_target_left_whole(fleet: Fleet
     target = write(fleet.root.parent, "installs/kept.js", "x").parent
     tree = add_agent(fleet, "LINKED", "g1", "landed")
     _winapi.CreateJunction(str(target), str(tree / "node_modules"))
-    code, _, err = fleet.run("prune")
-    assert code == 0, err
+    code, out, err = fleet.run("prune")
+    assert code == 0, (out, err)
     wait_gone(fleet.root / ".claude" / "worktrees" / TRASH)
     assert (target / "kept.js").exists()
 
@@ -358,8 +358,8 @@ def test_a_path_past_windows_limit_is_deleted(fleet: Fleet) -> None:
     # Windows takes a path past its limit through this prefix, whatever the machine's setting.
     Path("\\\\?\\" + str(deep)).mkdir(parents=True)
     Path("\\\\?\\" + str(deep / "f.js")).write_bytes(b"x")
-    code, _, err = fleet.run("prune")
-    assert code == 0, err
+    code, out, err = fleet.run("prune")
+    assert code == 0, (out, err)
     wait_gone(fleet.root / ".claude" / "worktrees" / TRASH)
     assert not tree.exists()
 
@@ -391,7 +391,7 @@ def test_a_stopped_writer_with_no_tree_and_no_branch_left_is_settled(fleet: Flee
     write_agent(fleet.state, model.Agent("LOST", "writer", status="stopped", ids=("s1",)))
     ran(fleet, "s1")
     code, out, err = fleet.run("prune")
-    assert code == 0, err
+    assert code == 0, (out, err)
     assert "settled GONE: nothing of it is left" in out
     assert model.read_agent(fleet.state, "GONE").status == "pruned"
     # A reader runs in the coordinator's checkout and has no tree to lose: a resume still reaches it.
@@ -415,7 +415,7 @@ def test_discard_removes_one_agents_tree_and_branch_whatever_they_hold(fleet: Fl
     assert f"kept {dead} (DEAD): rows are routed to it: DEAD-F1" in out
     route(fleet, "DEAD-F1", "ending")
     code, out, err = fleet.run("prune", "--discard", "DEAD")
-    assert code == 0, err
+    assert code == 0, (out, err)
     assert f"removed {dead} and worktree-agent-h1 (DEAD)" in out
     assert out.splitlines()[-1] == "prune: removed 1, kept 0"
     assert model.read_agent(fleet.state, "DEAD").status == "pruned"
@@ -427,11 +427,11 @@ def test_discard_removes_one_agents_tree_and_branch_whatever_they_hold(fleet: Fl
     live = add_agent(fleet, "LIVE", "h3", "running", {"other.txt": "live\n"})
     route(fleet, "LIVE-F1", "LIVE")
     code, out, err = fleet.run("prune")
-    assert code == 0, err
+    assert code == 0, (out, err)
     assert f"kept {live} (LIVE): its record is running, and no transcript found for h3" in out
     assert fleet.run("route", "ending", "LIVE-F1")[0] == 2
     code, out, err = fleet.run("prune", "--discard", "LIVE")
-    assert code == 0, err
+    assert code == 0, (out, err)
     assert "LIVE's rows route once it is settled: LIVE-F1" in out
     assert f"removed {live} and worktree-agent-h3 (LIVE)" in out
     assert model.read_agent(fleet.state, "LIVE").status == "pruned"
@@ -445,7 +445,7 @@ def test_a_discard_of_a_landed_agent_keeps_its_landing_due(fleet: Fleet) -> None
     ran(fleet, "m1")
     (item,) = model.write_queue(fleet.state, lambda _: [model.QueueItem(1, "landed", "push", "DONE")])
     code, out, err = fleet.run("prune", "--discard", "DONE")
-    assert code == 0, err
+    assert code == 0, (out, err)
     assert f"removed {tree} and worktree-agent-m1 (DONE)" in out
     agent = model.read_agent(fleet.state, "DONE")
     assert (agent.status, agent.reason) == ("pruned", None)
@@ -461,7 +461,7 @@ def test_a_report_waiting_keeps_its_agents_tree_discarded_or_not(fleet: Fleet) -
     ran(fleet, "k2")
     for args in (("prune",), ("prune", "--discard", "WAITS")):
         code, out, err = fleet.run(*args)
-        assert code == 0, (args, err)
+        assert code == 0, (args, out, err)
         said = "WAITS's round 1 report is not judged: `orchestra judge WAITS` banks its findings first"
         assert f"kept {waits} (WAITS): {said}" in out
     assert (
@@ -481,7 +481,7 @@ def test_a_report_waiting_keeps_its_agents_tree_discarded_or_not(fleet: Fleet) -
     assert f"removed {halted} and worktree-agent-k3 (HALTED)" in fleet.run("prune", "--discard", "HALTED")[1]
     model.update_agent(fleet.state, "WAITS", lambda held: replace(held, status="judged"))
     code, out, err = fleet.run("prune")
-    assert code == 0, err
+    assert code == 0, (out, err)
     assert f"removed {waits} and worktree-agent-k1 (WAITS)" in out
     assert asks.exists()
 
@@ -506,7 +506,7 @@ def test_a_report_arriving_during_a_prune_keeps_its_record(fleet: Fleet) -> None
     write(hooks, "reference-transaction", hook).chmod(0o755)
     git(fleet.root, "config", "core.hooksPath", hooks.as_posix())
     code, out, err = fleet.run("prune")
-    assert code == 0, err
+    assert code == 0, (out, err)
     assert f"removed {late} and worktree-agent-l1 (LATE)" in out
     assert "kept LATE's record: it became reported during the prune" in out
     assert model.read_agent(fleet.state, "LATE").status == "reported"
@@ -523,7 +523,7 @@ def test_no_prune_deletes_the_session_branch_or_the_base(tmp_path: Path, make_re
         write_agent(fleet.state, model.Agent(name, "writer", status="stopped", branch=branch))
     for args in (("prune",), ("prune", "--discard", "ONSESSION"), ("prune", "--discard", "ONBASE")):
         code, out, err = fleet.run(*args)
-        assert code == 0, (args, err)
+        assert code == 0, (args, out, err)
     assert "kept main (ONBASE): it is the session's branch or its base, which prune never deletes" in out
     assert git(root, "for-each-ref", "--format=%(refname:short)", "refs/heads/").split() == ["main", "step"]
     assert [model.read_agent(fleet.state, name).status for name in ("ONSESSION", "ONBASE")] == ["stopped", "stopped"]
