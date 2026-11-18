@@ -283,7 +283,7 @@ def run(args: argparse.Namespace) -> int:
         if args.type or args.slice:
             raise Refused("--check takes the name alone: the header already names the type and the slice")
         return check(args, state, here.root, args.name)
-    slice_ =args.slice if args.slice is not None or args.type == SLICED else NONE
+    slice_ = args.slice if args.slice is not None or args.type == SLICED else NONE
     if not args.type or not slice_ or not slice_.strip():
         raise Refused("a new brief needs --type, and --slice for a writer; `--check` checks one written")
     return write(state, here.root, args.name, args.type, cli.one_line(slice_))
