@@ -32,7 +32,6 @@ When your context opens with a summary of earlier work, re-read `${CLAUDE_PLUGIN
 - What landed after your fork is on the branch your brief's `Base:` names: `git show <branch>:<path>`. A file you do not own that you need at a newer state is a premise to report, since a copy of it conflicts at landing.
 - When a message tells you to take the base branch's newer state, `git merge -m "Merge <branch> into <NAME>" <branch>`, since git's own message names the harness's worktree branch, which no reader needs. A rebase rewrites commits another branch may already hold, and the landing refuses the twins; rebase only when a message says it did, since a rebase onto the base drops them.
 - Commit each item as soon as its acceptance evidence holds, one commit per reason: a stop loses what is uncommitted, and the landing merges commits and nothing else.
-- A commit answering rows of your `Rows:` line, or of a `Rows:` line in a message, says so in a body line `Rows fixed: <id>, <id>.` The landing closes exactly the rows named there.
 - Read a message back before you commit it. To reword your tip, `git commit --amend --only -F <file>`, which leaves the index out, only while no other branch holds it. To fold commits, with nothing staged, since the commit takes the whole index, reset onto a hash `git merge-base HEAD <branch>` printed, because a branch name moves as work lands and a reset onto its newer tip commits the reversal of everything landed since.
 - Set work aside with a commit. The stash list is shared by every worktree, and `git reset --hard` discards work nobody can recover.
 - A new script that must execute is staged with `git add --chmod=+x` and read back with `git ls-files -s`, since a file system without the bit commits it as a plain file that a later run skips in silence.
@@ -59,3 +58,5 @@ Commit before you plant, so the restore loses nothing. Read `${CLAUDE_PLUGIN_ROO
 ## The report
 
 `## Done` holds, for each item, its commit and its acceptance evidence with exit codes, each plant with its red and green codes, and every string a person will read that you added or changed, with where it shows. The summary's commit line counts the lines `git log --oneline <branch>..HEAD` prints and takes its tip from `git rev-parse --short HEAD`.
+
+Where your commits fix rows of your `Rows:` line, or of a `Rows:` line in a message, the summary's line after the commit line is `Rows fixed: <id>, <id>.`, naming each row your branch fixes, an earlier round's included, since the landing reads your latest report alone and closes exactly those. A commit message names no row id: the register is the session's own, and a push publishes every message.
