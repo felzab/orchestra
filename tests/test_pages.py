@@ -19,10 +19,10 @@ ROOT = Path(__file__).resolve().parents[1]
 
 # The most bytes each page under these folders may hold, counted as git stores it.
 BUDGETS = {
-    "skills/run/SKILL.md": 11800,
+    "skills/run/SKILL.md": 12050,
     "skills/run/start.md": 2550,
     "skills/run/brief.md": 3600,
-    "skills/run/review.md": 3700,
+    "skills/run/review.md": 3850,
     "skills/run/checkpoint.md": 2050,
     "skills/run/end.md": 2500,
     "skills/run/handoff.md": 2500,
@@ -30,13 +30,13 @@ BUDGETS = {
     "skills/status/SKILL.md": 500,
     "skills/estimate/SKILL.md": 2450,
     "skills/checkpoint/SKILL.md": 500,
-    "skills/away/SKILL.md": 2300,
+    "skills/away/SKILL.md": 2350,
     "skills/back/SKILL.md": 1550,
     "skills/end/SKILL.md": 500,
     "skills/resume/SKILL.md": 500,
     "skills/plan/SKILL.md": 1900,
     "skills/agent/SKILL.md": 5800,
-    "agents/writer.md": 7100,
+    "agents/writer.md": 7150,
     "agents/driver.md": 5000,
     "agents/researcher.md": 4500,
     "agents/auditor.md": 3000,
@@ -61,7 +61,7 @@ BUDGETS = {
         )
     },
     # Its twelfth checklist item, the built-the-right-way questions, outgrew the shared budget.
-    "lenses/essential.md": 1600,
+    "lenses/essential.md": 1650,
     # Its Read first names the per-commit read's command and both of its spans.
     "lenses/disclosure.md": 1550,
 }

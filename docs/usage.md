@@ -16,16 +16,21 @@ Three settings make a project ready, each in the project's `.claude/settings.jso
   `gate`, `land.steps`, `preflight` and `claude` name too, since `orchestra` runs them.
 - **The plugin enabled at project scope**, which [the install](../README.md#install) writes.
 
-Claude Code applies a project's permission rules only in a folder you have trusted, so start one
-interactive session in a new clone and accept its trust prompt: a headless or Agent SDK session in a
-folder never trusted was seen refusing `orchestra` despite the rule.
-
 ```json
 {
   "worktree": { "baseRef": "head" },
   "permissions": { "allow": ["Bash(orchestra *)"] }
 }
 ```
+
+Claude Code applies the `allow` rules of a project's `.claude/settings.json` only in a folder you
+have trusted, and a headless or Agent SDK session shows no trust prompt (the
+[permissions page](https://code.claude.com/docs/en/permissions), "Project allow rules and workspace
+trust"), so start one interactive session in a new clone and accept its trust prompt.
+
+On Windows, run `git config --global core.longpaths true` once: the frozen tree `diff --tree` makes
+sits deep under the state folder, and a git command an agent runs there without the key reads a
+path past 260 characters as deleted, with exit code 0.
 
 Add `.claude/worktrees/` to `.gitignore`: Claude Code puts the agents' worktrees there. Commit
 `.claude/settings.json` and `.gitignore` before the first session, and keep
@@ -78,11 +83,10 @@ yourself before its context passes 500,000 tokens, which `/context` shows.
 a session. It takes three options:
 
 - `--base`, the branch the session is cut from, named by its local branch's short name. Without it,
-  a session takes the base of its programme's newest session made in this checkout, else the
-  configuration's `base`, so a programme whose sessions branch from a branch of their own names it
-  on its first session alone. Without it, too, `init` refuses a branch that already holds commits
-  that base does not, as a branch cut from another one does. Its first line names the base, where
-  it came from and its commit, and `orchestra log` keeps that line.
+  a session takes the configuration's `base`, and `init` refuses a branch that already holds
+  commits that base does not, as a branch cut from another one does, so a programme whose sessions
+  branch from a branch of their own names it on each session. `init`'s first line names the base,
+  where it came from and its commit, and `orchestra log` keeps that line.
 - `--programme`, the name of the larger piece of work the session belongs to, which defaults to the
   primary checkout's folder name, and which `init` refuses to default where that programme's folder
   holds sessions of another checkout, so an unrelated clone sharing the folder name gets a programme
@@ -296,8 +300,8 @@ does not know is refused, naming its path in the file.
   [where the state lives](#where-the-state-lives) names. `init` refuses the home folder, a folder
   holding it, a file system's root and a folder inside the checkout, and a folder under `.claude`
   makes every agent's report write prompt.
-- **`base`** is the branch a session branch is cut from, `main` by default, where neither
-  `init --base` nor an earlier session of the programme in this checkout names one. `init` records
+- **`base`** is the branch a session branch is cut from, `main` by default;
+  [`init`'s `--base`](#starting-a-session) names another for one session. `init` records
   the commit where the session branch leaves it, and refuses a base this clone has no local branch
   of, naming `git branch <base> origin/<base>` where `origin` has it.
 - **`models`** maps a profile's name to a `model` alias (`opus`, `sonnet`, `haiku` or `fable`) and an
@@ -376,10 +380,7 @@ default `stateRoot` is the `orchestra` folder in the platform's folder for a use
 data: `%LOCALAPPDATA%` on Windows, `~/Library/Application Support` on macOS, and `$XDG_DATA_HOME` or
 `~/.local/share` elsewhere. Uninstalling the plugin leaves it in place. Under the desktop app on
 Windows, the folder can sit in the app's own packaged AppData instead, where Windows redirects a
-packaged app's writes; the first line of `orchestra status` names the folder in use. On Windows,
-run `git config --global core.longpaths true` once: the frozen tree `diff --tree` makes sits deep
-under this folder, and a git command an agent runs there without the key reads a path past 260
-characters as deleted, with exit code 0.
+packaged app's writes; the first line of `orchestra status` names the folder in use.
 
 `init` writes the folder's path into `<git common dir>/orchestra/<branch>`, the branch name
 URL-quoted, a file no commit carries and every worktree of the clone shares, so every command finds
