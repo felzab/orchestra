@@ -242,8 +242,12 @@ class _Reader:
     def summary(self, start: int, end: int, items: re.Pattern[str]) -> _Summary:
         """The summary's parts, each line of it read in its place."""
         rows = self.filled(start + 1, end)
-        # Only the lines around the findings count, so a review with many findings still fits.
-        fixed = "\n".join(line for _, line in rows if not items.fullmatch(line))
+        # Only the lines around the findings count, so a review with many findings still fits; a writer's
+        # `Rows fixed:` line grows with its branch's rows as they do, so it is left out too.
+        listed = self.type == FIXING
+        fixed = "\n".join(
+            line for _, line in rows if not items.fullmatch(line) and not (listed and line.startswith(ROWS_FIXED))
+        )
         if (size := len(fixed.encode("utf-8"))) > SUMMARY_BYTES:
             self.fault(
                 start, f"the summary's fixed lines hold {size} bytes, over {SUMMARY_BYTES}: keep each to its part"
@@ -265,7 +269,7 @@ class _Reader:
         count, tip = self.commits(*commits)
         claimed: tuple[str, ...] = ()
         # Only a writer's branch lands; any other's line, a driver's included, is faulted below as no item line.
-        if self.type == FIXING and middle and middle[0][1].startswith(ROWS_FIXED):
+        if listed and middle and middle[0][1].startswith(ROWS_FIXED):
             claimed = self.fixed(*middle.pop(0))
         return _Summary(status, reason, count, tip, self.named(middle, items), claimed)
 

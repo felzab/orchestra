@@ -130,6 +130,17 @@ def test_a_writers_optional_rows_fixed_line_names_its_rows_each_faulted_where_it
         assert any(problem.startswith("line 7 `Rows fixed: A-F2.`: no item line") for problem in found), (kind, found)
 
 
+def test_a_writers_rows_fixed_line_is_left_out_of_the_summarys_byte_cap() -> None:
+    """The line names every row the branch fixes, an earlier round's included, so it grows with the work as the
+    item lines do: sixty rows pass beside a sentence that fits the cap only without them."""
+    sentence = "Built the store's writes" + ", and its reads" * 45 + "."
+    rows = ", ".join(f"REVIEW.2-F{n}" for n in range(1, 61))
+    held, said = report.parse(text(fixed=f"{rows}.").replace("Built the store's writes.", sentence), "writer", "FE", 1)
+    assert said == []
+    assert held is not None
+    assert len(held.rows) == 60
+
+
 def test_a_report_with_no_finding_holds_none() -> None:
     written = (
         text().split("## Findings")[0] + "## Findings\nnone\n\n## Not verified" + text().split("## Not verified")[1]
