@@ -2,7 +2,7 @@
 
 **Question.** Does anything the change publishes name a person, a machine, a private project or a credential? A public push cannot be taken back, and a commit message is changed only by rewriting history.
 
-**Read first.** The project's statement of what it publishes, where it keeps one; with none, list each name the change publishes in the report, for the coordinator to put to the owner. Then the diff and every commit message of the span, which the capture writes beside the diff, and each unpushed commit's own change, `git log -p <the remote branch>..<the tip>` (from the session's base before the first push), since a push publishes every commit, not only the net diff.
+**Read first.** The project's statement of what it publishes, where it keeps one; with none, list each name the change publishes in the report, for the coordinator to put to the owner. Then, after the first push, at a push's gate, `git log -p @{upstream}..HEAD` alone, each earlier push read at its own; otherwise the span's diff and commit messages, written beside it, and each commit's change from the base, since a push publishes every commit, not only the net diff.
 
 **Checklist.**
 

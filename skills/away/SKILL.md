@@ -17,7 +17,7 @@ Reply once and ask nothing:
 
 - what runs while the owner is away;
 - when a usage stop is due by the `usage` rows above (or the app's `get_usage` where they read unknown), and that a weekly limit continues only on the owner's word;
-- that after a usage limit resets a terminal session continues by itself, a desktop app session only where its limit card's "Auto-continue when limits reset" box is ticked, and that no prompt this session schedules wakes it;
+- that after a five-hour limit resets a terminal session continues by itself unless the machine slept past the reset, a desktop app session only where its limit card's "Auto-continue when limits reset" box is ticked, and that a prompt it schedules is no wake to rely on;
 - what will wait for the owner;
 - that a call no permission rule or mode allows is now refused where it used to prompt, so before leaving the owner accepts edits by mode or allows `Edit` and `Write`, and allows `Bash(orchestra *)` (which also allows each program the configuration names), the `git` and `gh` commands a commit, a push and a pull request run, and each check and install the project's addenda name;
 - that this session and its agents are refused, other sessions here only while a hook faults;

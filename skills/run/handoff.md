@@ -1,6 +1,6 @@
 # The handoff and the next starter
 
-A handoff tells the next session what this one believed and how much of it was verified. Write it once, from the state and from commands, into the programme's folder, the one holding this session's state. A pause inside a session needs none: `NOW.md` serves it. A session's plan, handoff and starter describe the session, so they may narrate it, where a project's other documents state only what is true.
+A handoff tells the next session what this one believed and how much of it was verified. Write it once, from the state and from commands, into the programme's folder, the one holding this session's state. A pause inside a session needs none: `NOW.md` serves it.
 
 ## The handoff's sections
 
