@@ -34,6 +34,9 @@ DEFAULT = "default"
 SECTIONS = ("GOAL", "WORK", "PREMISES", "TRAPS")
 NONE = "none"
 NEW = "(new)"
+# The one type whose brief needs a slice of the plan: a writer's commits land. A reader changes no file,
+# and a driver plants in its own worktree and lands nothing, so either may work outside the plan.
+SLICED = "writer"
 
 FIRST_RE = re.compile(
     r"^Agent:[ \t]*(?P<agent>\S*)[ \t]+Type:[ \t]*(?P<type>\S*)[ \t]+Slice:[ \t]*(?P<slice>.*?)[ \t]*$"
@@ -262,7 +265,11 @@ def add(_verb: str, parser: argparse.ArgumentParser) -> None:
     parser.add_argument("name", help="the agent's name: upper-case letters, digits and hyphens")
     parser.add_argument("--type", choices=typing.get_args(model.AgentType), help="the agent's type")
     parser.add_argument(
-        "--slice", help=f"the plan's slice the agent works on; a reader's is `{NONE}` unless given, a slice of no plan"
+        "--slice",
+        help=(
+            f"the plan's slice the agent works on; a reader's or a driver's is `{NONE}` unless given,"
+            " a slice of no plan"
+        ),
     )
     parser.add_argument(
         "--check", action="store_true", help="check the brief and stamp it, or refuse naming each fault"
@@ -276,10 +283,10 @@ def run(args: argparse.Namespace) -> int:
         if args.type or args.slice:
             raise Refused("--check takes the name alone: the header already names the type and the slice")
         return check(args, state, here.root, args.name)
-    # A reader changes no file a slice owns, so it may run outside the plan, as a review or a question does.
-    slice_ = args.slice if args.slice is not None or args.type in report.COMMITTING else NONE
+    # A reader or a driver lands no file a slice owns, so it may run outside the plan, as a review or a probe does.
+    slice_ = args.slice if args.slice is not None or args.type == SLICED else NONE
     if not args.type or not slice_ or not slice_.strip():
-        raise Refused("a new brief needs --type, and --slice for a writer or a driver; `--check` checks one written")
+        raise Refused("a new brief needs --type, and --slice for a writer; `--check` checks one written")
     return write(state, here.root, args.name, args.type, cli.one_line(slice_))
 
 
@@ -546,8 +553,8 @@ def _read(state: Path, name: str) -> bytes:
         return store.read_bytes(path)
     except FileNotFoundError:
         raise Refused(
-            f"{name} has no brief at {path}: `orchestra brief {name} --type T`, with `--slice S` for a writer"
-            " or a driver, writes one"
+            f"{name} has no brief at {path}: `orchestra brief {name} --type T`, with `--slice S` for a writer,"
+            " writes one"
         ) from None
 
 

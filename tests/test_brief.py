@@ -87,7 +87,15 @@ def test_a_reader_is_briefed_outside_the_plan_with_no_slice_and_a_writer_is_not(
     assert "agent READER: on no slice" not in inprocess("status", cwd=project).stdout
     refused = inprocess("brief", "WRITER", "--type", "writer", cwd=project)
     assert refused.returncode == 2
-    assert "a new brief needs --type, and --slice for a writer or a driver" in refused.stderr
+    assert "a new brief needs --type, and --slice for a writer; `--check` checks one written" in refused.stderr
+
+
+def test_a_driver_is_briefed_outside_the_plan_with_no_slice(project: Path, state: Path) -> None:
+    """A driver plants in its own worktree and lands nothing, so the review's `use` driver needs no slice."""
+    done = inprocess("brief", "PROBE", "--type", "driver", cwd=project)
+    assert done.returncode == 0, done.stderr
+    assert brief.header(state, "PROBE").slice == "none"
+    assert done.stdout.splitlines()[1].startswith("PROBE briefed as a driver on none:")
 
 
 def test_a_whole_brief_is_stamped_and_an_edit_unstamps_it(project: Path, state: Path) -> None:
