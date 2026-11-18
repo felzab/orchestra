@@ -150,11 +150,13 @@ def _base(root: Path, head: str, given: str | None, configured: str) -> tuple[st
     else:
         base, source = configured, "the configuration's base"
     # A clone holding no branch of that name, which no edit of the shared configuration repairs. A local branch
-    # alone, so the record holds its short name, by which `prune` spares the base among the branches it deletes.
+    # alone, so the record holds its short name, by which `prune` spares the base among the branches it deletes:
+    # `show-ref --verify` takes an exact ref path (git-show-ref(1)), where `rev-parse` reads a suffix such as
+    # `~0` or `^` after it as another commit (gitrevisions(7)).
     branch = f"refs/heads/{base}"
-    if config.run_git(root, "rev-parse", "--verify", "--quiet", f"{branch}^{{commit}}").returncode != 0:
+    if config.run_git(root, "show-ref", "--verify", "--quiet", branch).returncode != 0:
         remote = f"refs/remotes/origin/{base}"
-        if config.run_git(root, "rev-parse", "--verify", "--quiet", f"{remote}^{{commit}}").returncode == 0:
+        if config.run_git(root, "show-ref", "--verify", "--quiet", remote).returncode == 0:
             raise Refused(
                 f"the base {base} ({source}) is no branch in this clone: make it from origin's with"
                 f" `git branch {base} origin/{base}`, and run init again"
