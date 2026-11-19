@@ -19,23 +19,23 @@ ROOT = Path(__file__).resolve().parents[1]
 
 # The most bytes each page under these folders may hold, counted as git stores it.
 BUDGETS = {
-    "skills/run/SKILL.md": 12050,
-    "skills/run/start.md": 2550,
-    "skills/run/brief.md": 3600,
-    "skills/run/review.md": 3850,
+    "skills/run/SKILL.md": 12500,
+    "skills/run/start.md": 2650,
+    "skills/run/brief.md": 3750,
+    "skills/run/review.md": 5050,
     "skills/run/checkpoint.md": 2050,
-    "skills/run/end.md": 2500,
-    "skills/run/handoff.md": 2500,
+    "skills/run/end.md": 2600,
+    "skills/run/handoff.md": 2600,
     "skills/run/resume.md": 4400,
     "skills/status/SKILL.md": 500,
-    "skills/estimate/SKILL.md": 2450,
+    "skills/estimate/SKILL.md": 2800,
     "skills/checkpoint/SKILL.md": 500,
     "skills/away/SKILL.md": 2350,
     "skills/back/SKILL.md": 1550,
     "skills/end/SKILL.md": 500,
     "skills/resume/SKILL.md": 500,
     "skills/plan/SKILL.md": 1900,
-    "skills/agent/SKILL.md": 5800,
+    "skills/agent/SKILL.md": 6500,
     "agents/writer.md": 7150,
     "agents/driver.md": 5000,
     "agents/researcher.md": 4500,
@@ -69,6 +69,22 @@ BUDGETED = ("skills/", "agents/", "lenses/")
 READ = (*BUDGETED, "docs/")
 # The one skill an agent definition preloads, which `disable-model-invocation` would keep from loading.
 PRELOADED = "agent"
+
+# Rules a session showed missing, each held at the page whose reader acts on it, so a trim that drops one fails.
+RULES = {
+    "skills/agent/SKILL.md": (
+        "A turn you end to wait on your own background command or monitor is a stop",
+        "so append no `; echo exit=$?`",
+        "with `$?`, `;`, `$(...)`, a loop or a heredoc is refused by Claude Code's worktree check, so run it plain",
+    ),
+    "skills/run/SKILL.md": (
+        "a dispatch waits for nothing but its `after:` edges and its files",
+        "To give a running writer a file outside its `Owns:`, edit its brief's `Owns:`, run `orchestra brief",
+    ),
+}
+# Pages whose `!` output Claude Code re-attaches after a compaction cut to their first 5,000 tokens
+# (https://code.claude.com/docs/en/skills, "Skill content lifecycle"): the output goes last, so the cut drops it first.
+INJECTING = ("skills/run/SKILL.md", "skills/estimate/SKILL.md", "skills/away/SKILL.md", "skills/back/SKILL.md")
 
 # The fields every agent definition carries, and those added by whether its agent commits. The validator
 # passes a misspelt field and Claude Code ignores it: a `tools:` line lost that way hands an auditor a shell.
@@ -195,6 +211,19 @@ def test_the_core_and_the_owner_skills_name_commands() -> None:
     assert "orchestra status || true" in commands(_text("skills/status/SKILL.md"))
     assert "orchestra land NAME --preview" in commands(_text("skills/run/SKILL.md"))
     assert not parses("orchestra land NAME --dry-run")
+
+
+@pytest.mark.parametrize(("page", "rule"), [(page, rule) for page, rules in RULES.items() for rule in rules])
+def test_each_page_keeps_its_rule(page: str, rule: str) -> None:
+    assert rule in _text(page)
+
+
+@pytest.mark.parametrize("page", INJECTING)
+def test_a_page_s_injected_output_comes_last(page: str) -> None:
+    blocks = [block.strip() for block in _text(page).replace("\r\n", "\n").split("\n\n") if block.strip()]
+    injected = [k for k, block in enumerate(blocks) if block.startswith("!`")]
+    assert injected
+    assert injected == list(range(len(blocks) - len(injected), len(blocks)))
 
 
 @pytest.mark.parametrize("page", [page for page in PAGES if page.startswith("skills/") and page.endswith("/SKILL.md")])
