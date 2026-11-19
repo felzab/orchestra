@@ -112,23 +112,23 @@ def test_the_end_holds_each_due_lens_by_a_judged_report_of_its_type_or_a_declini
     )
     for name, kind, lens in readers:
         _judged(changed, name, kind, lens)
-    # A reader given several lenses holds none of them: each due lens has an agent of its own.
+    # A reader given several lenses holds each its type runs: how wide one reader goes is the coordinator's call.
     _judged(changed, "GROUPED", "auditor", "security, contract")
     # An auditor cannot answer the question of a lens a researcher runs.
     _judged(changed, "WRONG", "auditor", "disclosure")
     # Pruned or landed before its report was judged, an agent's brief holds no lens: its review was never banked.
-    _judged(changed, "UNJUDGED", "auditor", "accessibility, contract")
+    _judged(changed, "UNJUDGED", "auditor", "essential, contract")
     write_agent(changed, model.Agent("UNJUDGED", "auditor", "pruned", reports={1: "r"}, outcome="DONE"))
     line = _lens_end(project)
     assert line.startswith("NOT held  each due lens judged or declined: no judged report and no")
     missing = line.partition(" note for ")[2].split(", ")
     assert "disclosure (read by an auditor; its Run by line names a researcher)" in missing
-    assert "contract (read beside other lenses by GROUPED)" in missing
+    assert "essential" in missing
     # Undeclared, it is read or declined as a due lens is, since nothing says whether the change touches it.
     assert "cost (undeclared)" in missing
     named = {said.split()[0] for said in missing}
     # Held, declined or never due: a trigger with no paths declares a lens due on nothing.
-    assert not {"security", "prompt", "data", "tests", "necessity", "document", "accessibility"} & named
+    assert not {"security", "contract", "prompt", "data", "tests", "necessity", "document", "accessibility"} & named
 
     _judged(changed, "RES", "researcher", "disclosure")
     # The plugin's own lenses this project does not replace, each declined with its reason.
@@ -136,7 +136,7 @@ def test_the_end_holds_each_due_lens_by_a_judged_report_of_its_type_or_a_declini
         assert inprocess("note", f"Lens declined: {name}, not this change's", cwd=project).returncode == 0
     line = _lens_end(project)
     assert line.startswith("held      each due lens judged or declined: declined ")
-    assert "contract (not this change's)" in line
+    assert "essential (not this change's)" in line
 
 
 def test_a_lens_line_is_read_in_every_form_and_any_other_value_is_refused(tmp_path: Path) -> None:
