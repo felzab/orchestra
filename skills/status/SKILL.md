@@ -4,9 +4,8 @@ disable-model-invocation: true
 allowed-tools: Bash(orchestra status *)
 ---
 
-!`orchestra status || true`
-
-1. Reply with the block above unchanged.
-2. Add one line for each thing that waits on the owner.
+1. Run `orchestra status` with the Bash tool.
+2. Reply with its output unchanged.
+3. Add one line for each thing that waits on the owner.
 
 This reply dispatches, lands and asks nothing.

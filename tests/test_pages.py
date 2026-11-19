@@ -19,23 +19,23 @@ ROOT = Path(__file__).resolve().parents[1]
 
 # The most bytes each page under these folders may hold, counted as git stores it.
 BUDGETS = {
-    "skills/run/SKILL.md": 12050,
-    "skills/run/start.md": 2550,
-    "skills/run/brief.md": 3600,
-    "skills/run/review.md": 3850,
+    "skills/run/SKILL.md": 12500,
+    "skills/run/start.md": 2650,
+    "skills/run/brief.md": 3810,
+    "skills/run/review.md": 5092,
     "skills/run/checkpoint.md": 2050,
-    "skills/run/end.md": 2500,
-    "skills/run/handoff.md": 2500,
+    "skills/run/end.md": 2600,
+    "skills/run/handoff.md": 2600,
     "skills/run/resume.md": 4400,
     "skills/status/SKILL.md": 500,
-    "skills/estimate/SKILL.md": 2450,
+    "skills/estimate/SKILL.md": 2940,
     "skills/checkpoint/SKILL.md": 500,
-    "skills/away/SKILL.md": 2350,
+    "skills/away/SKILL.md": 2366,
     "skills/back/SKILL.md": 1550,
     "skills/end/SKILL.md": 500,
     "skills/resume/SKILL.md": 500,
-    "skills/plan/SKILL.md": 1900,
-    "skills/agent/SKILL.md": 5800,
+    "skills/plan/SKILL.md": 1913,
+    "skills/agent/SKILL.md": 6500,
     "agents/writer.md": 7150,
     "agents/driver.md": 5000,
     "agents/researcher.md": 4500,
@@ -69,6 +69,26 @@ BUDGETED = ("skills/", "agents/", "lenses/")
 READ = (*BUDGETED, "docs/")
 # The one skill an agent definition preloads, which `disable-model-invocation` would keep from loading.
 PRELOADED = "agent"
+
+# Rules a session showed missing, each held at the page whose reader acts on it, so a trim that drops one fails.
+RULES = {
+    "skills/agent/SKILL.md": (
+        "A turn you end to wait on your own background command or monitor is a stop",
+        "so append no `; echo exit=$?`",
+        "in a worktree, run each command plain, with no `;`, `$?`, `$(...)`, loop or heredoc",
+    ),
+    "skills/run/SKILL.md": (
+        "a dispatch waits for nothing but its `after:` edges and its files",
+        "To give a running writer a file outside its `Owns:`, edit its brief's `Owns:`, run `orchestra brief",
+    ),
+}
+# Claude Code re-attaches each invoked skill's body after a compaction, cut to its first 5,000 tokens, while a
+# tool result is summarized (https://code.claude.com/docs/en/skills, "Skill content lifecycle"), so `!` output
+# is sent again with every call. The run page alone injects, its output last so the cut drops it first; every
+# other command page runs its command as a step.
+INJECTING = ("skills/run/SKILL.md",)
+# An injection: `!` and a backtick at a line's start or after whitespace, where Claude Code runs it.
+INJECTION_RE = re.compile(r"(?:^|\s)!`")
 
 # The fields every agent definition carries, and those added by whether its agent commits. The validator
 # passes a misspelt field and Claude Code ignores it: a `tools:` line lost that way hands an auditor a shell.
@@ -192,9 +212,30 @@ def test_every_command_a_page_names_parses(page: str) -> None:
 
 def test_the_core_and_the_owner_skills_name_commands() -> None:
     """The check above passes on a page it finds no command in, so the finder is held to the pages that name some."""
-    assert "orchestra status || true" in commands(_text("skills/status/SKILL.md"))
+    assert "orchestra status" in commands(_text("skills/status/SKILL.md"))
     assert "orchestra land NAME --preview" in commands(_text("skills/run/SKILL.md"))
     assert not parses("orchestra land NAME --dry-run")
+
+
+@pytest.mark.parametrize(("page", "rule"), [(page, rule) for page, rules in RULES.items() for rule in rules])
+def test_each_page_keeps_its_rule(page: str, rule: str) -> None:
+    assert rule in _text(page)
+
+
+@pytest.mark.parametrize("page", INJECTING)
+def test_a_page_s_injected_output_comes_last(page: str) -> None:
+    blocks = [block.strip() for block in _text(page).replace("\r\n", "\n").split("\n\n") if block.strip()]
+    injected = [k for k, block in enumerate(blocks) if block.startswith("!`")]
+    assert injected
+    assert injected == list(range(len(blocks) - len(injected), len(blocks)))
+
+
+@pytest.mark.parametrize(
+    "page",
+    [page for page in PAGES if page.startswith("skills/") and page.endswith("/SKILL.md") and page not in INJECTING],
+)
+def test_any_other_skill_runs_its_command_as_a_step(page: str) -> None:
+    assert INJECTION_RE.search(_text(page)) is None
 
 
 @pytest.mark.parametrize("page", [page for page in PAGES if page.startswith("skills/") and page.endswith("/SKILL.md")])

@@ -54,19 +54,28 @@ the shell or a settings file's `env`, which outranks every settings key, and non
 `autoCompactWindow`, at the top level or for a model under `modelSettings`, it writes
 `"autoCompactWindow": 500000` into `.claude/settings.local.json`; where one does, it names that
 window and writes none. A window under `modelSettings` binds its model alone, so a session on
-another model runs at Claude Code's default window. The local file outranks the project's file, your
-user settings and the window `/autocompact` saves there, so change the window by editing its key in
-`.claude/settings.local.json`, or remove the key to let `/autocompact` take effect again.
-`claude --autocompact 500k` sets the window for one terminal session over every file; the desktop
-app takes no flag.
+another model runs at Claude Code's default window. The local file outranks the project's file and
+your user settings, the window `/autocompact` saves there included. `claude --autocompact 500k`
+sets the window for one terminal session over every file; the desktop app takes no flag.
 
-Every Claude Code session started at the checkout's root after `init` runs at the window the
-environment or the files set, the desktop app's too, and its agents inherit it; each agent
-definition also sets 500,000, which lowers a larger window an agent would inherit. In the desktop
-app, a session whose `init` wrote the window was seen running on toward Claude Code's default,
-and the next session started there ran at 500,000; Claude Code's settings page says most edits
-reach a running session, so this is a sighting, not a rule. In that first session, run `/compact`
-yourself before its context passes 500,000 tokens, which `/context` shows.
+A desktop session the app starts from its pre-warmed process did not apply the `autoCompactWindow`
+the project's or the local settings file sets
+([issue 105316](https://github.com/anthropics/claude-code/issues/105316), open; other keys were not
+tested), so `init`'s window may not reach it. Typing `/autocompact 500k` inside such a session was
+seen to apply: it saved a window for the session's model under `modelSettings` in
+`~/.claude/settings.json`, and the session then compacted by itself at 467,099 tokens. A top-level
+key in that file covers every model and is expected to reach such a session as well, but nobody has
+tested it:
+
+```json
+{ "autoCompactWindow": 500000 }
+```
+
+Your user settings reach every project on the machine, which is why `init` writes none there. Each
+agent definition also sets 500,000, which lowers a larger window an agent would inherit. Where the
+window still does not apply, the hook on each of your prompts tells you and the coordinator once its
+context has passed the window, since only you can type `/compact`: Claude Code lets no model run it
+(the [skills page](https://code.claude.com/docs/en/skills), "Restrict Claude's skill access").
 
 ## Starting a session
 
@@ -74,7 +83,9 @@ yourself before its context passes 500,000 tokens, which `/context` shows.
    the session's work lands on.
 2. Start Claude Code at the checkout's root, since Claude Code reads the project's
    `.claude/settings.json`, and on Windows `.claude/settings.local.json` too, from the folder a
-   session starts in. Type `/orchestra:run`. The coordinator reads its rules and says whether this
+   session starts in; a desktop session started from the app's pre-warmed process did not apply the
+   window either file sets, so give it one as [compacting at 500,000 tokens](#setting-up-a-project)
+   says. Type `/orchestra:run`. The coordinator reads its rules and says whether this
    branch already holds a session.
 3. For a new session, tell the coordinator what the session is for. It names the session, as in
    `orchestra init checkout-rework`, and then writes the session's plan.
@@ -171,9 +182,11 @@ them there.
 | `estimate`      | can the remaining work finish sooner                        |
 
 At the review, `orchestra diff` prints each lens due from the changed paths, with the files that
-made it due and the agent type that runs it. The coordinator gives each to an agent of its own, of
-that type, or declines it with a recorded reason, and the session's ending holds only once every
-due lens has a judged report from such an agent whose brief names that lens alone, or such a note.
+made it due and the agent type that runs it. The coordinator gives each to an agent of that type,
+alone or with other lenses of that type on one brief's `Lens:` line, as
+[the review page](../skills/run/review.md) says when, or declines it with a recorded reason. The
+session's ending holds only once every due lens has a judged report from such an agent whose brief
+names that lens, alone or with others, or such a note.
 A lens due only where the project declares it, and not declared, is printed as `undeclared` and is
 read or declined like a due one; [the `lenses` key](#the-configuration-file) declares it.
 
@@ -185,8 +198,11 @@ pushes once a wave, the agents dispatched together, which land before the next p
 Judging gives each finding of a report an owner or a closing; a finding so recorded is a row, such
 as `BILLING-F1`. Once the session's files stop moving, agents read the whole change with each lens
 due, a verifier tests their findings, one round of writers fixes what holds, a driver new to the
-work uses what ships, and fresh readers read the fixes. The ending, the lines under the plan's
-`## Ending`, runs at `/orchestra:end`.
+work uses what ships, and fresh readers read the fixes where a defect in them could pass unseen.
+How many readers go out, which lenses share one, and whether a cross-cutting change gets a reader of
+its own or the fixes a further round, the coordinator judges from what changed and what a defect
+there could break, and records each choice as a `Review:` note in the log. The ending, the lines
+under the plan's `## Ending`, runs at `/orchestra:end`.
 
 To see where the session stands:
 
@@ -310,8 +326,8 @@ does not know is refused, naming its path in the file.
   line; a name the configuration does not hold is refused. With no `default`, the dispatch sets no
   model and Claude Code chooses.
 - **`contextCeiling`** is the context, in tokens, past which a hook refuses the coordinator's message
-  that would resume an agent, since a resume sends the agent's whole context again. The default is
-  200,000.
+  that would resume an agent, except the answer to an agent stopped on a question and still waiting
+  on it, since a resume sends the agent's whole context again. The default is 200,000.
 - **`queues`** adds owners a row can be routed to besides an agent, beyond the built-in `owner`,
   `ending` and `handoff`.
 - **`preflight`** lists commands that must exit 0 before a session can work, each with `run`, the
@@ -365,7 +381,8 @@ them with its brief, from the primary checkout as they are on disk, like the con
 - **`.claude/orchestra/lenses/<name>.md`** is a lens of the project's own, or replaces the plugin's
   lens of the same name. It keeps the plugin's five parts: the question, what to read first, a
   numbered checklist, what is not its business, and whether a failure it looks for is silent. It
-  ends with the two lines the program reads. `**Run by.**` is `auditor`, `driver` or `researcher`.
+  ends with the two lines the program reads, each read as Markdown reads a paragraph, so a row a
+  formatter soft-wraps over several lines reads as one line. `**Run by.**` is `auditor`, `driver` or `researcher`.
   `**Applies.**` is one of `always`; `paths` and backticked patterns separated by commas,
   optionally followed by `except` and more patterns; `declared`, due only where a trigger names
   it, and held at the ending as a due lens is while no trigger names it; and `on request`, which
@@ -418,8 +435,9 @@ want to read them.
 write outside the session's working directories prompts. `init` therefore adds the programme's
 folder, `<stateRoot>/<programme>`, to `permissions.additionalDirectories` in the checkout's
 `.claude/settings.local.json`. In the same write it sets `autoCompactWindow` where neither the
-environment nor a settings file sets a window, as [compacting at 500,000 tokens](#setting-up-a-project)
-says. It rewrites the file only where it is in the JSON layout Claude Code itself writes, so no
+environment nor a settings file sets a window, though a desktop session started from the app's
+pre-warmed process did not apply it, as [compacting at 500,000 tokens](#setting-up-a-project) says.
+It rewrites the file only where it is in the JSON layout Claude Code itself writes, so no
 other key changes, and otherwise tells you what to add. It adds no folder where a settings file already grants it. A
 tracked `.claude/settings.local.json` is left alone too. The file then holds a path of this
 machine, so where no ignore rule covers it, `init` first adds it to the clone's `.git/info/exclude`,

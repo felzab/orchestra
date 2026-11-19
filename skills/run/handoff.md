@@ -37,7 +37,7 @@ Leave out a figure nobody measured again in the state the next session inherits,
 
 ## The audit
 
-An auditor with `Lens: prompt` that saw none of the work reads the handoff and the starter cold. Fix what it finds, because a wrong line here is acted on by a session that cannot ask you.
+An auditor with `Lens: prompt` that saw none of the work reads the handoff and the starter cold. It also reads what is left undone against the diff file whose path `orchestra diff` prints, named in its brief, and the owner's list of [end.md](end.md) step 8, pasted there, since `orchestra status --end` holds only what the program records. Fix what it finds, because a wrong line here is acted on by a session that cannot ask you.
 
 ## The starter
 

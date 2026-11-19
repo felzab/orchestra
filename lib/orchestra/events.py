@@ -111,7 +111,10 @@ class Where:
     """Whose an event is, and the state it reads."""
 
     data: Record
+    # The input's `cwd`: an agent's own folder, its worktree where it has one.
     cwd: Path
+    # The folder the state was found from: `cwd`, or the project root where a `cd` left `cwd` in no fleet's clone.
+    place: Path
     state: Path | None
     # The id of the subagent the event fires in; None in the main session.
     agent_id: str | None
@@ -134,17 +137,21 @@ class Where:
         if self.state is None:
             return None
         try:
-            return config.checkout(self.cwd).root
+            return config.checkout(self.place).root
         except Refused:
             return None
 
 
-def answer(event: str, data: Record, *, held: Path | bool) -> str | None:
-    """The stdout answering one event; None for nothing. An event that cannot be judged fails closed where it guards."""
+def answer(event: str, data: Record, *, held: Path | bool, place: Path | None) -> str | None:
+    """The stdout answering one event; None for nothing. An event that cannot be judged fails closed where it guards.
+
+    `place` is the folder `hooks` read `held` from, the input's `cwd` unless that held no fleet.
+    """
+    place = place if place is not None else Path(str(data.get("cwd")))
     # One budget for the event and for its fault's answer, so the fault's log write ends inside it too.
     with store.budget(SESSION_END_SECONDS if event == "SessionEnd" else BUDGET_SECONDS):
         try:
-            where = _where(data, held=held)
+            where = _where(data, held=held, place=place)
             facts = store.unleased() if where.agent is not None else contextlib.nullcontext()
             with facts:
                 return HANDLERS[event](where)
@@ -156,10 +163,10 @@ def answer(event: str, data: Record, *, held: Path | bool) -> str | None:
         if not traced:
             # A refusal names its own fix, so it is one line on stderr, never a trace.
             LOGGER.error("orchestra hook %s: %s", event, fault)
-        return _faulted(event, data, fault, held=held)
+        return _faulted(event, data, fault, held=held, place=place)
 
 
-def _faulted(event: str, data: Record, fault: str, *, held: Path | bool) -> str | None:
+def _faulted(event: str, data: Record, fault: str, *, held: Path | bool, place: Path) -> str | None:
     """An event that cannot be judged: a guarded call denied naming the fault, any other the fault shown and logged.
 
     No exit 0 shows its stderr, so an event of the lease holder's session or of one of the plugin's
@@ -171,7 +178,7 @@ def _faulted(event: str, data: Record, fault: str, *, held: Path | bool) -> str 
     state = None
     logged: list[bool] = []
     try:
-        state = _state(data, held=held)
+        state = _state(held=held, place=place)
         if state is not None and _owned(data, state):
             known = state
             tool = data.get("tool_name")
@@ -211,19 +218,19 @@ def _id(value: object) -> str | None:
     return value.removeprefix("agent-") if isinstance(value, str) and value else None
 
 
-def _state(data: Record, *, held: Path | bool) -> Path | None:
-    """`held` is the branch's pointer where `hooks` read it from git's files, True where git must find it."""
+def _state(*, held: Path | bool, place: Path) -> Path | None:
+    """`held` is the branch's pointer where `hooks` read it from git's files in `place`, True where git must find it."""
     if held is False:
         return None
     try:
-        return store.state_dir(Path(str(data.get("cwd")))) if held is True else store.pointed(held)
+        return store.state_dir(place) if held is True else store.pointed(held)
     except Refused:
         return None
 
 
-def _where(data: Record, *, held: Path | bool) -> Where:
+def _where(data: Record, *, held: Path | bool, place: Path) -> Where:
     cwd = Path(str(data.get("cwd")))
-    state = _state(data, held=held)
+    state = _state(held=held, place=place)
     agent_id = _id(data.get("agent_id"))
     kind = data.get("agent_type")
     plugin = kind.removeprefix(PLUGIN) if isinstance(kind, str) and kind.startswith(PLUGIN) else None
@@ -235,7 +242,7 @@ def _where(data: Record, *, held: Path | bool) -> Where:
         else:
             owner = store.lease(state).get("owner")
             coordinator = owner is not None and owner == data.get("session_id")
-    return Where(data, cwd, state, agent_id, plugin, agent, coordinator)
+    return Where(data, cwd, place, state, agent_id, plugin, agent, coordinator)
 
 
 def _quietly(act: Callable[[], object]) -> None:
@@ -402,7 +409,11 @@ def _start(where: Where, given: Record, agent: model.Agent, root: Path) -> str |
 
 
 def _prompt(state: Path, root: Path, agent: model.Agent) -> str:
-    """The agent's paths, the project's addendum for its type among them or `none`, so no agent probes for one."""
+    """The agent's paths, the project's addendum for its type among them or `none`, so no agent probes for one.
+
+    The report's line names its title too, as a resume names its round: the dispatch alone knows the round is 1,
+    and an agent left to guess one from its name was seen titling its first report round 2.
+    """
     name = agent.name
     held = brief.brief_path(state, name)
     addendum = root / ADDENDA / f"{agent.type}.md"
@@ -410,7 +421,7 @@ def _prompt(state: Path, root: Path, agent: model.Agent) -> str:
         [
             f"Brief: {held}",
             f"Messages: {held.with_name(f'{name}.messages.md')}",
-            f"Report: {report.path(state, name)}",
+            f"Report: {report.path(state, name)}, titled `# {name} · {agent.type} · round 1`",
             f"Addendum: {addendum if addendum.is_file() else 'none'}",
         ]
     )
@@ -523,6 +534,8 @@ def _addressee(state: Path, to: object) -> model.Agent | None:
 def _resume(where: Where, given: Record) -> str | None:
     """A resume refused where its worktree is gone, its report unjudged or its context too large; else its next report.
 
+    The context's ceiling spares the answer to a report stopped on a question, which closes that round.
+
     A message to an agent mid-turn resumes nothing: it reads it at its next turn. A `running` record whose
     turn ended is resumed, since the send that wrote it may never have landed.
     """
@@ -543,7 +556,11 @@ def _resume(where: Where, given: Record) -> str | None:
     elif (unjudged := findings.unjudged(agent)) is not None:
         # `judge` reads an agent's latest round alone, so a round begun before it would leave this one's unread.
         why = unjudged
-    else:
+    elif agent.outcome not in report.STOPPED or agent.status not in ("reported", "running"):
+        # A report stopped on a question is no ceiling's: its answer is the one message that closes the round,
+        # and until then `judge`, `land` and `prune --discard` hold the agent, so a successor could take nothing.
+        # `running` lets a resend through whose first send failed; a usage stop keeps the old outcome but waits
+        # on no answer, so the ceiling applies again.
         size, ceiling = context.size(agent, where.session), config.load(root).context_ceiling
         if size is not None and size > ceiling:
             why = (
@@ -1008,7 +1025,11 @@ def session_end(where: Where) -> str | None:
 
 
 def user_prompt_submit(where: Where) -> str | None:
-    """The clock read now, and the minutes since the previous prompt."""
+    """The clock read now, the minutes since the previous prompt, and a context past its compaction window.
+
+    The window's warning goes to the owner too, in a `systemMessage`, since only the owner can type `/compact`
+    (skills.md: the model cannot run it). A `Stop` hook would carry it at a model call each time it fired.
+    """
     state = where.state
     if not where.coordinator or state is None:
         return None
@@ -1028,7 +1049,50 @@ def user_prompt_submit(where: Where) -> str | None:
         said += f" {passed} passed since the previous prompt."
         if gap > STALE_MINUTES:
             said += " A usage figure read before that is stale: `orchestra status --measure` reads it again."
-    return _context("UserPromptSubmit", said)
+    past = _past_window(where)
+    if past is None:
+        return _context("UserPromptSubmit", said)
+    size, window = f"{past[0]:,}", f"{past[1]:,}"
+    # Facts, not an order: an imperative in added context can read as an injection (hooks.md, "Add context for Claude").
+    said += (
+        f" Your context is {size} tokens, past the {window}-token compaction window, which has not applied;"
+        " only the owner can type `/compact`."
+    )
+    shown = (
+        f"orchestra: this session's context is {size} tokens, past its {window}-token compaction window, which"
+        " has not applied: type `/compact` at the next seam."
+    )
+    return _json(
+        {
+            "systemMessage": shown,
+            "hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": said[:CONTEXT_CHARS]},
+        }
+    )
+
+
+def _past_window(where: Where) -> tuple[int, int] | None:
+    """The main session's context and its compaction window, where the context is past it; None where it is not.
+
+    No hook input carries the main session's context, so it is read from its transcript, which may lag the
+    conversation (hooks.md, "Common input fields"). A desktop session started from a pre-warmed process was
+    seen running past the window its project's settings set (anthropics/claude-code issue 105316), which no
+    other sign shows.
+    """
+    given, root = where.data.get("transcript_path"), where.root
+    if not isinstance(given, str) or not given or root is None:
+        return None
+    try:
+        last = context.last_call(Path(given))
+    except OSError:
+        return None
+    if last is None:
+        return None
+    size = context.tokens(context.as_object(last.get("usage")))
+    model = last.get("model")
+    # Imported here, since no other event reads the settings files and every hook would pay for its imports.
+    read = typing.cast("Callable[[Path, str | None], int | None]", importlib.import_module("orchestra.init").window)
+    window = read(root, model if isinstance(model, str) else None)
+    return (size, window) if window is not None and size > window else None
 
 
 HANDLERS: dict[str, Callable[[Where], str | None]] = {

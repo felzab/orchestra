@@ -5,11 +5,9 @@ argument-hint: "[the programme's goal]"
 allowed-tools: Bash(orchestra *)
 ---
 
-!`orchestra status || true`
-
 The programme to plan: $ARGUMENTS
 
-A programme is planned in a session of its own. Where the block above shows none, read `${CLAUDE_PLUGIN_ROOT}/skills/run/start.md` and start one with `orchestra init <session> --programme <programme>`, since the audit below needs an agent and one programme name gives every session one list of rulings.
+First run `orchestra status` with the Bash tool. A programme is planned in a session of its own. Where that output shows none, read `${CLAUDE_PLUGIN_ROOT}/skills/run/start.md` and start one with `orchestra init <session> --programme <programme>`, since the audit below needs an agent and one programme name gives every session one list of rulings.
 
 1. **Ask first.** Send the owner one batch of questions on the goal, the constraints and what is out of scope.
 2. **The path.** Lay the whole programme out as sessions, each one branch and one pull request. Size a session to be worth its own branch without filling one coordinator's context, and give a phase whose verdict must stand alone a session of its own.

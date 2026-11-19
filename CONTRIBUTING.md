@@ -117,5 +117,9 @@ longer subject short in its commit lists, for example
 | `Hooks` | `hooks/`                                                           |
 | `Pages` | `skills/`, `agents/` and `lenses/`                                 |
 | `Docs`  | the documentation                                                  |
+| `Tests` | `tests/`, where a commit changes nothing else                      |
 | `CI`    | `.github/`                                                         |
 | `Repo`  | the manifests, `evals/`, `pyproject.toml`, the schema and the rest |
+
+A merge commit's subject is `Merge <name> into <branch>`, as `orchestra land NAME` writes it; give
+your own merge that subject with `git merge -m`.

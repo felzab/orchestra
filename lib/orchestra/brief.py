@@ -1,7 +1,8 @@
 """`brief`: a brief's header written from the state and git, and the brief checked before its dispatch.
 
-The tool writes the header, so no value in it is typed; the coordinator fills `Owns:`, `Rows:`,
-`Writes:` and `Lens:`, adds `Model: <profile>` where the agent needs a profile of the configuration's
+The tool writes the header, so no value in it is typed, and a writer's `Owns:` with the files its
+slice's line in PLAN.md names in backticks; the coordinator fills `Rows:`, `Writes:`, `Lens:` and
+any `Owns:` left empty, adds `Model: <profile>` where the agent needs a profile of the configuration's
 `models` other than `default`, and writes the four sections below them. `--check` judges only what has a fixed
 shape, and stamps the agent's record with the SHA-256 of the brief's bytes, so an edit made after
 the check leaves the brief unchecked.
@@ -17,10 +18,11 @@ import argparse
 import dataclasses
 import functools
 import hashlib
+import importlib
 import itertools
 import re
 import typing
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -132,8 +134,21 @@ def owned(patterns: Iterable[str], path: str) -> bool:
     return any(_share(held, _automaton(pattern)) for pattern in patterns)
 
 
+@functools.cache
+def _start(pattern: str) -> str:
+    """The text every path the pattern names begins with: its literal part before the first `*`."""
+    pattern = pattern.replace("\\", "/").removeprefix("./")
+    return pattern.partition("*")[0] if "*" in pattern else pattern.rstrip("/")
+
+
 def overlap(one: str, other: str) -> bool:
-    """Whether two patterns name a path in common, whether or not that path exists yet."""
+    """Whether two patterns name a path in common, whether or not that path exists yet.
+
+    Two patterns whose literal starts diverge share none, which settles most pairs without the automata.
+    """
+    left, right = _start(one), _start(other)
+    if not (left.startswith(right) or right.startswith(left)):
+        return False
     return _share(_automaton(one), _automaton(other))
 
 
@@ -289,12 +304,33 @@ def run(args: argparse.Namespace) -> int:
     return write(state, here.root, args.name, args.type, cli.one_line(slice_))
 
 
+def _planned(state: Path, slice_: str) -> list[str]:
+    """The files the plan's line for the slice names in backticks, as `status` reads that line; none without one."""
+    # Imported here: the hooks import this module and none of them reads the status view, which imports this one.
+    view = importlib.import_module("orchestra.status")
+    read = typing.cast("Callable[[str], tuple[str, list[str], list[str]]]", view._slice)
+    heading = typing.cast("str", importlib.import_module("orchestra.init").SLICES)
+    try:
+        lines = model.plan_lines(state)
+    except Refused:
+        # No plan names the slice's files, so the label is left to be filled, as for a line naming none.
+        return []
+    for section, _, text in lines:
+        if section == heading and text:
+            held, files, _ = read(text)
+            if held == slice_:
+                return files
+    return []
+
+
 def write(state: Path, root: Path, name: str, kind: model.AgentType, slice_: str) -> int:
     path = brief_path(state, name)
     if path.exists():
         raise Refused(f"{path} exists, and what is written in it would be lost: edit it, or choose another name")
     session = model.read_session(state)
     commit = config.git(root, "rev-parse", "--short", "--verify", f"refs/heads/{session.branch}").strip()
+    # A writer's files are those its slice's line names; a reader's or a driver's slice owns none of them.
+    owns = _planned(state, slice_) if kind == SLICED else []
 
     def create(held: store.Record | None) -> store.Record:
         if held is not None:
@@ -308,7 +344,7 @@ def write(state: Path, root: Path, name: str, kind: model.AgentType, slice_: str
             f"Agent: {name}    Type: {kind}    Slice: {slice_}",
             f"Base: {session.branch} at {commit}",
             f"Report: {report.path(state, name)}",
-            *(f"{label}:" for label in LISTS),
+            *(f"{label}: {', '.join(owns)}" if label == "Owns" and owns else f"{label}:" for label in LISTS),
             "",
             *SECTIONS,
             "",
@@ -317,10 +353,14 @@ def write(state: Path, root: Path, name: str, kind: model.AgentType, slice_: str
     store.write_text(path, text)
     store.write_text(path.with_name(f"{name}.messages.md"), "")
     print(path)
-    print(
-        f"{name} briefed as {report.article(kind)} on {slice_}: fill Owns, Rows, Writes and Lens and the four sections,"
-        " then --check"
-    )
+    briefed = f"{name} briefed as {report.article(kind)} on {slice_}"
+    if owns:
+        print(
+            f"{briefed}: `Owns:` holds the {len(owns)} path(s) its line in PLAN.md names;"
+            " fill Rows, Writes and Lens and the four sections, then --check"
+        )
+    else:
+        print(f"{briefed}: fill Owns, Rows, Writes and Lens and the four sections, then --check")
     return DONE
 
 
@@ -441,7 +481,7 @@ def _changed(root: Path, branch: str, ref: str, tree: Path | None) -> set[str]:
         paths |= set(config.git(root, "diff", "-z", "--name-only", f"refs/heads/{branch}...{ref}").split("\0"))
     if tree is not None and tree.is_dir():
         # Without `core.longpaths`, Git for Windows with the `core.fscache` its installer sets reads a path past 260
-        # characters, as a frozen tree under the state's long folder holds, as deleted and still exits 0; other
+        # characters, as an agent's worktree under `.claude/worktrees/` can hold, as deleted and still exits 0; other
         # platforms ignore the key.
         listed = config.git(tree, "-c", "core.longpaths=true", "status", "--porcelain", "-z", "--untracked-files=all")
         entries = iter(listed.split("\0"))
@@ -453,10 +493,20 @@ def _changed(root: Path, branch: str, ref: str, tree: Path | None) -> set[str]:
     return paths - {""}
 
 
+def _frozen(tree: Path) -> bool:
+    """Whether a worktree is a review tree `diff --tree` made: a folder in a session state's `trees/`.
+
+    Told by the folder's shape, a `trees/` beside the state's session file, since the desktop app can
+    register the redirected physical path, which no configured root names.
+    """
+    return tree.parent.name == store.TREES and (tree.parent.parent / store.SESSION).is_file()
+
+
 def _unlanded(root: Path, branch: str, agents: list[model.Agent], name: str) -> dict[str, set[str]]:
     """Each other worktree's and each live agent's branch's changed paths, by who holds it.
 
     A driver's are left out: it commits nothing and reverts what it plants, so nothing of its worktree lands.
+    So is a review tree, any session's, which a lens reader reads and nothing lands from.
     """
     owner = {agent.branch: agent.name for agent in agents if agent.branch}
     planting = {agent.branch for agent in agents if agent.branch and agent.type == "driver"}
@@ -465,7 +515,7 @@ def _unlanded(root: Path, branch: str, agents: list[model.Agent], name: str) -> 
     # The first is the primary checkout, which holds the session branch itself.
     for tree in config.worktrees(root)[1:]:
         held = tree.get("branch", "")
-        if owner.get(held) == name or held in planting:
+        if owner.get(held) == name or held in planting or _frozen(Path(tree["worktree"])):
             continue
         seen.add(held)
         who = f"{owner[held]} ({held})" if held in owner else held or tree["worktree"]

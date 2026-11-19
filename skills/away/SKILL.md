@@ -5,9 +5,9 @@ argument-hint: "[until when, and any last order]"
 allowed-tools: Bash(orchestra *)
 ---
 
-!`orchestra status --measure || true`
-
 The owner is leaving. Until when, and any last order: $ARGUMENTS
+
+First run `orchestra status --measure` with the Bash tool.
 
 1. Run `orchestra mode away`, with the time alone after it where the owner gave one, because one prompt nobody answers parks every agent. Record each order beyond the time as a ruling, and write one for the session's end as a line under `PLAN.md`'s `## Ending`.
 2. Call the ask tool once. A refusal, or the tool being gone, shows the denial is live; a dialog shows it is not, and you say so in the reply.
@@ -16,7 +16,7 @@ The owner is leaving. Until when, and any last order: $ARGUMENTS
 Reply once and ask nothing:
 
 - what runs while the owner is away;
-- when a usage stop is due by the `usage` rows above (or the app's `get_usage` where they read unknown), and that a weekly limit continues only on the owner's word;
+- when a usage stop is due by the `usage` rows of that output (or the app's `get_usage` where they read unknown), and that a weekly limit continues only on the owner's word;
 - that after a five-hour limit resets a terminal session continues by itself for three resets at most (Claude Code's interactive-mode page), unless the machine slept past the reset, a desktop app session only where its limit card's "Auto-continue when limits reset" box is ticked, and that a prompt it schedules is no wake to rely on;
 - what will wait for the owner;
 - that a call no permission rule or mode allows is now refused where it used to prompt, so before leaving the owner accepts edits by mode or allows `Edit` and `Write`, and allows `Bash(orchestra *)` (which also allows each program the configuration names), the `git` and `gh` commands a commit, a push and a pull request run, and each check and install the project's addenda name;

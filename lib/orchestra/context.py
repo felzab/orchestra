@@ -68,8 +68,29 @@ def as_object(value: object) -> dict[str, object]:
 
 def calls(path: Path) -> list[dict[str, object]]:
     """The usage of each call the agent's model made, in order: one per message, however many lines carry it."""
-    usages: dict[object, dict[str, object]] = {}
-    for raw in path.read_bytes().splitlines():
+    return [as_object(message.get("usage")) for message in _made(path.read_bytes().splitlines())]
+
+
+def last_call(path: Path) -> dict[str, object] | None:
+    """The message of a transcript's last call, its `usage` and `model` among its keys; None where its tail holds none.
+
+    Read from the transcript's last `TAIL_BYTES` alone, so a main session's transcript of hundreds of megabytes
+    costs a hook one read of a megabyte. A tail holding no call, as after a pasted image wider than it, reads
+    as none: the whole file would cost a prompt more than twice its size in memory, and the next prompt reads again.
+    """
+    offset = max(0, path.stat().st_size - TAIL_BYTES)
+    with path.open("rb") as held:
+        held.seek(offset)
+        data = held.read()
+    # A read from the middle starts inside a line.
+    made = _made(data.splitlines()[1:] if offset else data.splitlines())
+    return made[-1] if made else None
+
+
+def _made(lines: list[bytes]) -> list[dict[str, object]]:
+    """The message of each call a model made, in order: one per call, however many lines carry it."""
+    messages: dict[object, dict[str, object]] = {}
+    for raw in lines:
         try:
             entry = as_object(json.loads(raw))
         except ValueError:
@@ -78,10 +99,10 @@ def calls(path: Path) -> list[dict[str, object]]:
         message = as_object(entry.get("message"))
         if message.get("role") != "assistant" or message.get("model") == SYNTHETIC or entry.get("isApiErrorMessage"):
             continue
-        if usage := as_object(message.get("usage")):
+        if as_object(message.get("usage")):
             # A call's message reaches the transcript as one line per content block, each with its usage.
-            usages[message.get("id")] = usage
-    return list(usages.values())
+            messages[message.get("id")] = message
+    return list(messages.values())
 
 
 def _messages(path: Path, offset: int) -> list[dict[str, object]]:

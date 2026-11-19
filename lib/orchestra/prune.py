@@ -309,7 +309,7 @@ def prune(
     moved += frozen
     claimed |= {tree.key for tree in frozen}
     if only is None:
-        out.lines += strangers(every, claimed)
+        out.lines += strangers(every, claimed, state / store.TREES)
     _unregister(root, moved, branches, gone, out)
     # A record whose status moved since this read, a report arriving meanwhile, is left for that report.
     _settle(state, gone, {agent.name: agent.status for agent in agents}, out, discard=discard)
@@ -364,16 +364,28 @@ def _unregister(
             gone[name].append(branch)
 
 
-def strangers(every: list[Tree], claimed: set[object]) -> list[str]:
-    """Each tree no agent of this session holds, left as it is."""
+def strangers(every: list[Tree], claimed: set[object], frozen: Path) -> list[str]:
+    """Each tree no agent of this session holds, left as it is; one in the state's `frozen` folder named as such.
+
+    The folder is matched by its identity, as a tree is, since git may list a redirected spelling of it.
+    """
     said: list[str] = []
+    review = _key(frozen)
     for tree in every:
         if tree.key in claimed:
             continue
         what = (
             f"({tree.branch})" if tree.branch else (f"detached at {tree.head[:9]}" if tree.head else "git lists none")
         )
-        said.append(f"left {tree.path} {what}: no agent of this session holds it")
+        if _key(tree.path.parent) == review:
+            # The session's end, named so a checkpoint mid-review leaves the trees its lens readers read.
+            ending = (
+                "a frozen tree `diff --tree` made for a lens round:"
+                " `orchestra prune --ending` removes it at the session's end"
+            )
+            said.append(f"left {tree.path} {what}: {ending}")
+        else:
+            said.append(f"left {tree.path} {what}: no agent of this session holds it")
     return said
 
 

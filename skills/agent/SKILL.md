@@ -27,7 +27,8 @@ Your dispatch prompt names your brief, its messages file, your report and the pr
 - A hash, a figure or a quotation in your report is copied from a command's output or a source, where a recalled one is often wrong.
 - Where a change leaves one file contradicting its siblings, the siblings are evidence the change is wrong.
 - The Bash tool can turn a typed `\\` into `\` silently: write such text with the Write tool and pass it by file, as `git commit -F <file>`.
-- Where you hold a shell: run each check unfiltered and read its exit code from the command itself, because a filter drops the line naming the error and a pipe reports its last command's code. Start nothing on a fixed port, and act only on processes, containers and files you created: every agent shares the machine. To compare two timings, run the two variants alternately in one sitting and report the ratio with its spread, since the machine's load drifts. Stop each background command or monitor you started, with `TaskStop`, before your final message, since it outlives you.
+- Where you hold a shell: run each check unfiltered and read its exit code from the command itself, because a filter drops the line naming the error and a pipe reports its last command's code. The tool's result names a failing command's exit code, so append no `; echo exit=$?`; in a worktree, run each command plain, with no `;`, `$?`, `$(...)`, loop or heredoc, which Claude Code's worktree check may refuse (issues 94040, 100806).
+- Start nothing on a fixed port, and act only on processes, containers and files you created: every agent shares the machine. To compare two timings, run the two variants alternately in one sitting and report the ratio with its spread, since the machine's load drifts. Stop each background command or monitor you started, with `TaskStop`, before your final message, since it outlives you. A turn you end to wait on your own background command or monitor is a stop: the stop hook reads your report then, and the coordinator may judge and land your branch while your task still runs; so run a check in the foreground (a Bash call given `timeout: 600000` allows ten minutes; split a longer check), and end your turn only when the report is final or you stop on a question.
 
 ## The report
 
@@ -58,6 +59,7 @@ Harm: <the concrete harm>. Likelihood: <how likely, and on what evidence>.
 ## Outside the scope
 ```
 
+- `<n>` is the round your `Report:` line names, or the round your latest resume names.
 - `STATUS` is `DONE`, `DONE-WITH-CONCERNS`, `BLOCKED` or `NEEDS-ANSWER`. A researcher, an auditor and a verifier write `Commits: none`.
 - Copy each finding's heading line, after its `### `, into `## Summary` unchanged, since the stop hook compares the two. The summary's other lines hold at most 1,500 bytes together, in words a reader who saw none of your work understands. Your final message is that section followed by the report's path.
 - A finding's first line holds both `Harm:` and `Likelihood:`, since the stop hook reads that one line.

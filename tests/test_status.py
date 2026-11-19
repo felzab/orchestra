@@ -164,6 +164,38 @@ def test_the_overview_says_what_runs_what_waits_and_what_drifted(project: Path, 
     assert lines[-1] == "status: 3 running (2 suspect), 3 to judge, 1 to resume, 1 due, 3 unclosed, 2 drift"
 
 
+def _pairs(project: Path, built: Path, added: str) -> list[str]:
+    """The drift lines naming unticked slices that share files, with `added` planned after S3."""
+    store.write_text(built / store.PLAN, PLAN.replace("- [ ] S3 tests/\n", f"- [ ] S3 tests/\n{added}"))
+    lines = _lines(inprocess("status", cwd=project))
+    return [line for line in lines if line.startswith("drift     ") and "share" in line]
+
+
+def test_two_unticked_slices_sharing_files_with_no_after_edge_drift(project: Path, built: Path) -> None:
+    """The plan and the estimate read them as parallel, while `brief --check` refuses the second as the first runs."""
+    pair = "- [ ] S5 `docs/a.md`, `src/b.py`\n- [ ] S6 `notes/x.md`, `docs/`{}\n"
+    said = (
+        "drift     slices S5 and S6 share 1 file(s), `docs/` first, and neither is after the other: the second's"
+        " brief is refused while the first runs, so name S5 in S6's `after:`"
+    )
+    assert _pairs(project, built, pair.format("")) == [said]
+    assert _pairs(project, built, pair.format(" after: S5")) == []
+    # An edge through a third slice orders them as well, a ticked one included.
+    assert _pairs(project, built, pair.format(" after: S1") + "- [x] S1b `x/` after: S5\n") == [said]
+    assert _pairs(project, built, pair.format(" after: S1b") + "- [x] S1b `x/` after: S5\n") == []
+    # A ticked slice is done, so it shares nothing with what is still planned.
+    assert _pairs(project, built, pair.format("").replace("- [ ] S5", "- [x] S5")) == []
+
+
+def test_the_drift_names_five_pairs_of_slices_and_counts_the_rest(project: Path, built: Path) -> None:
+    """A plan ordered by its sections alone, with no `after:` edges, would push every later line out."""
+    wide = "".join(f"- [ ] W{k} `shared.md`\n" for k in range(4))
+    lines = _pairs(project, built, wide)
+    assert len(lines) == 6
+    more = "1 more pair(s) of slices share files likewise: each is named here once those above are ordered"
+    assert lines[-1] == f"drift     {more}"
+
+
 def test_a_row_is_marked_for_a_re_plan_once_routed_to_three_agents_and_never_for_its_queues(
     project: Path, built: Path
 ) -> None:
@@ -257,12 +289,29 @@ def test_status_exits_0_where_there_is_no_session_or_a_file_is_torn(project: Pat
     assert done.returncode == 0, done.stderr
     assert any(line.startswith("unclosed  unknown: ") and "line 1 is no JSON object" in line for line in _lines(done))
     assert _lines(done)[-1].endswith(", unclosed unknown, 0 drift")
+    # A torn log hides the spans an estimate starts from, and no other section.
+    (_state(project) / store.LOG).write_bytes(b"torn\n")
+    measured = _lines(inprocess("status", "--measure", cwd=project))
+    assert any(line.startswith("spans     unknown: ") and "line 1 is no JSON object" in line for line in measured)
+    assert measured[-1].startswith("measure: 0 finished, 0 running, ")
+
+
+def _logged(state: Path, kind: str, text: str, minutes: float) -> None:
+    """The log's line of `kind`, `minutes` ago, as the hook that writes that kind words it."""
+    store.append_jsonl(state / store.LOG, {"time": _ago(minutes), "kind": kind, "text": text})
+
+
+def _dispatch(state: Path, name: str, minutes: float) -> None:
+    _logged(state, "dispatch", f"{name} as x1 on opus", minutes)
 
 
 def test_measure_gives_the_figures_an_estimate_starts_from(project: Path, built: Path) -> None:
     for name, minutes in (("W1", 10), ("W2", 30), ("W3", 50)):
         since = {"running": _ago(minutes + 60), "reported": _ago(60)}
         _agent(built, model.Agent(name, "writer", "landed", reports={1: "r"}, since=since))
+        _dispatch(built, name, minutes + 60)
+        _logged(built, "report", f"{name} round 1: DONE", 60)
+    _dispatch(built, "FRESH", 30)
     model.write_rulings(
         built,
         lambda _: [
@@ -274,8 +323,10 @@ def test_measure_gives_the_figures_an_estimate_starts_from(project: Path, built:
     assert done.returncode == 0, done.stderr
     lines = _lines(done)
     assert lines[0].endswith(" · a snapshot")
-    assert "writer    3 finished, median 30 min, longest 50 min from running to reported" in lines
-    assert "running   FRESH (writer): 30 min, context 84,312 tokens" in lines
+    assert "writer    3 finished, median 30 min, longest 50 min, each agent's rounds summed" in lines
+    assert "running   FRESH (writer): 30 min since its dispatch or resume, context 84,312 tokens" in lines
+    # QUIET's dispatch has no line in the log, so its minutes are not guessed from its record.
+    assert any(line.startswith("running   QUIET (writer): minutes unknown, context ") for line in lines)
     assert [line for line in lines if line.startswith("unticked")] == [
         "unticked  S2 docs/guide.md",
         "unticked  S3 tests/",
@@ -288,12 +339,36 @@ def test_measure_gives_the_figures_an_estimate_starts_from(project: Path, built:
     assert lines[-1] == "measure: 3 finished, 3 running, 4 unticked, 1 due, 1 asked and not ruled"
 
 
+def test_measure_sums_a_resumed_agents_rounds_and_counts_no_wait_between_them(project: Path, built: Path) -> None:
+    """A resume stamps `running` again, so the record alone keeps the last round; a span from the first
+    dispatch to the last report would count the 38 minutes the agent sat waiting on an answer."""
+    since = {"running": _ago(1), "reported": _ago(0)}
+    _agent(built, model.Agent("RESUMED", "auditor", "judged", reports={1: "r", 2: "r"}, since=since))
+    _dispatch(built, "RESUMED", 40)
+    _logged(built, "report", "RESUMED round 1: NEEDS-ANSWER", 39)
+    _logged(built, "resume", "RESUMED round 2", 1)
+    _logged(built, "report", "RESUMED round 2: DONE", 0)
+    # A limit's stop ends a round no report ends, so the round before it counts and the wait after it does not.
+    _agent(built, model.Agent("LIMITED", "driver", "reported", reports={1: "r"}))
+    _dispatch(built, "LIMITED", 30)
+    _logged(built, "stopped", "LIMITED: You've hit your limit", 26)
+    _logged(built, "resume", "LIMITED round 1", 10)
+    _logged(built, "report", "LIMITED round 1: DONE", 4)
+    # The running agent's minutes count from its latest start: a resend after one that never landed restarts it.
+    _logged(built, "resume", "FRESH round 2", 12)
+    _logged(built, "resume", "FRESH round 2", 7)
+    lines = _lines(inprocess("status", "--measure", cwd=project))
+    assert "auditor   1 finished, median 2 min, longest 2 min, each agent's rounds summed" in lines
+    assert "driver    1 finished, median 10 min, longest 10 min, each agent's rounds summed" in lines
+    assert any(line.startswith("running   FRESH (writer): 7 min since its dispatch or resume,") for line in lines)
+
+
 def test_measure_lists_what_waits_and_the_context_of_each_agent_holding_rows(project: Path, built: Path) -> None:
     """A slice no agent took reads free unless a running writer's brief owns one of its files."""
     plan = PLAN.replace("- [ ] S3 tests/\n", "- [ ] S3 tests/\n- [ ] S7 `docs/`\n")
     store.write_text(built / store.PLAN, plan)
     lines = _lines(inprocess("status", "--measure", cwd=project))
-    held = "docs/ is in the `Owns:` of {}, a writer running for 30 min"
+    held = "1 of its files is in the `Owns:` of {}, a writer running for 30 min: `docs/`"
     assert [line for line in lines if line.startswith("waits")] == [
         "waits     slice S3, which no agent took: its files are free",
         f"waits     slice S7, which no agent took: {held.format('FRESH')}; {held.format('QUIET')}",
@@ -315,6 +390,19 @@ def test_a_slice_after_another_waits_until_that_one_is_ticked(project: Path, bui
         "waits     slice S8, which no agent took: its files are free",
         "waits     slice S10, which no agent took: it is after S99, which PLAN.md does not list",
     ]
+
+
+def test_a_wide_slice_names_each_holding_writer_once_with_a_count(project: Path, built: Path) -> None:
+    """A clause a path ran a judge and a land to kilobytes a line; `--measure` alone lists the paths."""
+    _brief(built, "FRESH", "writer", "S2", "docs/**")
+    files = [f"docs/part{k}.md" for k in range(30)]
+    wide = "- [ ] S7 " + ", ".join(f"`{path}`" for path in files) + "\n"
+    store.write_text(built / store.PLAN, PLAN.replace("- [ ] S3 tests/\n", f"- [ ] S3 tests/\n{wide}"))
+    said = "waits     slice S7, which no agent took: 30 of its files are in the `Owns:` of FRESH, a writer running for "
+    said += "30 min"
+    assert said in status.paced(built)
+    measured = _lines(inprocess("status", "--measure", cwd=project))
+    assert said + ": " + ", ".join(f"`{path}`" for path in files) in measured
 
 
 def test_a_verb_closes_on_five_waits_lines_and_a_count_of_the_rest(built: Path) -> None:
@@ -357,7 +445,8 @@ def test_end_holds_each_machine_checkable_line_or_names_what_breaks_it(project: 
     # At the end a slice no agent took is drift: planned and never done, or done and never ticked.
     untaken = "S3: no agent took it; dispatch it, tick it if you did it, or remove its line"
     assert f"NOT held  no planned slice untaken: {untaken}" in lines
-    assert lines[-1] == "end: 1 of 9 lines held"
+    assert "held      no frozen tree left" in lines
+    assert lines[-1] == "end: 2 of 10 lines held"
 
 
 def test_an_override_waiting_is_listed_and_holds_the_end_open_until_dropped(project: Path, built: Path) -> None:

@@ -1,6 +1,6 @@
 # Writing a brief
 
-A brief is read once, by an agent that knows nothing else about the work. Its definition holds the bar and every standing rule, so the brief holds only this work. The program writes the header's first three lines; you fill the four lists and write the four sections.
+A brief is read once, by an agent that knows nothing else about the work. Its definition holds the bar and every standing rule, so the brief holds only this work. The program writes the header's first three lines and a writer's `Owns:` from its slice's line, to which you add `(new)` where due; you fill the other lists and write the four sections.
 
 ```text
 Agent: API-RETRY    Type: writer    Slice: S3
@@ -32,7 +32,7 @@ TRAPS     The tests share one fake clock: advance it, since a sleep makes the su
 ## The sections
 
 - `GOAL` says what is to be true afterwards and why the thing is as it is today, because an order written from a measurement alone removes what the code was built to do.
-- `WORK` is numbered items. Each carries `Accept:`, the check named by what it asserts. Where `Rows:` names rows, each item carries `At:`, a symbol, a path or a rule id, since a line number moves. An item that adds a mechanism carries `Harm:`, with the harm it prevents here, how likely that is and who would see it without the mechanism; an item you cannot fill that slot for is not briefed.
+- `WORK` is numbered items. Each carries `Accept:`, the check named by what it asserts; a writer's names a check that runs in its worktree, since an `orchestra` verb reads the session's branch and the primary checkout and so sees no unlanded commit. Where `Rows:` names rows, each item carries `At:`, a symbol, a path or a rule id, since a line number moves. An item that adds a mechanism carries `Harm:`, with the harm it prevents here, how likely that is and who would see it without the mechanism; an item you cannot fill that slot for is not briefed.
 - `PREMISES` holds everything the work rests on that the agent has not seen, each with its source. Another agent's conclusion goes here as a claim.
 - `TRAPS` holds only what is true of this work and stands in no definition.
 

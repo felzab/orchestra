@@ -258,14 +258,22 @@ def test_the_frozen_trees_of_lens_rounds_go_at_the_ending(fleet: Fleet) -> None:
     git(fleet.root, "worktree", "add", "-q", "--detach", str(frozen), head)
     code, out, _ = fleet.run("prune")
     assert code == 0
-    assert f"left {frozen} detached at {head[:9]}" in out
+    # Plain prune leaves it, naming the verb that removes it, which an ending once skipped unseen.
+    ending = (
+        "a frozen tree `diff --tree` made for a lens round: `orchestra prune --ending` removes it at the session's end"
+    )
+    assert f"left {frozen} detached at {head[:9]}: {ending}" in out.splitlines()
     assert frozen.exists()
+    left = f"1 in {fleet.state / 'trees'}: `orchestra prune --ending` removes each"
+    assert f"NOT held  no frozen tree left: {left}" in fleet.run("status", "--end")[1].splitlines()
     code, out, err = fleet.run("prune", "--ending")
     assert code == 0, (out, err)
     assert f"removed {frozen}: the frozen tree of a lens round" in out
     assert out.splitlines()[-1] == "prune: removed 1, kept 0"
     assert not frozen.exists()
     assert str(frozen.as_posix()) not in git(fleet.root, "worktree", "list", "--porcelain")
+    # Its trash is being deleted already, so it holds the line open no longer.
+    assert "held      no frozen tree left" in fleet.run("status", "--end")[1].splitlines()
     wait_gone(fleet.state / "trees" / TRASH)
 
 
@@ -374,7 +382,7 @@ def test_two_spellings_of_one_tree_name_one_tree(tmp_path: Path) -> None:
     else:
         other = tmp_path / "other"
         other.symlink_to(real)
-    assert prune.strangers([prune.Tree(other)], {prune.Tree(real).key}) == []
+    assert prune.strangers([prune.Tree(other)], {prune.Tree(real).key}, tmp_path / "trees") == []
 
 
 def test_a_stopped_writer_with_no_tree_and_no_branch_left_is_settled(fleet: Fleet) -> None:
