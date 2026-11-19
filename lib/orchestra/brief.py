@@ -134,8 +134,21 @@ def owned(patterns: Iterable[str], path: str) -> bool:
     return any(_share(held, _automaton(pattern)) for pattern in patterns)
 
 
+@functools.cache
+def _start(pattern: str) -> str:
+    """The text every path the pattern names begins with: its literal part before the first `*`."""
+    pattern = pattern.replace("\\", "/").removeprefix("./")
+    return pattern.partition("*")[0] if "*" in pattern else pattern.rstrip("/")
+
+
 def overlap(one: str, other: str) -> bool:
-    """Whether two patterns name a path in common, whether or not that path exists yet."""
+    """Whether two patterns name a path in common, whether or not that path exists yet.
+
+    Two patterns whose literal starts diverge share none, which settles most pairs without the automata.
+    """
+    left, right = _start(one), _start(other)
+    if not (left.startswith(right) or right.startswith(left)):
+        return False
     return _share(_automaton(one), _automaton(other))
 
 
