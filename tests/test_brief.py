@@ -100,6 +100,11 @@ def test_a_writers_owns_is_filled_from_its_slices_line_in_the_plan(project: Path
     for name, kind, slice_ in (("B", "writer", "S2"), ("C", "writer", "S3"), ("D", "auditor", "S1")):
         assert inprocess("brief", name, "--type", kind, "--slice", slice_, cwd=project).returncode == 0
         assert brief.header(state, name).labels["Owns"] == ""
+    # So does a missing plan: the brief is written all the same.
+    (state / store.PLAN).unlink()
+    done = inprocess("brief", "E", "--type", "writer", "--slice", "S1", cwd=project)
+    assert done.returncode == 0, done.stderr
+    assert brief.header(state, "E").labels["Owns"] == ""
 
 
 def test_a_reader_or_a_driver_is_briefed_outside_the_plan_with_no_slice_and_a_writer_on_none_is_drift(

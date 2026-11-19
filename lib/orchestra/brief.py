@@ -310,7 +310,12 @@ def _planned(state: Path, slice_: str) -> list[str]:
     view = importlib.import_module("orchestra.status")
     read = typing.cast("Callable[[str], tuple[str, list[str], list[str]]]", view._slice)
     heading = typing.cast("str", importlib.import_module("orchestra.init").SLICES)
-    for section, _, text in model.plan_lines(state):
+    try:
+        lines = model.plan_lines(state)
+    except Refused:
+        # No plan names the slice's files, so the label is left to be filled, as for a line naming none.
+        return []
+    for section, _, text in lines:
         if section == heading and text:
             held, files, _ = read(text)
             if held == slice_:
