@@ -577,6 +577,28 @@ def test_a_resume_past_the_context_ceiling_is_refused_naming_the_figure(project:
     assert decision(said)[0] == "allow"
 
 
+def test_a_writer_stopped_on_a_question_past_the_ceiling_is_answered_and_a_finished_one_is_not_resumed(
+    project: Path, state: Path
+) -> None:
+    """Until its question is answered, `judge`, `land` and `prune --discard` hold it, so no successor could take over."""
+    write_config(project, {"stateRoot": (project.parent / "state").as_posix(), "contextCeiling": 100_000})
+    briefed(project, "W", "writer", owns="lib/a.py")
+    dispatched(project, "W", "writer", "w1")
+    git(project, "worktree", "add", "-b", "worktree-agent-w1", str(project.parent / "trees" / "agent-w1"))
+    transcript(project.parent / "claude-config", "w1", line("assistant", "m1", 150_000))
+    sent = {"to": "W", "message": "Keep the old name."}
+    changed(state, "W", status="judged", outcome="DONE", branch="worktree-agent-w1")
+    said = hook("PreToolUse", project, tool_name="SendMessage", tool_input=sent)[1]
+    assert str(decision(said)[1]).startswith(
+        "W's context is 150,474 tokens, over the configuration's contextCeiling of 100,000"
+    )
+    for outcome in ("BLOCKED", "NEEDS-ANSWER"):
+        changed(state, "W", status="reported", outcome=outcome, reports={1: "reports/W.md"})
+        told = f"Keep the old name.\n\nThis continues round 1: complete your report at {report.path(state, 'W')}."
+        said = hook("PreToolUse", project, tool_name="SendMessage", tool_input=sent)[1]
+        assert decision(said) == ("allow", sent | {"message": told}), outcome
+
+
 def test_a_reported_agent_is_set_running_in_its_next_round_before_the_message_reaches_it(
     project: Path, state: Path
 ) -> None:

@@ -523,6 +523,8 @@ def _addressee(state: Path, to: object) -> model.Agent | None:
 def _resume(where: Where, given: Record) -> str | None:
     """A resume refused where its worktree is gone, its report unjudged or its context too large; else its next report.
 
+    The context's ceiling spares the answer to a report stopped on a question, which closes that round.
+
     A message to an agent mid-turn resumes nothing: it reads it at its next turn. A `running` record whose
     turn ended is resumed, since the send that wrote it may never have landed.
     """
@@ -543,7 +545,9 @@ def _resume(where: Where, given: Record) -> str | None:
     elif (unjudged := findings.unjudged(agent)) is not None:
         # `judge` reads an agent's latest round alone, so a round begun before it would leave this one's unread.
         why = unjudged
-    else:
+    elif agent.outcome not in report.STOPPED:
+        # A report stopped on a question is no ceiling's: its answer is the one message that closes the round,
+        # and until then `judge`, `land` and `prune --discard` hold the agent, so a successor could take nothing.
         size, ceiling = context.size(agent, where.session), config.load(root).context_ceiling
         if size is not None and size > ceiling:
             why = (
