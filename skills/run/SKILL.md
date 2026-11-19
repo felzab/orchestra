@@ -45,6 +45,7 @@ Give no agent a deadline or a token budget, because a model under time pressure 
 
 - Cut the work by file: `PLAN.md` lists every file each slice writes, since two writers in one file conflict at landing. A file two slices need has one owner; the other slice follows its landing.
 - A second writer goes out only on files disjoint from every running writer's. Agents of the other types run in parallel.
+- To give a running writer a file outside its `Owns:`, edit its brief's `Owns:`, run `orchestra brief NAME --check`, which checks the line against running agents and unlanded trees, and tell the writer by message, since its landing reads the edited line.
 - Name each coupling that is no file edge, such as a rule and its check: coupled files share a wave and an auditor.
 - The ownership gives the landing order, written into `PLAN.md`: a contract two agents build against lands before the second forks. One session is one branch and one pull request.
 - Where several briefs rest on premises nobody has checked against the branch, one researcher settles them first.

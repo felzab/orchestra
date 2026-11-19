@@ -79,6 +79,7 @@ RULES = {
     ),
     "skills/run/SKILL.md": (
         "a dispatch waits for nothing but its `after:` edges and its files",
+        "To give a running writer a file outside its `Owns:`, edit its brief's `Owns:`, run `orchestra brief",
     ),
 }
 
