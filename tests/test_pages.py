@@ -35,7 +35,7 @@ BUDGETS = {
     "skills/end/SKILL.md": 500,
     "skills/resume/SKILL.md": 500,
     "skills/plan/SKILL.md": 1900,
-    "skills/agent/SKILL.md": 5800,
+    "skills/agent/SKILL.md": 6500,
     "agents/writer.md": 7150,
     "agents/driver.md": 5000,
     "agents/researcher.md": 4500,
@@ -69,6 +69,15 @@ BUDGETED = ("skills/", "agents/", "lenses/")
 READ = (*BUDGETED, "docs/")
 # The one skill an agent definition preloads, which `disable-model-invocation` would keep from loading.
 PRELOADED = "agent"
+
+# Rules a session showed missing, each held at the page whose reader acts on it, so a trim that drops one fails.
+RULES = {
+    "skills/agent/SKILL.md": (
+        "A turn you end to wait on your own background command or monitor is a stop",
+        "so append no `; echo exit=$?`",
+        "with `$?`, `;`, `$(...)`, a loop or a heredoc is refused by Claude Code's worktree check, so run it plain",
+    ),
+}
 
 # The fields every agent definition carries, and those added by whether its agent commits. The validator
 # passes a misspelt field and Claude Code ignores it: a `tools:` line lost that way hands an auditor a shell.
@@ -195,6 +204,11 @@ def test_the_core_and_the_owner_skills_name_commands() -> None:
     assert "orchestra status || true" in commands(_text("skills/status/SKILL.md"))
     assert "orchestra land NAME --preview" in commands(_text("skills/run/SKILL.md"))
     assert not parses("orchestra land NAME --dry-run")
+
+
+@pytest.mark.parametrize(("page", "rule"), [(page, rule) for page, rules in RULES.items() for rule in rules])
+def test_each_page_keeps_its_rule(page: str, rule: str) -> None:
+    assert rule in _text(page)
 
 
 @pytest.mark.parametrize("page", [page for page in PAGES if page.startswith("skills/") and page.endswith("/SKILL.md")])
