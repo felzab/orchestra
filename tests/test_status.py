@@ -296,9 +296,13 @@ def test_status_exits_0_where_there_is_no_session_or_a_file_is_torn(project: Pat
     assert measured[-1].startswith("measure: 0 finished, 0 running, ")
 
 
+def _logged(state: Path, kind: str, text: str, minutes: float) -> None:
+    """The log's line of `kind`, `minutes` ago, as the hook that writes that kind words it."""
+    store.append_jsonl(state / store.LOG, {"time": _ago(minutes), "kind": kind, "text": text})
+
+
 def _dispatch(state: Path, name: str, minutes: float) -> None:
-    """The log's line for the agent's dispatch, `minutes` ago, as the dispatch hook writes it."""
-    store.append_jsonl(state / store.LOG, {"time": _ago(minutes), "kind": "dispatch", "text": f"{name} as x1 on opus"})
+    _logged(state, "dispatch", f"{name} as x1 on opus", minutes)
 
 
 def test_measure_gives_the_figures_an_estimate_starts_from(project: Path, built: Path) -> None:
@@ -306,6 +310,7 @@ def test_measure_gives_the_figures_an_estimate_starts_from(project: Path, built:
         since = {"running": _ago(minutes + 60), "reported": _ago(60)}
         _agent(built, model.Agent(name, "writer", "landed", reports={1: "r"}, since=since))
         _dispatch(built, name, minutes + 60)
+        _logged(built, "report", f"{name} round 1: DONE", 60)
     _dispatch(built, "FRESH", 30)
     model.write_rulings(
         built,
@@ -318,8 +323,8 @@ def test_measure_gives_the_figures_an_estimate_starts_from(project: Path, built:
     assert done.returncode == 0, done.stderr
     lines = _lines(done)
     assert lines[0].endswith(" · a snapshot")
-    assert "writer    3 finished, median 30 min, longest 50 min from dispatch to last report" in lines
-    assert "running   FRESH (writer): 30 min since its dispatch, context 84,312 tokens" in lines
+    assert "writer    3 finished, median 30 min, longest 50 min, each agent's rounds summed" in lines
+    assert "running   FRESH (writer): 30 min since its dispatch or resume, context 84,312 tokens" in lines
     # QUIET's dispatch has no line in the log, so its minutes are not guessed from its record.
     assert any(line.startswith("running   QUIET (writer): minutes unknown, context ") for line in lines)
     assert [line for line in lines if line.startswith("unticked")] == [
@@ -334,15 +339,28 @@ def test_measure_gives_the_figures_an_estimate_starts_from(project: Path, built:
     assert lines[-1] == "measure: 3 finished, 3 running, 4 unticked, 1 due, 1 asked and not ruled"
 
 
-def test_measure_counts_a_resumed_agents_whole_run_from_its_dispatch(project: Path, built: Path) -> None:
-    """A resume stamps `running` again, so the record alone would read a 39-minute run as its last minute."""
-    since = {"running": _ago(2), "reported": _ago(1)}
+def test_measure_sums_a_resumed_agents_rounds_and_counts_no_wait_between_them(project: Path, built: Path) -> None:
+    """A resume stamps `running` again, so the record alone keeps the last round; a span from the first
+    dispatch to the last report would count the 38 minutes the agent sat waiting on an answer."""
+    since = {"running": _ago(1), "reported": _ago(0)}
     _agent(built, model.Agent("RESUMED", "auditor", "judged", reports={1: "r", 2: "r"}, since=since))
     _dispatch(built, "RESUMED", 40)
-    # A later dispatch line of the same name moves nothing: the first is the start.
-    _dispatch(built, "RESUMED", 5)
+    _logged(built, "report", "RESUMED round 1: NEEDS-ANSWER", 39)
+    _logged(built, "resume", "RESUMED round 2", 1)
+    _logged(built, "report", "RESUMED round 2: DONE", 0)
+    # A limit's stop ends a round no report ends, so the round before it counts and the wait after it does not.
+    _agent(built, model.Agent("LIMITED", "driver", "reported", reports={1: "r"}))
+    _dispatch(built, "LIMITED", 30)
+    _logged(built, "stopped", "LIMITED: You've hit your limit", 26)
+    _logged(built, "resume", "LIMITED round 1", 10)
+    _logged(built, "report", "LIMITED round 1: DONE", 4)
+    # The running agent's minutes count from its latest start: a resend after one that never landed restarts it.
+    _logged(built, "resume", "FRESH round 2", 12)
+    _logged(built, "resume", "FRESH round 2", 7)
     lines = _lines(inprocess("status", "--measure", cwd=project))
-    assert "auditor   1 finished, median 39 min, longest 39 min from dispatch to last report" in lines
+    assert "auditor   1 finished, median 2 min, longest 2 min, each agent's rounds summed" in lines
+    assert "driver    1 finished, median 10 min, longest 10 min, each agent's rounds summed" in lines
+    assert any(line.startswith("running   FRESH (writer): 7 min since its dispatch or resume,") for line in lines)
 
 
 def test_measure_lists_what_waits_and_the_context_of_each_agent_holding_rows(project: Path, built: Path) -> None:
