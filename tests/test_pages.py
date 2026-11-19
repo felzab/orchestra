@@ -84,7 +84,17 @@ RULES = {
 }
 # Pages whose `!` output Claude Code re-attaches after a compaction cut to their first 5,000 tokens
 # (https://code.claude.com/docs/en/skills, "Skill content lifecycle"): the output goes last, so the cut drops it first.
-INJECTING = ("skills/run/SKILL.md", "skills/estimate/SKILL.md", "skills/away/SKILL.md", "skills/back/SKILL.md")
+INJECTING = (
+    "skills/run/SKILL.md",
+    "skills/estimate/SKILL.md",
+    "skills/away/SKILL.md",
+    "skills/back/SKILL.md",
+    "skills/checkpoint/SKILL.md",
+    "skills/end/SKILL.md",
+    "skills/plan/SKILL.md",
+    "skills/resume/SKILL.md",
+    "skills/status/SKILL.md",
+)
 
 # The fields every agent definition carries, and those added by whether its agent commits. The validator
 # passes a misspelt field and Claude Code ignores it: a `tools:` line lost that way hands an auditor a shell.

@@ -4,6 +4,6 @@ disable-model-invocation: true
 allowed-tools: Bash(orchestra *)
 ---
 
-!`orchestra status || true`
+Read `${CLAUDE_PLUGIN_ROOT}/skills/run/checkpoint.md` and run its steps, starting from the block below.
 
-Read `${CLAUDE_PLUGIN_ROOT}/skills/run/checkpoint.md` and run its steps, starting from the block above.
+!`orchestra status || true`

@@ -4,6 +4,6 @@ disable-model-invocation: true
 allowed-tools: Bash(orchestra *)
 ---
 
-!`orchestra status --end || true`
+Read `${CLAUDE_PLUGIN_ROOT}/skills/run/end.md` and run it to its end, starting from the block below.
 
-Read `${CLAUDE_PLUGIN_ROOT}/skills/run/end.md` and run it to its end, starting from the block above.
+!`orchestra status --end || true`
