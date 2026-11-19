@@ -121,4 +121,5 @@ longer subject short in its commit lists, for example
 | `CI`    | `.github/`                                                         |
 | `Repo`  | the manifests, `evals/`, `pyproject.toml`, the schema and the rest |
 
-A merge commit keeps the subject git or `orchestra land NAME` gives it, `Merge <branch> into <branch>`.
+A merge commit's subject is `Merge <branch> into <branch>`, as `orchestra land NAME` writes it; give
+your own merge that subject with `git merge -m`.
