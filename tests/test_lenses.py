@@ -114,8 +114,8 @@ def test_the_end_holds_each_due_lens_by_a_judged_report_of_its_type_or_a_declini
         _judged(changed, name, kind, lens)
     # A reader given several lenses holds each its type runs: how wide one reader goes is the coordinator's call.
     _judged(changed, "GROUPED", "auditor", "security, contract")
-    # An auditor cannot answer the question of a lens a researcher runs.
-    _judged(changed, "WRONG", "auditor", "disclosure")
+    # An auditor cannot answer the question of a lens a researcher runs, grouped with another or not.
+    _judged(changed, "WRONG", "auditor", "disclosure, conformance")
     # Pruned or landed before its report was judged, an agent's brief holds no lens: its review was never banked.
     _judged(changed, "UNJUDGED", "auditor", "essential, contract")
     write_agent(changed, model.Agent("UNJUDGED", "auditor", "pruned", reports={1: "r"}, outcome="DONE"))
@@ -123,6 +123,7 @@ def test_the_end_holds_each_due_lens_by_a_judged_report_of_its_type_or_a_declini
     assert line.startswith("NOT held  each due lens judged or declined: no judged report and no")
     missing = line.partition(" note for ")[2].split(", ")
     assert "disclosure (read by an auditor; its Run by line names a researcher)" in missing
+    assert "conformance (read by an auditor; its Run by line names a researcher)" in missing
     assert "essential" in missing
     # Undeclared, it is read or declined as a due lens is, since nothing says whether the change touches it.
     assert "cost (undeclared)" in missing
