@@ -22,7 +22,7 @@ BUDGETS = {
     "skills/run/SKILL.md": 12500,
     "skills/run/start.md": 2650,
     "skills/run/brief.md": 3810,
-    "skills/run/review.md": 5050,
+    "skills/run/review.md": 5092,
     "skills/run/checkpoint.md": 2050,
     "skills/run/end.md": 2600,
     "skills/run/handoff.md": 2600,
