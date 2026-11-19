@@ -62,6 +62,8 @@ def git_alone(tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.Monk
     _git_alone(monkeypatch, tmp_path_factory.mktemp("git-config"))
     # A case run inside a Claude Code session would otherwise claim its state for that session.
     monkeypatch.delenv("CLAUDE_CODE_SESSION_ID", raising=False)
+    # The hooks find a session from the project root it names, so it would lead a case into the caller's checkout.
+    monkeypatch.delenv("CLAUDE_PROJECT_DIR", raising=False)
     # A window the contributor set would outrank every settings file `init` reads; a case wanting one sets it.
     monkeypatch.delenv("CLAUDE_CODE_AUTO_COMPACT_WINDOW", raising=False)
 

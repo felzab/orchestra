@@ -308,8 +308,9 @@ def window(root: Path, model: str | None) -> int | None:
     `WINDOW_ENV` outranks every settings key; else the first settings file that sets a window for the model
     or for every model decides, its window for the model first (settings-reference.md, "modelSettings"),
     where Claude Code writes each entry under the model's canonical name, the name a transcript records.
-    `WINDOW_TOKENS`, init's own, where nothing sets one; `"auto"`, the model's tuned window, is None. A
-    window given by `--autocompact` for one launch is the session's alone, and not read.
+    None where nothing sets one, as `_window` says such a session runs at Claude Code's default window, a
+    figure no file holds; `"auto"`, the model's tuned window, is None too. A window given by `--autocompact`
+    for one launch is the session's alone, and not read.
     """
     if held := _tokens(os.environ.get(WINDOW_ENV, "")):
         return held
@@ -318,7 +319,7 @@ def window(root: Path, model: str | None) -> int | None:
         found = found if found is not None else _setting(path, WINDOW)
         if found is not None:
             return found if isinstance(found, int) and not isinstance(found, bool) else None
-    return WINDOW_TOKENS
+    return None
 
 
 def _tokens(value: str) -> int | None:
@@ -436,13 +437,15 @@ def _rewrite(root: Path, folder: Path | None, yourself: str, *, set_window: bool
         settings[WINDOW] = WINDOW_TOKENS
         # Claude Code applies most edits to a running session, and its page names this key nowhere among those read
         # only at the start (settings.md, "When edits take effect"); but a desktop session started from a pre-warmed
-        # process reads neither the project's file nor this one (anthropics/claude-code issue 105316), so the owner
-        # is told the scope it reads. The user's settings reach every project, so writing there is the owner's call.
+        # process did not apply the window the project's file or this one sets (anthropics/claude-code issue 105316),
+        # so the owner is told what was seen to reach one, and what is expected to but untested. The user's settings
+        # reach every project, so writing there is the owner's call.
         said.append(f"set `{WINDOW}` to {WINDOW_TOKENS} in {path}, as no settings file sets a window")
         said.append(
-            "a desktop session started from a pre-warmed process skips the project's settings files"
-            " (anthropics/claude-code issue 105316), and a window in the user settings reaches it:"
-            f' `"{WINDOW}": {WINDOW_TOKENS}` at the top level of {config.claude_dir() / "settings.json"}'
+            "a desktop session started from a pre-warmed process did not apply the window the project's or the local"
+            " settings file sets (anthropics/claude-code issue 105316); `/autocompact 500k` typed inside such a"
+            f" session was seen to apply, saving a window for its model in {config.claude_dir() / 'settings.json'},"
+            f' and `"{WINDOW}": {WINDOW_TOKENS}` at the top level of that file is expected to reach it, untested'
         )
     store.replace_bytes(path, dumped(settings, text).encode("utf-8"))
     return said

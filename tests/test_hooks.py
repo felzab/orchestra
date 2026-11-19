@@ -19,7 +19,7 @@ from typing import cast
 
 import pytest
 
-from conftest import LIB, git, inprocess, write_config
+from conftest import LIB, MakeRepo, git, inprocess, write_config
 from orchestra import context, events, findings, hooks, log, model, queue, report, store
 from test_context import line, transcript
 from test_report import text
@@ -253,11 +253,14 @@ def test_another_session_in_the_same_checkout_gets_no_answer(project: Path) -> N
     assert hook("UserPromptSubmit", project, prompt="hi")[1] is not None
 
 
-def test_a_coordinator_whose_shell_left_the_checkout_is_found_from_the_project_root(project: Path, state: Path) -> None:
+def test_a_coordinator_whose_shell_left_the_checkout_is_found_from_the_project_root(
+    project: Path, state: Path, make_repo: MakeRepo
+) -> None:
     """A Bash `cd` moves the input's `cwd`, and the state's folder is a working directory a `cd` stays in.
 
     Claude Code exports the project root where the session started as `CLAUDE_PROJECT_DIR`, which no `cd` moves;
-    an agent's `cwd` stays its own folder, from which its branch is read.
+    an agent's `cwd` stays its own folder, from which its branch is read. A `cwd` in a clone holding a session
+    of its own is answered from that session, the project root's left unread.
     """
     root = {"CLAUDE_PROJECT_DIR": str(project)}
     briefed(project, "A", "auditor")
@@ -275,6 +278,13 @@ def test_a_coordinator_whose_shell_left_the_checkout_is_found_from_the_project_r
         None,
     )
     assert model.read_agent(state, "W").branch == "worktree-agent-w1"
+    second = make_repo(project.parent / "second")
+    write_config(second, {"stateRoot": (project.parent / "state").as_posix()})
+    assert run("init", "s2", cwd=second).returncode == 0
+    briefed(second, "B", "auditor")
+    call = {"description": "B", "prompt": "B", "subagent_type": "orchestra:auditor"}
+    # Only the second clone's session holds B's brief, so the first's would refuse this dispatch.
+    assert decision(hook("PreToolUse", second, tool_name="Agent", tool_input=call, env=root)[1])[0] == "allow"
 
 
 def test_an_agents_stop_is_recorded_whichever_session_holds_the_lease(project: Path, state: Path) -> None:
@@ -1133,14 +1143,23 @@ def test_a_prompt_past_the_compaction_window_tells_the_coordinator_and_the_owner
     main.write_bytes(line("assistant", "m0", 900_000) + line("user") + line("assistant", "m1", 500_000))
     said = hook("UserPromptSubmit", project, prompt="go", transcript_path=str(main))[1]
     assert context_of(said, "UserPromptSubmit").endswith(
-        " Your context is 500,474 tokens, past the 500,000-token compaction window, which has not applied:"
-        " suggest the owner type `/compact` at the next seam."
+        " Your context is 500,474 tokens, past the 500,000-token compaction window, which has not applied;"
+        " only the owner can type `/compact`."
     )
     assert field(said, "systemMessage") == (
         "orchestra: this session's context is 500,474 tokens, past its 500,000-token compaction window, which has not"
         " applied: type `/compact` at the next seam."
     )
     main.write_bytes(line("assistant", "m0", 900_000) + line("user") + line("assistant", "m1", 499_000))
+    said = hook("UserPromptSubmit", project, prompt="go", transcript_path=str(main))[1]
+    assert "compaction" not in context_of(said, "UserPromptSubmit")
+    assert "systemMessage" not in cast("dict[str, object]", said)
+    # With no window set the session runs at Claude Code's default, a figure no file holds, so none is assumed.
+    local = project / ".claude" / "settings.local.json"
+    settings = json.loads(local.read_bytes())
+    del settings["autoCompactWindow"]
+    local.write_bytes(json.dumps(settings).encode())
+    main.write_bytes(line("assistant", "m1", 900_000))
     said = hook("UserPromptSubmit", project, prompt="go", transcript_path=str(main))[1]
     assert "compaction" not in context_of(said, "UserPromptSubmit")
     assert "systemMessage" not in cast("dict[str, object]", said)

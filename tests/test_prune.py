@@ -259,8 +259,10 @@ def test_the_frozen_trees_of_lens_rounds_go_at_the_ending(fleet: Fleet) -> None:
     code, out, _ = fleet.run("prune")
     assert code == 0
     # Plain prune leaves it, naming the verb that removes it, which an ending once skipped unseen.
-    ending = "a frozen tree `diff --tree` made for a lens round: `orchestra prune --ending` removes it"
-    assert f"left {frozen} detached at {head[:9]}: {ending}" in out
+    ending = (
+        "a frozen tree `diff --tree` made for a lens round: `orchestra prune --ending` removes it at the session's end"
+    )
+    assert f"left {frozen} detached at {head[:9]}: {ending}" in out.splitlines()
     assert frozen.exists()
     left = f"1 in {fleet.state / 'trees'}: `orchestra prune --ending` removes each"
     assert f"NOT held  no frozen tree left: {left}" in fleet.run("status", "--end")[1].splitlines()
