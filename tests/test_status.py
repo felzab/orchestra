@@ -293,7 +293,7 @@ def test_measure_lists_what_waits_and_the_context_of_each_agent_holding_rows(pro
     plan = PLAN.replace("- [ ] S3 tests/\n", "- [ ] S3 tests/\n- [ ] S7 `docs/`\n")
     store.write_text(built / store.PLAN, plan)
     lines = _lines(inprocess("status", "--measure", cwd=project))
-    held = "docs/ is in the `Owns:` of {}, a writer running for 30 min"
+    held = "1 of its files is in the `Owns:` of {}, a writer running for 30 min: `docs/`"
     assert [line for line in lines if line.startswith("waits")] == [
         "waits     slice S3, which no agent took: its files are free",
         f"waits     slice S7, which no agent took: {held.format('FRESH')}; {held.format('QUIET')}",
@@ -315,6 +315,19 @@ def test_a_slice_after_another_waits_until_that_one_is_ticked(project: Path, bui
         "waits     slice S8, which no agent took: its files are free",
         "waits     slice S10, which no agent took: it is after S99, which PLAN.md does not list",
     ]
+
+
+def test_a_wide_slice_names_each_holding_writer_once_with_a_count(project: Path, built: Path) -> None:
+    """A clause a path ran a judge and a land to kilobytes a line; `--measure` alone lists the paths."""
+    _brief(built, "FRESH", "writer", "S2", "docs/**")
+    files = [f"docs/part{k}.md" for k in range(30)]
+    wide = "- [ ] S7 " + ", ".join(f"`{path}`" for path in files) + "\n"
+    store.write_text(built / store.PLAN, PLAN.replace("- [ ] S3 tests/\n", f"- [ ] S3 tests/\n{wide}"))
+    said = "waits     slice S7, which no agent took: 30 of its files are in the `Owns:` of FRESH, a writer running for "
+    said += "30 min"
+    assert said in status.paced(built)
+    measured = _lines(inprocess("status", "--measure", cwd=project))
+    assert said + ": " + ", ".join(f"`{path}`" for path in files) in measured
 
 
 def test_a_verb_closes_on_five_waits_lines_and_a_count_of_the_rest(built: Path) -> None:

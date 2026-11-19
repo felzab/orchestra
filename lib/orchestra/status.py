@@ -447,7 +447,7 @@ def measure(snap: Snapshot) -> tuple[list[str], str]:
         size = context.size(agent)
         lines.append(_row("running", f"{agent.name} ({agent.type}): {took}, context {_tokens(size)}"))
     holds, _ = _guarded("holds", lambda: _holders(snap.state, snap.agents))
-    waiting, _ = _guarded("waits", lambda: waits(snap.state, snap.agents, snap.clock))
+    waiting, _ = _guarded("waits", lambda: waits(snap.state, snap.agents, snap.clock, paths=True))
     ci, _ = _guarded("CI", lambda: _ci_minutes(snap.state))
     plan, unticked = _guarded(
         "unticked", lambda: [_row("unticked", text) for _, ticked, text in plan_lines(snap.state) if not ticked]
@@ -604,12 +604,14 @@ def _slice(text: str) -> tuple[str, list[str], list[str]]:
     return name, CODE_RE.findall(rest), [other for word in after.split() if (other := word.strip("`,"))]
 
 
-def waits(state: Path, agents: list[model.Agent], clock: datetime.datetime) -> list[str]:
+def waits(state: Path, agents: list[model.Agent], clock: datetime.datetime, *, paths: bool = False) -> list[str]:
     """Each unticked slice no agent took and each queue item whose event has not happened: work that may start now.
 
-    A slice's line names each running agent whose brief owns one of its files and each unticked slice
-    its `after:` names, or says its files are free, so a slice planned after another without needing
-    its files or its contract reads as free.
+    A slice's line names each running agent whose brief owns one of its files, once with how many, and
+    each unticked slice its `after:` names, or says its files are free, so a slice planned after another
+    without needing its files or its contract reads as free. Only `paths` lists the files themselves:
+    `--measure` lists every line, and `land` and `judge` close on the count alone, since a wide slice's
+    paths ran a line to kilobytes at every landing.
     """
     heading = init.SLICES
     planned = [(ticked, _slice(text)) for section, ticked, text in plan_lines(state) if section == heading and text]
@@ -635,12 +637,13 @@ def waits(state: Path, agents: list[model.Agent], clock: datetime.datetime) -> l
                 for other in after
                 if other not in done
             ]
-            held += [
-                f"{path} is in the `Owns:` of {agent.name}, {report.article(agent.type)} {_for(agent, clock)}"
-                for path in files
-                for agent in writing
-                if any(brief.overlap(path, pattern) for pattern in heads[agent.name].owns)
-            ]
+            for agent in writing:
+                hit = [path for path in files if any(brief.overlap(path, owns) for owns in heads[agent.name].owns)]
+                if not hit:
+                    continue
+                count = "1 of its files is" if len(hit) == 1 else f"{len(hit)} of its files are"
+                said = f"{count} in the `Owns:` of {agent.name}, {report.article(agent.type)} {_for(agent, clock)}"
+                held.append(said + (": " + ", ".join(f"`{path}`" for path in hit) if paths else ""))
             said = "; ".join(held) if held else "its files are free"
             lines.append(_row("waits", f"slice {name}, which no agent took: {said}"))
     due = {item.number for item in queue.due(state)}
