@@ -19,7 +19,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 # The most bytes each page under these folders may hold, counted as git stores it.
 BUDGETS = {
-    "skills/run/SKILL.md": 12050,
+    "skills/run/SKILL.md": 12500,
     "skills/run/start.md": 2550,
     "skills/run/brief.md": 3600,
     "skills/run/review.md": 5050,
@@ -76,6 +76,9 @@ RULES = {
         "A turn you end to wait on your own background command or monitor is a stop",
         "so append no `; echo exit=$?`",
         "with `$?`, `;`, `$(...)`, a loop or a heredoc is refused by Claude Code's worktree check, so run it plain",
+    ),
+    "skills/run/SKILL.md": (
+        "a dispatch waits for nothing but its `after:` edges and its files",
     ),
 }
 
