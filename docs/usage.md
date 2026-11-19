@@ -180,9 +180,11 @@ them there.
 | `estimate`      | can the remaining work finish sooner                        |
 
 At the review, `orchestra diff` prints each lens due from the changed paths, with the files that
-made it due and the agent type that runs it. The coordinator gives each to an agent of its own, of
-that type, or declines it with a recorded reason, and the session's ending holds only once every
-due lens has a judged report from such an agent whose brief names that lens alone, or such a note.
+made it due and the agent type that runs it. The coordinator gives each to an agent of that type,
+alone or with other lenses of that type on one brief's `Lens:` line, as
+[the review page](../skills/run/review.md) says when, or declines it with a recorded reason. The
+session's ending holds only once every due lens has a judged report from such an agent whose brief
+names that lens, alone or with others, or such a note.
 A lens due only where the project declares it, and not declared, is printed as `undeclared` and is
 read or declined like a due one; [the `lenses` key](#the-configuration-file) declares it.
 
@@ -194,8 +196,11 @@ pushes once a wave, the agents dispatched together, which land before the next p
 Judging gives each finding of a report an owner or a closing; a finding so recorded is a row, such
 as `BILLING-F1`. Once the session's files stop moving, agents read the whole change with each lens
 due, a verifier tests their findings, one round of writers fixes what holds, a driver new to the
-work uses what ships, and fresh readers read the fixes. The ending, the lines under the plan's
-`## Ending`, runs at `/orchestra:end`.
+work uses what ships, and fresh readers read the fixes where a defect in them could pass unseen.
+How many readers go out, which lenses share one, and whether a cross-cutting change gets a reader of
+its own or the fixes a further round, the coordinator judges from what changed and what a defect
+there could break, and records each choice as a `Review:` note in the log. The ending, the lines
+under the plan's `## Ending`, runs at `/orchestra:end`.
 
 To see where the session stands:
 
