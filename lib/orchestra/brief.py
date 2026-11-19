@@ -463,7 +463,7 @@ def _changed(root: Path, branch: str, ref: str, tree: Path | None) -> set[str]:
         paths |= set(config.git(root, "diff", "-z", "--name-only", f"refs/heads/{branch}...{ref}").split("\0"))
     if tree is not None and tree.is_dir():
         # Without `core.longpaths`, Git for Windows with the `core.fscache` its installer sets reads a path past 260
-        # characters, as a frozen tree under the state's long folder holds, as deleted and still exits 0; other
+        # characters, as an agent's worktree under `.claude/worktrees/` can hold, as deleted and still exits 0; other
         # platforms ignore the key.
         listed = config.git(tree, "-c", "core.longpaths=true", "status", "--porcelain", "-z", "--untracked-files=all")
         entries = iter(listed.split("\0"))
@@ -475,10 +475,20 @@ def _changed(root: Path, branch: str, ref: str, tree: Path | None) -> set[str]:
     return paths - {""}
 
 
+def _frozen(tree: Path) -> bool:
+    """Whether a worktree is a review tree `diff --tree` made: a folder in a session state's `trees/`.
+
+    Told by the folder's shape, a `trees/` beside the state's session file, since the desktop app can
+    register the redirected physical path, which no configured root names.
+    """
+    return tree.parent.name == store.TREES and (tree.parent.parent / store.SESSION).is_file()
+
+
 def _unlanded(root: Path, branch: str, agents: list[model.Agent], name: str) -> dict[str, set[str]]:
     """Each other worktree's and each live agent's branch's changed paths, by who holds it.
 
     A driver's are left out: it commits nothing and reverts what it plants, so nothing of its worktree lands.
+    So is a review tree, any session's, which a lens reader reads and nothing lands from.
     """
     owner = {agent.branch: agent.name for agent in agents if agent.branch}
     planting = {agent.branch for agent in agents if agent.branch and agent.type == "driver"}
@@ -487,7 +497,7 @@ def _unlanded(root: Path, branch: str, agents: list[model.Agent], name: str) -> 
     # The first is the primary checkout, which holds the session branch itself.
     for tree in config.worktrees(root)[1:]:
         held = tree.get("branch", "")
-        if owner.get(held) == name or held in planting:
+        if owner.get(held) == name or held in planting or _frozen(Path(tree["worktree"])):
             continue
         seen.add(held)
         who = f"{owner[held]} ({held})" if held in owner else held or tree["worktree"]
