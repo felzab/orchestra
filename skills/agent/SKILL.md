@@ -59,7 +59,7 @@ Harm: <the concrete harm>. Likelihood: <how likely, and on what evidence>.
 ## Outside the scope
 ```
 
-- `<n>` is the round your `Report:` line names.
+- `<n>` is the round your `Report:` line names, or the round your latest resume names.
 - `STATUS` is `DONE`, `DONE-WITH-CONCERNS`, `BLOCKED` or `NEEDS-ANSWER`. A researcher, an auditor and a verifier write `Commits: none`.
 - Copy each finding's heading line, after its `### `, into `## Summary` unchanged, since the stop hook compares the two. The summary's other lines hold at most 1,500 bytes together, in words a reader who saw none of your work understands. Your final message is that section followed by the report's path.
 - A finding's first line holds both `Harm:` and `Likelihood:`, since the stop hook reads that one line.
