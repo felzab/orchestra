@@ -114,7 +114,7 @@ def test_a_turn_the_last_64_kib_settle_reads_nothing_before_them(
             msvcrt.locking(held.fileno(), msvcrt.LK_UNLCK, path.stat().st_size - context.FIRST_BYTES)
 
 
-def test_the_last_call_is_read_from_the_tail_and_from_the_whole_only_where_the_tail_holds_none(tmp_path: Path) -> None:
+def test_the_last_call_is_read_from_the_tail_alone(tmp_path: Path) -> None:
     """Each of the coordinator's prompts reads its transcript, which reaches hundreds of megabytes."""
     if sys.platform != "win32":
         pytest.skip("only Windows refuses a read of a byte range another handle locked")
@@ -131,11 +131,9 @@ def test_the_last_call_is_read_from_the_tail_and_from_the_whole_only_where_the_t
             msvcrt.locking(held.fileno(), msvcrt.LK_UNLCK, path.stat().st_size - context.TAIL_BYTES)
     assert last is not None
     assert context.tokens(context.as_object(last.get("usage"))) == 2 + 472 + 900_000
-    # A tail holding no call, as after a long tool result, reads on to the whole file.
+    # A tail holding no call, as after a long tool result, reads as none rather than reading the whole file.
     path.write_bytes(line("assistant", "m1", 9) + filler + line("user"))
-    last = context.last_call(path)
-    assert last is not None
-    assert last.get("id") == "m1"
+    assert context.last_call(path) is None
     path.write_bytes(line("user"))
     assert context.last_call(path) is None
 

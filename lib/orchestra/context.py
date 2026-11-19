@@ -72,20 +72,18 @@ def calls(path: Path) -> list[dict[str, object]]:
 
 
 def last_call(path: Path) -> dict[str, object] | None:
-    """The message of a transcript's last call, its `usage` and `model` among its keys; None where it made none.
+    """The message of a transcript's last call, its `usage` and `model` among its keys; None where its tail holds none.
 
-    Read from the transcript's tail, and from the whole file only where the tail holds no call, so a main
-    session's transcript of hundreds of megabytes costs a hook one read of a megabyte.
+    Read from the transcript's last `TAIL_BYTES` alone, so a main session's transcript of hundreds of megabytes
+    costs a hook one read of a megabyte. A tail holding no call, as after a pasted image wider than it, reads
+    as none: the whole file would cost a prompt more than twice its size in memory, and the next prompt reads again.
     """
-    made: list[dict[str, object]] = []
-    for offset in dict.fromkeys((max(0, path.stat().st_size - TAIL_BYTES), 0)):
-        with path.open("rb") as held:
-            held.seek(offset)
-            data = held.read()
-        # A read from the middle starts inside a line.
-        made = _made(data.splitlines()[1:] if offset else data.splitlines())
-        if made:
-            break
+    offset = max(0, path.stat().st_size - TAIL_BYTES)
+    with path.open("rb") as held:
+        held.seek(offset)
+        data = held.read()
+    # A read from the middle starts inside a line.
+    made = _made(data.splitlines()[1:] if offset else data.splitlines())
     return made[-1] if made else None
 
 
