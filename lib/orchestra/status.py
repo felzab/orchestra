@@ -757,6 +757,7 @@ def end(snap: Snapshot) -> tuple[list[str], str]:
         ("each due lens judged or declined", lambda: _lenses(snap)),
         ("no override waiting", lambda: _armed(snap.state)),
         ("no planned slice untaken", lambda: _drifted(_untaken(snap.state, snap.agents))),
+        ("no frozen tree left", lambda: _frozen(snap.state)),
     ]
     lines: list[str] = []
     held = 0
@@ -779,6 +780,15 @@ def _armed(state: Path) -> str | None:
     since = str(held.get("time") or "")[:16].replace("T", " ")
     caller = held.get("for") or "the coordinator"
     return f"for {caller} since {since}: {held.get('reason')}; `orchestra override --drop` removes it"
+
+
+def _frozen(state: Path) -> str | None:
+    """The review's frozen trees the state still holds, each a registered git worktree; None where none is left."""
+    folder = state / store.TREES
+    # The trash a removal renames a tree into is being deleted already.
+    entries = folder.iterdir() if folder.is_dir() else ()
+    held = [entry for entry in entries if entry.is_dir() and entry.name != prune.TRASH]
+    return f"{len(held)} in {folder}: `orchestra prune --ending` removes each" if held else None
 
 
 def _drifted(untaken: list[str]) -> str | None:

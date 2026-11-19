@@ -427,7 +427,8 @@ def test_end_holds_each_machine_checkable_line_or_names_what_breaks_it(project: 
     # At the end a slice no agent took is drift: planned and never done, or done and never ticked.
     untaken = "S3: no agent took it; dispatch it, tick it if you did it, or remove its line"
     assert f"NOT held  no planned slice untaken: {untaken}" in lines
-    assert lines[-1] == "end: 1 of 9 lines held"
+    assert "held      no frozen tree left" in lines
+    assert lines[-1] == "end: 2 of 10 lines held"
 
 
 def _reader(state: Path, name: str, kind: model.AgentType, lens: str) -> None:
