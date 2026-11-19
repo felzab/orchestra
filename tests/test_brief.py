@@ -79,6 +79,29 @@ def test_the_header_is_filled_from_the_state_and_git(project: Path, state: Path)
     assert "exists, and what is written in it would be lost" in again.stderr
 
 
+def test_a_writers_owns_is_filled_from_its_slices_line_in_the_plan(project: Path, state: Path) -> None:
+    """The plan's line names the slice's files in backticks, as `status` reads it, so nobody copies them by hand."""
+    plan = (
+        "# Plan\n\n## Slices and their files\n\n"
+        "- [ ] S1 the module `lib/a.py` and `docs/[id]/page.md` after: `S0`, S2\n"
+        "- [ ] S2 a slice whose line names no file\n\n"
+        "## Landing order\n\n- [ ] S3 `lib/a.py`\n"
+    )
+    store.write_text(state / store.PLAN, plan)
+    done = inprocess("brief", "A", "--type", "writer", "--slice", "S1", cwd=project)
+    assert done.returncode == 0, done.stderr
+    assert "Owns: lib/a.py, docs/[id]/page.md" in (state / "briefs" / "A.md").read_bytes().decode().splitlines()
+    assert brief.header(state, "A").owns == ("lib/a.py", "docs/[id]/page.md")
+    assert done.stdout.splitlines()[1] == (
+        "A briefed as a writer on S1: `Owns:` holds the 2 path(s) its line in PLAN.md names;"
+        " fill Rows, Writes and Lens and the four sections, then --check"
+    )
+    # A line naming no file, a line under another heading and a reader's brief leave the label to be filled.
+    for name, kind, slice_ in (("B", "writer", "S2"), ("C", "writer", "S3"), ("D", "auditor", "S1")):
+        assert inprocess("brief", name, "--type", kind, "--slice", slice_, cwd=project).returncode == 0
+        assert brief.header(state, name).labels["Owns"] == ""
+
+
 def test_a_reader_or_a_driver_is_briefed_outside_the_plan_with_no_slice_and_a_writer_on_none_is_drift(
     project: Path, state: Path
 ) -> None:

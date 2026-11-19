@@ -1,7 +1,8 @@
 """`brief`: a brief's header written from the state and git, and the brief checked before its dispatch.
 
-The tool writes the header, so no value in it is typed; the coordinator fills `Owns:`, `Rows:`,
-`Writes:` and `Lens:`, adds `Model: <profile>` where the agent needs a profile of the configuration's
+The tool writes the header, so no value in it is typed, and a writer's `Owns:` with the files its
+slice's line in PLAN.md names in backticks; the coordinator fills `Rows:`, `Writes:`, `Lens:` and
+any `Owns:` left empty, adds `Model: <profile>` where the agent needs a profile of the configuration's
 `models` other than `default`, and writes the four sections below them. `--check` judges only what has a fixed
 shape, and stamps the agent's record with the SHA-256 of the brief's bytes, so an edit made after
 the check leaves the brief unchecked.
@@ -17,10 +18,11 @@ import argparse
 import dataclasses
 import functools
 import hashlib
+import importlib
 import itertools
 import re
 import typing
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -289,12 +291,28 @@ def run(args: argparse.Namespace) -> int:
     return write(state, here.root, args.name, args.type, cli.one_line(slice_))
 
 
+def _planned(state: Path, slice_: str) -> list[str]:
+    """The files the plan's line for the slice names in backticks, as `status` reads that line; none without one."""
+    # Imported here: the hooks import this module and none of them reads the status view, which imports this one.
+    view = importlib.import_module("orchestra.status")
+    read = typing.cast("Callable[[str], tuple[str, list[str], list[str]]]", view._slice)
+    heading = typing.cast("str", importlib.import_module("orchestra.init").SLICES)
+    for section, _, text in model.plan_lines(state):
+        if section == heading and text:
+            held, files, _ = read(text)
+            if held == slice_:
+                return files
+    return []
+
+
 def write(state: Path, root: Path, name: str, kind: model.AgentType, slice_: str) -> int:
     path = brief_path(state, name)
     if path.exists():
         raise Refused(f"{path} exists, and what is written in it would be lost: edit it, or choose another name")
     session = model.read_session(state)
     commit = config.git(root, "rev-parse", "--short", "--verify", f"refs/heads/{session.branch}").strip()
+    # A writer's files are those its slice's line names; a reader's or a driver's slice owns none of them.
+    owns = _planned(state, slice_) if kind == SLICED else []
 
     def create(held: store.Record | None) -> store.Record:
         if held is not None:
@@ -308,7 +326,7 @@ def write(state: Path, root: Path, name: str, kind: model.AgentType, slice_: str
             f"Agent: {name}    Type: {kind}    Slice: {slice_}",
             f"Base: {session.branch} at {commit}",
             f"Report: {report.path(state, name)}",
-            *(f"{label}:" for label in LISTS),
+            *(f"{label}: {', '.join(owns)}" if label == "Owns" and owns else f"{label}:" for label in LISTS),
             "",
             *SECTIONS,
             "",
@@ -317,10 +335,14 @@ def write(state: Path, root: Path, name: str, kind: model.AgentType, slice_: str
     store.write_text(path, text)
     store.write_text(path.with_name(f"{name}.messages.md"), "")
     print(path)
-    print(
-        f"{name} briefed as {report.article(kind)} on {slice_}: fill Owns, Rows, Writes and Lens and the four sections,"
-        " then --check"
-    )
+    briefed = f"{name} briefed as {report.article(kind)} on {slice_}"
+    if owns:
+        print(
+            f"{briefed}: `Owns:` holds the {len(owns)} path(s) its line in PLAN.md names;"
+            " fill Rows, Writes and Lens and the four sections, then --check"
+        )
+    else:
+        print(f"{briefed}: fill Owns, Rows, Writes and Lens and the four sections, then --check")
     return DONE
 
 
