@@ -606,7 +606,7 @@ def test_a_resume_past_the_context_ceiling_is_refused_naming_the_figure(project:
 def test_a_writer_stopped_on_a_question_past_the_ceiling_is_answered_and_a_finished_one_is_not_resumed(
     project: Path, state: Path
 ) -> None:
-    """Until its question is answered, `judge`, `land` and `prune --discard` hold it, so no successor could take over."""
+    """Until its question is answered, `judge`, `land` and `prune --discard` hold it, so no successor takes over."""
     write_config(project, {"stateRoot": (project.parent / "state").as_posix(), "contextCeiling": 100_000})
     briefed(project, "W", "writer", owns="lib/a.py")
     dispatched(project, "W", "writer", "w1")
