@@ -1,6 +1,6 @@
 [project]
 name = "orchestra"
-version = "0.2.0"
+version = "0.3.0"
 description = "A Claude Code plugin that runs a fleet of agents from state files one program owns."
 requires-python = ">=3.11"
 # The program runs on the standard library alone, so the plugin needs no install step.
