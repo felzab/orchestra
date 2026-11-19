@@ -164,6 +164,38 @@ def test_the_overview_says_what_runs_what_waits_and_what_drifted(project: Path, 
     assert lines[-1] == "status: 3 running (2 suspect), 3 to judge, 1 to resume, 1 due, 3 unclosed, 2 drift"
 
 
+def _pairs(project: Path, built: Path, added: str) -> list[str]:
+    """The drift lines naming unticked slices that share files, with `added` planned after S3."""
+    store.write_text(built / store.PLAN, PLAN.replace("- [ ] S3 tests/\n", f"- [ ] S3 tests/\n{added}"))
+    lines = _lines(inprocess("status", cwd=project))
+    return [line for line in lines if line.startswith("drift     ") and "share" in line]
+
+
+def test_two_unticked_slices_sharing_files_with_no_after_edge_drift(project: Path, built: Path) -> None:
+    """The plan and the estimate read them as parallel, while `brief --check` refuses the second as the first runs."""
+    pair = "- [ ] S5 `docs/a.md`, `src/b.py`\n- [ ] S6 `notes/x.md`, `docs/`{}\n"
+    said = (
+        "drift     slices S5 and S6 share 1 file(s), `docs/` first, and neither is after the other: the second's"
+        " brief is refused while the first runs, so name S5 in S6's `after:`"
+    )
+    assert _pairs(project, built, pair.format("")) == [said]
+    assert _pairs(project, built, pair.format(" after: S5")) == []
+    # An edge through a third slice orders them as well, a ticked one included.
+    assert _pairs(project, built, pair.format(" after: S1") + "- [x] S1b `x/` after: S5\n") == [said]
+    assert _pairs(project, built, pair.format(" after: S1b") + "- [x] S1b `x/` after: S5\n") == []
+    # A ticked slice is done, so it shares nothing with what is still planned.
+    assert _pairs(project, built, pair.format("").replace("- [ ] S5", "- [x] S5")) == []
+
+
+def test_the_drift_names_five_pairs_of_slices_and_counts_the_rest(project: Path, built: Path) -> None:
+    """A plan ordered by its sections alone, with no `after:` edges, would push every later line out."""
+    wide = "".join(f"- [ ] W{k} `shared.md`\n" for k in range(4))
+    lines = _pairs(project, built, wide)
+    assert len(lines) == 6
+    more = "1 more pair(s) of slices share files likewise: each is named here once those above are ordered"
+    assert lines[-1] == f"drift     {more}"
+
+
 def test_a_row_is_marked_for_a_re_plan_once_routed_to_three_agents_and_never_for_its_queues(
     project: Path, built: Path
 ) -> None:

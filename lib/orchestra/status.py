@@ -69,6 +69,8 @@ LABEL = 10
 WAITS_SHOWN = 5
 # What a slice line ends with to name the slices whose contract it needs, none of whose files it writes.
 AFTER = " after:"
+# The most pairs of unticked slices sharing files that the drift names; a count says how many more.
+PAIRS_SHOWN = 5
 # The usage limits as `/usage` reports them run headless, with no customisation loaded and no transcript
 # kept; its assistant message carries `usage_report` (the Agent SDK's TypeScript reference, `SDKUsageReport`).
 USAGE_RUN = ("-p", "/usage", "--safe-mode", "--no-session-persistence", "--output-format", "stream-json", "--verbose")
@@ -323,7 +325,8 @@ def slices(state: Path) -> dict[str, bool]:
 
 
 def _drift(snap: Snapshot) -> list[str]:
-    """What drifted from the plan: files no landed brief or ticked slice owns, and agents on no slice.
+    """What drifted from the plan: files no landed brief or ticked slice owns, agents on no slice, and slices
+    planned as parallel that share files.
 
     A ticked slice's line names the files it wrote in backticks, `` - [x] <SLICE> `<file>`... ``, which
     owns them as a brief would: the coordinator makes the edits it can spell out itself, with no brief.
@@ -355,7 +358,50 @@ def _drift(snap: Snapshot) -> list[str]:
     for path in filter(None, changed.split("\0")):
         if not brief.owned(owned, path):
             lines.append(_row("drift", f"{path}: changed since the base, and no landed brief or ticked slice owns it"))
+    return lines + _parallel(snap.state)
+
+
+def _parallel(state: Path) -> list[str]:
+    """Each two unticked slices whose files overlap while neither is after the other, however many steps back.
+
+    The plan and the estimate read such a pair as parallel, while `brief --check` refuses the second's
+    brief as long as the first's agent runs.
+    """
+    heading = init.SLICES
+    planned = [(ticked, _slice(text)) for section, ticked, text in plan_lines(state) if section == heading and text]
+    after = {name: named for _, (name, _, named) in planned}
+    unticked = [(name, files) for ticked, (name, files, _) in planned if not ticked and files]
+    reach = {name: _before(name, after) for name, _ in unticked}
+    lines: list[str] = []
+    for at, (one, mine) in enumerate(unticked):
+        for other, theirs in unticked[at + 1 :]:
+            if one in reach[other] or other in reach[one]:
+                continue
+            if shared := [path for path in theirs if any(brief.overlap(path, held) for held in mine)]:
+                said = f"share {len(shared)} file(s), `{shared[0]}` first, and neither is after the other"
+                lines.append(
+                    _row(
+                        "drift",
+                        f"slices {one} and {other} {said}: the second's brief is refused while the first runs,"
+                        f" so name {one} in {other}'s `after:`",
+                    )
+                )
+    if len(lines) > PAIRS_SHOWN:
+        # A plan ordered by its sections alone held 258 such pairs, which would push every later line out.
+        more = f"{len(lines) - PAIRS_SHOWN} more pair(s) of slices share files likewise"
+        lines = [*lines[:PAIRS_SHOWN], _row("drift", f"{more}: each is named here once those above are ordered")]
     return lines
+
+
+def _before(name: str, after: dict[str, list[str]]) -> set[str]:
+    """Every slice the named one's `after:` reaches, through the slices it names in turn."""
+    seen: set[str] = set()
+    todo = list(after.get(name, ()))
+    while todo:
+        if (held := todo.pop()) not in seen:
+            seen.add(held)
+            todo += after.get(held, ())
+    return seen
 
 
 def _untaken(state: Path, agents: list[model.Agent]) -> list[str]:
