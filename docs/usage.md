@@ -379,7 +379,8 @@ them with its brief, from the primary checkout as they are on disk, like the con
 - **`.claude/orchestra/lenses/<name>.md`** is a lens of the project's own, or replaces the plugin's
   lens of the same name. It keeps the plugin's five parts: the question, what to read first, a
   numbered checklist, what is not its business, and whether a failure it looks for is silent. It
-  ends with the two lines the program reads. `**Run by.**` is `auditor`, `driver` or `researcher`.
+  ends with the two lines the program reads, each read as Markdown reads a paragraph, so a row a
+  formatter soft-wraps over several lines reads as one line. `**Run by.**` is `auditor`, `driver` or `researcher`.
   `**Applies.**` is one of `always`; `paths` and backticked patterns separated by commas,
   optionally followed by `except` and more patterns; `declared`, due only where a trigger names
   it, and held at the ending as a due lens is while no trigger names it; and `on request`, which
