@@ -1,6 +1,6 @@
 # Writing a brief
 
-A brief is read once, by an agent that knows nothing else about the work. Its definition holds the bar and every standing rule, so the brief holds only this work. The program writes the header's first three lines; you fill the four lists and write the four sections.
+A brief is read once, by an agent that knows nothing else about the work. Its definition holds the bar and every standing rule, so the brief holds only this work. The program writes the header's first three lines and a writer's `Owns:` from its slice's line, to which you add `(new)` where due; you fill the other lists and write the four sections.
 
 ```text
 Agent: API-RETRY    Type: writer    Slice: S3
