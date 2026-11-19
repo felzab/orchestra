@@ -30,8 +30,8 @@ The fixes from the second project session that ran on the plugin.
 - `orchestra status --measure` measures an agent from its dispatch, not from its last resume.
 - The dispatch names the first report's title and its round.
 - An agent's rules say a turn ended to wait on its own background command is a stop, that a long
-  check runs in the foreground with its timeout named, and that a command naming `git` in a
-  worktree runs plain, with no `; echo exit=$?`.
+  check runs in the foreground with its timeout named, and that a command in a worktree runs plain,
+  with no `;`, `$?`, `$(...)`, loop or heredoc.
 - Every command page puts its injected output last, so a compaction's cut keeps its orders.
 - The estimate projects the weekly usage window beside the end time, and the first estimate may
   follow the researchers that map the plan.

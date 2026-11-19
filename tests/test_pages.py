@@ -75,7 +75,7 @@ RULES = {
     "skills/agent/SKILL.md": (
         "A turn you end to wait on your own background command or monitor is a stop",
         "so append no `; echo exit=$?`",
-        "with `$?`, `;`, `$(...)`, a loop or a heredoc is refused by Claude Code's worktree check, so run it plain",
+        "in a worktree, run each command plain, with no `;`, `$?`, `$(...)`, loop or heredoc",
     ),
     "skills/run/SKILL.md": (
         "a dispatch waits for nothing but its `after:` edges and its files",
