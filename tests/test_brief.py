@@ -410,6 +410,9 @@ def test_a_star_matches_within_a_folder_and_two_across_folders(path: str, patter
         ("lib/**/z.py", "lib/a/*/z.py", True),
         ("docs", "docs/a.md", True),
         ("a/*/c", "a/b/*", True),
+        # The automaton reads a leading `./` and a backslash as the plain spelling, so the prefilter must too.
+        ("./lib/a.py", "lib/**", True),
+        ("lib\\a.py", "lib/a.py", True),
         ("lib/*.py", "lib/a/b.py", False),
         ("docs", "docsx", False),
         ("a/*.md", "a/*.py", False),
