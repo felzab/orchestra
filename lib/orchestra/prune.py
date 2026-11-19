@@ -378,7 +378,11 @@ def strangers(every: list[Tree], claimed: set[object], frozen: Path) -> list[str
             f"({tree.branch})" if tree.branch else (f"detached at {tree.head[:9]}" if tree.head else "git lists none")
         )
         if _key(tree.path.parent) == review:
-            ending = "a frozen tree `diff --tree` made for a lens round: `orchestra prune --ending` removes it"
+            # The session's end, named so a checkpoint mid-review leaves the trees its lens readers read.
+            ending = (
+                "a frozen tree `diff --tree` made for a lens round:"
+                " `orchestra prune --ending` removes it at the session's end"
+            )
             said.append(f"left {tree.path} {what}: {ending}")
         else:
             said.append(f"left {tree.path} {what}: no agent of this session holds it")
