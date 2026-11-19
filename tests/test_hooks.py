@@ -1119,6 +1119,29 @@ def test_each_prompt_carries_the_clock_and_a_gap_past_half_an_hour_names_usage(p
     assert " 31 minutes have passed since the previous prompt. A usage figure read before that is stale:" in shown
 
 
+@pytest.mark.usefixtures("state")
+def test_a_prompt_past_the_compaction_window_tells_the_coordinator_and_the_owner(project: Path) -> None:
+    """A desktop session started from a pre-warmed process was seen skipping the window its project's settings set.
+
+    The window is the one `init` wrote to the local settings; the transcript's last call decides, not its largest.
+    """
+    main = project.parent / "main.jsonl"
+    main.write_bytes(line("assistant", "m0", 900_000) + line("user") + line("assistant", "m1", 500_000))
+    said = hook("UserPromptSubmit", project, prompt="go", transcript_path=str(main))[1]
+    assert context_of(said, "UserPromptSubmit").endswith(
+        " Your context is 500,474 tokens, past the 500,000-token compaction window, which has not applied:"
+        " suggest the owner type `/compact` at the next seam."
+    )
+    assert field(said, "systemMessage") == (
+        "orchestra: this session's context is 500,474 tokens, past its 500,000-token compaction window, which has not"
+        " applied: type `/compact` at the next seam."
+    )
+    main.write_bytes(line("assistant", "m0", 900_000) + line("user") + line("assistant", "m1", 499_000))
+    said = hook("UserPromptSubmit", project, prompt="go", transcript_path=str(main))[1]
+    assert "compaction" not in context_of(said, "UserPromptSubmit")
+    assert "systemMessage" not in cast("dict[str, object]", said)
+
+
 def test_a_hook_reads_each_agents_transcript_in_the_session_its_input_names(project: Path, state: Path) -> None:
     """Whether Claude Code puts the session's id in a hook's environment is not established; its input names it.
 

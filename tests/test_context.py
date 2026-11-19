@@ -114,6 +114,32 @@ def test_a_turn_the_last_64_kib_settle_reads_nothing_before_them(
             msvcrt.locking(held.fileno(), msvcrt.LK_UNLCK, path.stat().st_size - context.FIRST_BYTES)
 
 
+def test_the_last_call_is_read_from_the_tail_and_from_the_whole_only_where_the_tail_holds_none(tmp_path: Path) -> None:
+    """Each of the coordinator's prompts reads its transcript, which reaches hundreds of megabytes."""
+    if sys.platform != "win32":
+        pytest.skip("only Windows refuses a read of a byte range another handle locked")
+    filler = b'{"type": "progress"}\n' * (2 * context.TAIL_BYTES // 21)
+    path = tmp_path / "main.jsonl"
+    path.write_bytes(line("assistant", "m1", 9) + filler + line("user") + line("assistant", "m2", 900_000))
+    with path.open("rb+") as held:
+        # Everything before the last MiB is locked, so a read reaching into it fails.
+        msvcrt.locking(held.fileno(), msvcrt.LK_NBLCK, path.stat().st_size - context.TAIL_BYTES)
+        try:
+            last = context.last_call(path)
+        finally:
+            held.seek(0)
+            msvcrt.locking(held.fileno(), msvcrt.LK_UNLCK, path.stat().st_size - context.TAIL_BYTES)
+    assert last is not None
+    assert context.tokens(context.as_object(last.get("usage"))) == 2 + 472 + 900_000
+    # A tail holding no call, as after a long tool result, reads on to the whole file.
+    path.write_bytes(line("assistant", "m1", 9) + filler + line("user"))
+    last = context.last_call(path)
+    assert last is not None
+    assert last.get("id") == "m1"
+    path.write_bytes(line("user"))
+    assert context.last_call(path) is None
+
+
 def test_a_clock_time_is_rounded_up_to_the_minute() -> None:
     """A time named as the earliest something succeeds must never be early."""
     moment = datetime.datetime.now().astimezone().replace(hour=21, minute=17, second=0, microsecond=0)

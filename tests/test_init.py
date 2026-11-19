@@ -358,6 +358,34 @@ def test_a_window_for_one_model_or_from_the_environment_is_left_as_it_is_and_nam
     assert "autoCompactWindow" not in json.loads((project / init.SETTINGS_LOCAL).read_bytes())
 
 
+def test_the_window_in_force_is_the_variables_else_the_first_files_for_the_model_or_every_model(
+    project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The window a coordinator's prompt compares its context with (settings-reference.md, "modelSettings")."""
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(project.parent / "claude-config"))
+    model = "claude-opus-5-5"
+    assert init.window(project, model) == init.WINDOW_TOKENS
+    models = {"modelSettings": {model: {"autoCompactWindow": 300000}}}
+    _settings(project, "user").write_bytes(json.dumps({"autoCompactWindow": 900000, **models}).encode())
+    # In one file a model's own window outranks the window for every model, and binds that model alone.
+    assert (init.window(project, model), init.window(project, "claude-other"), init.window(project, None)) == (
+        300000,
+        900000,
+        900000,
+    )
+    # A higher-ranked file's window for every model outranks a lower one's for the model.
+    _settings(project, "local").write_bytes(b'{"autoCompactWindow": 700000}')
+    assert init.window(project, model) == 700000
+    # `auto` is the model's tuned window, a figure no file holds.
+    tuned = {"modelSettings": {model: {"autoCompactWindow": "auto"}}}
+    _settings(project, "local").write_bytes(json.dumps(tuned).encode())
+    assert init.window(project, model) is None
+    monkeypatch.setenv("CLAUDE_CODE_AUTO_COMPACT_WINDOW", "400k")
+    assert init.window(project, model) == 400_000
+    monkeypatch.setenv("CLAUDE_CODE_AUTO_COMPACT_WINDOW", "1M")
+    assert init.window(project, model) == 1_000_000
+
+
 def test_init_refuses_a_session_that_exists_and_a_branch_that_holds_one(project: Path) -> None:
     assert inprocess("init", "s1", cwd=project).returncode == 0
     again = inprocess("init", "s2", cwd=project)
