@@ -79,6 +79,29 @@ def test_the_header_is_filled_from_the_state_and_git(project: Path, state: Path)
     assert "exists, and what is written in it would be lost" in again.stderr
 
 
+def test_a_writers_owns_is_filled_from_its_slices_line_in_the_plan(project: Path, state: Path) -> None:
+    """The plan's line names the slice's files in backticks, as `status` reads it, so nobody copies them by hand."""
+    plan = (
+        "# Plan\n\n## Slices and their files\n\n"
+        "- [ ] S1 the module `lib/a.py` and `docs/[id]/page.md` after: `S0`, S2\n"
+        "- [ ] S2 a slice whose line names no file\n\n"
+        "## Landing order\n\n- [ ] S3 `lib/a.py`\n"
+    )
+    store.write_text(state / store.PLAN, plan)
+    done = inprocess("brief", "A", "--type", "writer", "--slice", "S1", cwd=project)
+    assert done.returncode == 0, done.stderr
+    assert "Owns: lib/a.py, docs/[id]/page.md" in (state / "briefs" / "A.md").read_bytes().decode().splitlines()
+    assert brief.header(state, "A").owns == ("lib/a.py", "docs/[id]/page.md")
+    assert done.stdout.splitlines()[1] == (
+        "A briefed as a writer on S1: `Owns:` holds the 2 path(s) its line in PLAN.md names;"
+        " fill Rows, Writes and Lens and the four sections, then --check"
+    )
+    # A line naming no file, a line under another heading and a reader's brief leave the label to be filled.
+    for name, kind, slice_ in (("B", "writer", "S2"), ("C", "writer", "S3"), ("D", "auditor", "S1")):
+        assert inprocess("brief", name, "--type", kind, "--slice", slice_, cwd=project).returncode == 0
+        assert brief.header(state, name).labels["Owns"] == ""
+
+
 def test_a_reader_or_a_driver_is_briefed_outside_the_plan_with_no_slice_and_a_writer_on_none_is_drift(
     project: Path, state: Path
 ) -> None:
@@ -259,9 +282,35 @@ def test_a_drivers_worktree_holds_no_path_of_a_writers_brief(project: Path, stat
     assert check(project, "A")[1][:-1] == ["lib/a.py is changed by PROBE (worktree-agent-d1), unlanded"]
 
 
+def test_a_frozen_review_tree_holds_no_path_and_a_detached_tree_elsewhere_does(
+    project: Path, state: Path, tmp_path: Path
+) -> None:
+    """`diff --tree` checks a commit out for a lens reader, and nothing of it lands; an ending that skipped
+    `prune --ending` leaves it registered, so the next session's briefs meet a previous session's tree."""
+    earlier = tmp_path / "earlier-state"
+    (earlier / store.TREES).mkdir(parents=True)
+    (earlier / store.SESSION).write_bytes(b"{}\n")
+    frozen = earlier / store.TREES / git(project, "rev-parse", "main")
+    git(project, "worktree", "add", "-q", "--detach", str(frozen), "main")
+    (frozen / "lib" / "a.py").write_bytes(b"read and left changed\n")
+    # A `trees/` folder that holds no session file beside it is no session state's.
+    loose = tmp_path / "elsewhere" / store.TREES / "loose"
+    git(project, "worktree", "add", "-q", "--detach", str(loose), "main")
+    (loose / "docs" / "[id]" / "page.md").write_bytes(b"changed\n")
+    briefed(project, "A", owns="lib/a.py")
+    assert check(project, "A") == (0, [f"A's brief is checked: {state / 'briefs' / 'A.md'}"])
+    briefed(project, "B", owns="docs/[id]/page.md")
+    lines = check(project, "B")[1][:-1]
+    assert len(lines) == 1, lines
+    assert lines[0].startswith("docs/[id]/page.md is changed by ")
+    assert lines[0].endswith("/loose, unlanded")
+
+
 @pytest.mark.skipif(sys.platform != "win32", reason="the 260-character path limit is Windows' alone")
-def test_a_frozen_tree_whose_paths_pass_windows_limit_changes_none_of_them(project: Path, state: Path) -> None:
-    """`git status` reads such a path as deleted unless `core.longpaths` is set, and exits 0 all the same."""
+@pytest.mark.usefixtures("state")
+def test_a_worktree_whose_paths_pass_windows_limit_changes_none_of_them(project: Path, tmp_path: Path) -> None:
+    """`git status` reads such a path as deleted unless `core.longpaths` is set, and exits 0 all the same; an
+    agent's worktree sits deeper than the checkout, under `.claude/worktrees/`."""
     # Git for Windows' installer sets `core.fscache` in the system configuration, which the suite leaves out; with
     # it, a path too long to read is reported missing rather than skipped with a warning.
     git(project, "config", "core.fscache", "true")
@@ -273,9 +322,8 @@ def test_a_frozen_tree_whose_paths_pass_windows_limit_changes_none_of_them(proje
     (project / deep).write_bytes(b"deep\n")
     git(project, "add", deep)
     git(project, "commit", "-m", "deep")
-    frozen = inprocess("diff", "--tree", cwd=project)
-    assert frozen.returncode == 0, frozen.stderr
-    tree = state / store.TREES / git(project, "rev-parse", "main")
+    tree = tmp_path / ("worktree" * 5)
+    git(project, "-c", "core.longpaths=true", "worktree", "add", "-q", "--detach", str(tree), "main")
     assert len(str(tree / deep)) > 260, len(str(tree / deep))
     briefed(project, "A", owns=deep)
     code, lines = check(project, "A")

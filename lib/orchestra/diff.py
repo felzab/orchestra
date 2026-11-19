@@ -6,10 +6,11 @@ files' encodings. A lens reader that
 needs more than the change reads `--tree`'s detached worktree, which stays at the captured commit
 while the session branch moves on; `prune` removes it at the ending.
 
-Each lens file states when it is due and which agent type runs it, in two lines the program reads:
-`**Applies.**` and `**Run by.**`. A file of the project's own under `.claude/orchestra/lenses/`
-replaces the plugin's of its name, and `lenses.triggers` in the configuration adds the project's
-paths, so the lenses due follow from the changed paths rather than from a list someone remembers.
+Each lens file states when it is due and which agent type runs it, in two rows the program reads:
+`**Applies.**` and `**Run by.**`, each a paragraph a formatter may wrap. A file of the project's own
+under `.claude/orchestra/lenses/` replaces the plugin's of its name, and `lenses.triggers` in the
+configuration adds the project's paths, so the lenses due follow from the changed paths rather than
+from a list someone remembers.
 """
 
 from __future__ import annotations
@@ -32,10 +33,12 @@ MESSAGES = ("--no-color", "--no-decorate", "--no-show-signature", "--no-mailmap"
 
 PLUGIN_LENSES = Path(__file__).resolve().parents[2] / "lenses"
 PROJECT_LENSES = Path(".claude", "orchestra", "lenses")
-# Each label's value runs to the line's end, one closing full stop dropped; a project's file checked out
-# with CRLF line ends, as Git for Windows' `core.autocrlf` does, ends each line on a carriage return.
-APPLIES_RE = re.compile(r"^\*\*Applies\.\*\*[ \t]+(?P<value>.*?)\.?[ \t\r]*$", re.MULTILINE)
-RUN_BY_RE = re.compile(r"^\*\*Run by\.\*\*[ \t]+(?P<value>.*?)\.?[ \t\r]*$", re.MULTILINE)
+# Each label's value is its Markdown paragraph, which a formatter's prose wrap may break over lines: the
+# lines from the label up to a blank line, a line opening another bold label, or the end. A project's file
+# checked out with CRLF line ends, as Git for Windows' `core.autocrlf` does, ends each line on a carriage return.
+ROW = r"(?![^ \t\r\n])(?P<value>[^\n]*(?:\n(?![ \t\r]*$|\*\*)[^\n]*)*)"
+APPLIES_RE = re.compile(rf"^\*\*Applies\.\*\*{ROW}", re.MULTILINE)
+RUN_BY_RE = re.compile(rf"^\*\*Run by\.\*\*{ROW}", re.MULTILINE)
 LIST = r"`[^`]+`(?:, `[^`]+`)*"
 PATHS_RE = re.compile(rf"paths (?P<paths>{LIST})(?: except (?P<except>{LIST}))?")
 PATTERN_RE = re.compile(r"`([^`]+)`")
@@ -75,10 +78,12 @@ class Due:
 
 
 def _value(pattern: re.Pattern[str], text: str, label: str, path: Path) -> str:
+    """The label's paragraph as one line, as CommonMark reads a soft line break, its closing full stop dropped."""
     found = [match["value"] for match in pattern.finditer(text)]
     if len(found) != 1:
         raise Refused(f"{path} holds {len(found)} `**{label}.**` lines, and a lens file holds one")
-    return found[0]
+    # A soft line break reads as one space, the spaces around it removed (CommonMark 0.31.2, "Soft line breaks").
+    return " ".join(line.strip() for line in found[0].splitlines()).strip().removesuffix(".")
 
 
 def parse(name: str, path: Path, text: str) -> Lens:

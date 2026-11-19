@@ -163,6 +163,22 @@ def test_a_lens_line_is_read_in_every_form_and_any_other_value_is_refused(tmp_pa
             diff.parse("x", path, text)
 
 
+@pytest.mark.parametrize(
+    "rows",
+    [
+        "**Applies.** paths `a/`,\n`b/**` except `b/c`, `d/`.\n\n**Run by.** driver.",
+        # Read a line at a time, this one parsed and lost its `except` list with no message.
+        "**Applies.** paths `a/`, `b/**`\nexcept `b/c`, `d/`.\n\n**Run by.** driver.",
+        "**Applies.**\npaths `a/`, `b/**` except `b/c`,\r\n  `d/`.\r\n\r\n**Run by.**\n  driver.",
+    ],
+    ids=["after-a-comma", "before-except", "label-alone"],
+)
+def test_a_row_a_formatter_wrapped_reads_as_its_one_line(rows: str) -> None:
+    """Markdown reads a soft-wrapped paragraph as one line, so a rewrap of the file changes nothing it says."""
+    lens = diff.parse("x", Path("x.md"), f"# Lens: x\n\n{rows}\n")
+    assert (lens.applies, lens.paths, lens.excepted, lens.run_by) == ("paths", ("a/", "b/**"), ("b/c", "d/"), "driver")
+
+
 def test_doctor_fails_a_trigger_naming_no_lens_and_a_lens_line_it_cannot_read(project: Path) -> None:
     write_config(
         project,
