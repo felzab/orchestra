@@ -257,12 +257,24 @@ def test_status_exits_0_where_there_is_no_session_or_a_file_is_torn(project: Pat
     assert done.returncode == 0, done.stderr
     assert any(line.startswith("unclosed  unknown: ") and "line 1 is no JSON object" in line for line in _lines(done))
     assert _lines(done)[-1].endswith(", unclosed unknown, 0 drift")
+    # A torn log hides the spans an estimate starts from, and no other section.
+    (_state(project) / store.LOG).write_bytes(b"torn\n")
+    measured = _lines(inprocess("status", "--measure", cwd=project))
+    assert any(line.startswith("spans     unknown: ") and "line 1 is no JSON object" in line for line in measured)
+    assert measured[-1].startswith("measure: 0 finished, 0 running, ")
+
+
+def _dispatch(state: Path, name: str, minutes: float) -> None:
+    """The log's line for the agent's dispatch, `minutes` ago, as the dispatch hook writes it."""
+    store.append_jsonl(state / store.LOG, {"time": _ago(minutes), "kind": "dispatch", "text": f"{name} as x1 on opus"})
 
 
 def test_measure_gives_the_figures_an_estimate_starts_from(project: Path, built: Path) -> None:
     for name, minutes in (("W1", 10), ("W2", 30), ("W3", 50)):
         since = {"running": _ago(minutes + 60), "reported": _ago(60)}
         _agent(built, model.Agent(name, "writer", "landed", reports={1: "r"}, since=since))
+        _dispatch(built, name, minutes + 60)
+    _dispatch(built, "FRESH", 30)
     model.write_rulings(
         built,
         lambda _: [
@@ -274,8 +286,10 @@ def test_measure_gives_the_figures_an_estimate_starts_from(project: Path, built:
     assert done.returncode == 0, done.stderr
     lines = _lines(done)
     assert lines[0].endswith(" · a snapshot")
-    assert "writer    3 finished, median 30 min, longest 50 min from running to reported" in lines
-    assert "running   FRESH (writer): 30 min, context 84,312 tokens" in lines
+    assert "writer    3 finished, median 30 min, longest 50 min from dispatch to last report" in lines
+    assert "running   FRESH (writer): 30 min since its dispatch, context 84,312 tokens" in lines
+    # QUIET's dispatch has no line in the log, so its minutes are not guessed from its record.
+    assert any(line.startswith("running   QUIET (writer): minutes unknown, context ") for line in lines)
     assert [line for line in lines if line.startswith("unticked")] == [
         "unticked  S2 docs/guide.md",
         "unticked  S3 tests/",
@@ -286,6 +300,17 @@ def test_measure_gives_the_figures_an_estimate_starts_from(project: Path, built:
     assert "asked     #1 Keep the cap?" in lines
     assert not any("Split the slice" in line for line in lines)
     assert lines[-1] == "measure: 3 finished, 3 running, 4 unticked, 1 due, 1 asked and not ruled"
+
+
+def test_measure_counts_a_resumed_agents_whole_run_from_its_dispatch(project: Path, built: Path) -> None:
+    """A resume stamps `running` again, so the record alone would read a 39-minute run as its last minute."""
+    since = {"running": _ago(2), "reported": _ago(1)}
+    _agent(built, model.Agent("RESUMED", "auditor", "judged", reports={1: "r", 2: "r"}, since=since))
+    _dispatch(built, "RESUMED", 40)
+    # A later dispatch line of the same name moves nothing: the first is the start.
+    _dispatch(built, "RESUMED", 5)
+    lines = _lines(inprocess("status", "--measure", cwd=project))
+    assert "auditor   1 finished, median 39 min, longest 39 min from dispatch to last report" in lines
 
 
 def test_measure_lists_what_waits_and_the_context_of_each_agent_holding_rows(project: Path, built: Path) -> None:

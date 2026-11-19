@@ -427,9 +427,15 @@ def _now(state: Path, *, shown: bool = True) -> list[str]:
 def measure(snap: Snapshot) -> tuple[list[str], str]:
     # First, so a cut at forty lines never drops the figure a wide wave is weighed against.
     lines, _ = _guarded("usage", lambda: usage(snap.state, snap.root, snap.clock))
+    try:
+        dispatched = _dispatched(snap.state)
+    except Refused as refused:
+        dispatched = {}
+        lines.append(_row("spans", f"unknown: {refused}"))
     spans: dict[str, list[float]] = {}
     for agent in snap.agents:
-        started, reported = _stamp(agent, "running"), _stamp(agent, "reported")
+        # The whole run: a resume stamps `running` again, so the record alone keeps only the last round.
+        started, reported = dispatched.get(agent.name), _stamp(agent, "reported")
         if agent.status in FINISHED and started and reported and reported >= started:
             spans.setdefault(agent.type, []).append((reported - started).total_seconds() / 60)
     for kind, held in sorted(spans.items()):
@@ -437,13 +443,13 @@ def measure(snap: Snapshot) -> tuple[list[str], str]:
             _row(
                 kind,
                 f"{len(held)} finished, median {statistics.median(held):.0f} min,"
-                f" longest {max(held):.0f} min from running to reported",
+                f" longest {max(held):.0f} min from dispatch to last report",
             )
         )
     running = [agent for agent in snap.agents if agent.status == "running"]
     for agent in running:
-        started = _stamp(agent, "running")
-        took = f"{_minutes(snap.clock - started)} min" if started else "minutes unknown"
+        started = dispatched.get(agent.name)
+        took = f"{_minutes(snap.clock - started)} min since its dispatch" if started else "minutes unknown"
         size = context.size(agent)
         lines.append(_row("running", f"{agent.name} ({agent.type}): {took}, context {_tokens(size)}"))
     holds, _ = _guarded("holds", lambda: _holders(snap.state, snap.agents))
@@ -471,6 +477,16 @@ def measure(snap: Snapshot) -> tuple[list[str], str]:
         _count(asked_count, "asked and not ruled"),
     ]
     return lines, "measure: " + ", ".join(parts)
+
+
+def _dispatched(state: Path) -> dict[str, datetime.datetime]:
+    """Each agent's first dispatch, from the log's `dispatch` lines, which nothing overwrites."""
+    first: dict[str, datetime.datetime] = {}
+    for entry in log.entries(state):
+        # The line reads `<NAME> as <id> on <model>`, and a name holds no space.
+        if entry.kind == log.DISPATCH and (at := _parsed(entry.time)) is not None:
+            first.setdefault(entry.text.partition(" ")[0], at)
+    return first
 
 
 def usage(state: Path, root: Path, clock: datetime.datetime) -> list[str]:
