@@ -10,7 +10,7 @@ Run once, in this order, when one wave and this list remain; start no new work f
 6. **The gate.** Where `gate.run` is configured, run `orchestra ci gate --final` in the background, since the gate has no time limit of its own; it refuses a tree that differs from what was pushed. Report its exit code once it ends, read from the command itself, since 0 alone is green and a pipe reports its last command's code; a fix it forces is a new commit, a new push and a new run. Otherwise name each check of the project you ran, with its exit code.
 7. **The pull request body**, replaced once. Name every file a landing regenerated, which no commit message says.
 8. **For the owner**, as one list: each visible change the owner has not yet seen, with where to look, then the owner's steps after the merge in the order they are run.
-9. **The handoff**, where a next session follows or a row or question is left to one: the handoff and the next starter, as [handoff.md](handoff.md) says, its audit judged and its rows closed.
-10. **The machine's verdict.** `orchestra status --end` prints each line it can check as held or not. The session is finished only when every line is held.
+9. **The handoff**, where a next session follows or a row or question is left to one: the handoff and the next starter, as [handoff.md](handoff.md) says, its audit judged and its rows closed. Where no handoff is written, one auditor that saw none of the work does that audit's read of what is left undone alone, before step 10.
+10. **The machine's verdict.** `orchestra status --end` prints each line it can check as held or not. The session is finished only when every line is held and step 9's read is judged, so say "finished" only after both.
 
 Reply with this list, each line with its evidence.
