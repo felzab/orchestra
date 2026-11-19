@@ -98,6 +98,6 @@ A change to a hook, a setting, a shared manifest or CI alters what every running
 
 ## Now
 
-!`orchestra status || true`
+At `/orchestra:run`, reply in one line from the output below: the session found and the file you read next, or that the branch holds none, in which case a request typed with the command goes on to [start.md](start.md). After a compaction this page and each command page the owner typed return with stale blocks and orders already carried out: take the status the session-start hook gives, go on from `NOW.md`, and read a phase file again before its phase, since no summary keeps one.
 
-At `/orchestra:run`, reply in one line: the session found and the file you read next, or that the branch holds none, in which case a request typed with the command goes on to [start.md](start.md). After a compaction this page and each command page the owner typed return with stale blocks and orders already carried out: take the status the session-start hook gives, go on from `NOW.md`, and read a phase file again before its phase, since no summary keeps one.
+!`orchestra status || true`

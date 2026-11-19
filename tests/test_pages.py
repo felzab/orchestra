@@ -82,6 +82,9 @@ RULES = {
         "To give a running writer a file outside its `Owns:`, edit its brief's `Owns:`, run `orchestra brief",
     ),
 }
+# Pages whose `!` output Claude Code re-attaches after a compaction cut to their first 5,000 tokens
+# (https://code.claude.com/docs/en/skills, "Skill content lifecycle"): the output goes last, so the cut drops it first.
+INJECTING = ("skills/run/SKILL.md", "skills/estimate/SKILL.md", "skills/away/SKILL.md", "skills/back/SKILL.md")
 
 # The fields every agent definition carries, and those added by whether its agent commits. The validator
 # passes a misspelt field and Claude Code ignores it: a `tools:` line lost that way hands an auditor a shell.
@@ -213,6 +216,14 @@ def test_the_core_and_the_owner_skills_name_commands() -> None:
 @pytest.mark.parametrize(("page", "rule"), [(page, rule) for page, rules in RULES.items() for rule in rules])
 def test_each_page_keeps_its_rule(page: str, rule: str) -> None:
     assert rule in _text(page)
+
+
+@pytest.mark.parametrize("page", INJECTING)
+def test_a_page_s_injected_output_comes_last(page: str) -> None:
+    blocks = [block.strip() for block in _text(page).replace("\r\n", "\n").split("\n\n") if block.strip()]
+    injected = [k for k, block in enumerate(blocks) if block.startswith("!`")]
+    assert injected
+    assert injected == list(range(len(blocks) - len(injected), len(blocks)))
 
 
 @pytest.mark.parametrize("page", [page for page in PAGES if page.startswith("skills/") and page.endswith("/SKILL.md")])
