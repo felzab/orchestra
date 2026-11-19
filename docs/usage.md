@@ -58,17 +58,19 @@ another model runs at Claude Code's default window. The local file outranks the 
 your user settings, the window `/autocompact` saves there included. `claude --autocompact 500k`
 sets the window for one terminal session over every file; the desktop app takes no flag.
 
-A desktop session the app starts from its pre-warmed process skips the project's and the local
-settings files ([issue 105316](https://github.com/anthropics/claude-code/issues/105316), open), so
-`init`'s window does not reach it. A window in your user settings does, and was seen to: after
-`/autocompact 500k`, such a session compacted by itself at 467,099 tokens. Set it once, at the top
-level of `~/.claude/settings.json`:
+A desktop session the app starts from its pre-warmed process did not apply the `autoCompactWindow`
+the project's or the local settings file sets
+([issue 105316](https://github.com/anthropics/claude-code/issues/105316), open; other keys were not
+tested), so `init`'s window may not reach it. Typing `/autocompact 500k` inside such a session was
+seen to apply: it saved a window for the session's model under `modelSettings` in
+`~/.claude/settings.json`, and the session then compacted by itself at 467,099 tokens. A top-level
+key in that file covers every model and is expected to reach such a session as well, but nobody has
+tested it:
 
 ```json
 { "autoCompactWindow": 500000 }
 ```
 
-A top-level key covers every model, where `/autocompact` saves an entry for the current model alone.
 Your user settings reach every project on the machine, which is why `init` writes none there. Each
 agent definition also sets 500,000, which lowers a larger window an agent would inherit. Where the
 window still does not apply, the hook on each of your prompts tells you and the coordinator once its
@@ -81,8 +83,8 @@ context has passed the window, since only you can type `/compact`: Claude Code l
    the session's work lands on.
 2. Start Claude Code at the checkout's root, since Claude Code reads the project's
    `.claude/settings.json`, and on Windows `.claude/settings.local.json` too, from the folder a
-   session starts in; a desktop session started from the app's pre-warmed process reads neither,
-   so set the window in your user settings as [compacting at 500,000 tokens](#setting-up-a-project)
+   session starts in; a desktop session started from the app's pre-warmed process did not apply the
+   window either file sets, so give it one as [compacting at 500,000 tokens](#setting-up-a-project)
    says. Type `/orchestra:run`. The coordinator reads its rules and says whether this
    branch already holds a session.
 3. For a new session, tell the coordinator what the session is for. It names the session, as in
@@ -433,8 +435,9 @@ want to read them.
 write outside the session's working directories prompts. `init` therefore adds the programme's
 folder, `<stateRoot>/<programme>`, to `permissions.additionalDirectories` in the checkout's
 `.claude/settings.local.json`. In the same write it sets `autoCompactWindow` where neither the
-environment nor a settings file sets a window, which a desktop session started from the app's
-pre-warmed process does not read, as [compacting at 500,000 tokens](#setting-up-a-project) says. It rewrites the file only where it is in the JSON layout Claude Code itself writes, so no
+environment nor a settings file sets a window, though a desktop session started from the app's
+pre-warmed process did not apply it, as [compacting at 500,000 tokens](#setting-up-a-project) says.
+It rewrites the file only where it is in the JSON layout Claude Code itself writes, so no
 other key changes, and otherwise tells you what to add. It adds no folder where a settings file already grants it. A
 tracked `.claude/settings.local.json` is left alone too. The file then holds a path of this
 machine, so where no ignore rule covers it, `init` first adds it to the clone's `.git/info/exclude`,

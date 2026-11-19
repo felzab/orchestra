@@ -37,8 +37,9 @@ The fixes from the second project session that ran on the plugin.
   follow the researchers that map the plan.
 - The ending's cold audit also reads what is left undone, before the coordinator says finished.
 - `init`'s message, and the usage guide, say that a desktop session started from the app's
-  pre-warmed process reads no project or local settings, and that a window in the user settings
-  reaches it.
+  pre-warmed process did not apply the `autoCompactWindow` the project's or the local settings file
+  sets, that `/autocompact 500k` typed inside it did, and that a top-level window in the user
+  settings is expected to reach it but untested.
 
 ### Fixed
 
