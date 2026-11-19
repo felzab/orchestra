@@ -326,8 +326,8 @@ does not know is refused, naming its path in the file.
   line; a name the configuration does not hold is refused. With no `default`, the dispatch sets no
   model and Claude Code chooses.
 - **`contextCeiling`** is the context, in tokens, past which a hook refuses the coordinator's message
-  that would resume an agent, since a resume sends the agent's whole context again. The default is
-  200,000.
+  that would resume an agent, except the answer to an agent stopped on a question and still waiting
+  on it, since a resume sends the agent's whole context again. The default is 200,000.
 - **`queues`** adds owners a row can be routed to besides an agent, beyond the built-in `owner`,
   `ending` and `handoff`.
 - **`preflight`** lists commands that must exit 0 before a session can work, each with `run`, the
