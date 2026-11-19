@@ -111,7 +111,10 @@ class Where:
     """Whose an event is, and the state it reads."""
 
     data: Record
+    # The input's `cwd`: an agent's own folder, its worktree where it has one.
     cwd: Path
+    # The folder the state was found from: `cwd`, or the project root where a `cd` left `cwd` in no fleet's clone.
+    place: Path
     state: Path | None
     # The id of the subagent the event fires in; None in the main session.
     agent_id: str | None
@@ -134,17 +137,21 @@ class Where:
         if self.state is None:
             return None
         try:
-            return config.checkout(self.cwd).root
+            return config.checkout(self.place).root
         except Refused:
             return None
 
 
-def answer(event: str, data: Record, *, held: Path | bool) -> str | None:
-    """The stdout answering one event; None for nothing. An event that cannot be judged fails closed where it guards."""
+def answer(event: str, data: Record, *, held: Path | bool, place: Path | None) -> str | None:
+    """The stdout answering one event; None for nothing. An event that cannot be judged fails closed where it guards.
+
+    `place` is the folder `hooks` read `held` from, the input's `cwd` unless that held no fleet.
+    """
+    place = place if place is not None else Path(str(data.get("cwd")))
     # One budget for the event and for its fault's answer, so the fault's log write ends inside it too.
     with store.budget(SESSION_END_SECONDS if event == "SessionEnd" else BUDGET_SECONDS):
         try:
-            where = _where(data, held=held)
+            where = _where(data, held=held, place=place)
             facts = store.unleased() if where.agent is not None else contextlib.nullcontext()
             with facts:
                 return HANDLERS[event](where)
@@ -156,10 +163,10 @@ def answer(event: str, data: Record, *, held: Path | bool) -> str | None:
         if not traced:
             # A refusal names its own fix, so it is one line on stderr, never a trace.
             LOGGER.error("orchestra hook %s: %s", event, fault)
-        return _faulted(event, data, fault, held=held)
+        return _faulted(event, data, fault, held=held, place=place)
 
 
-def _faulted(event: str, data: Record, fault: str, *, held: Path | bool) -> str | None:
+def _faulted(event: str, data: Record, fault: str, *, held: Path | bool, place: Path) -> str | None:
     """An event that cannot be judged: a guarded call denied naming the fault, any other the fault shown and logged.
 
     No exit 0 shows its stderr, so an event of the lease holder's session or of one of the plugin's
@@ -171,7 +178,7 @@ def _faulted(event: str, data: Record, fault: str, *, held: Path | bool) -> str 
     state = None
     logged: list[bool] = []
     try:
-        state = _state(data, held=held)
+        state = _state(held=held, place=place)
         if state is not None and _owned(data, state):
             known = state
             tool = data.get("tool_name")
@@ -211,19 +218,19 @@ def _id(value: object) -> str | None:
     return value.removeprefix("agent-") if isinstance(value, str) and value else None
 
 
-def _state(data: Record, *, held: Path | bool) -> Path | None:
-    """`held` is the branch's pointer where `hooks` read it from git's files, True where git must find it."""
+def _state(*, held: Path | bool, place: Path) -> Path | None:
+    """`held` is the branch's pointer where `hooks` read it from git's files in `place`, True where git must find it."""
     if held is False:
         return None
     try:
-        return store.state_dir(Path(str(data.get("cwd")))) if held is True else store.pointed(held)
+        return store.state_dir(place) if held is True else store.pointed(held)
     except Refused:
         return None
 
 
-def _where(data: Record, *, held: Path | bool) -> Where:
+def _where(data: Record, *, held: Path | bool, place: Path) -> Where:
     cwd = Path(str(data.get("cwd")))
-    state = _state(data, held=held)
+    state = _state(held=held, place=place)
     agent_id = _id(data.get("agent_id"))
     kind = data.get("agent_type")
     plugin = kind.removeprefix(PLUGIN) if isinstance(kind, str) and kind.startswith(PLUGIN) else None
@@ -235,7 +242,7 @@ def _where(data: Record, *, held: Path | bool) -> Where:
         else:
             owner = store.lease(state).get("owner")
             coordinator = owner is not None and owner == data.get("session_id")
-    return Where(data, cwd, state, agent_id, plugin, agent, coordinator)
+    return Where(data, cwd, place, state, agent_id, plugin, agent, coordinator)
 
 
 def _quietly(act: Callable[[], object]) -> None:

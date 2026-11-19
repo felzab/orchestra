@@ -54,6 +54,9 @@ ASKING = ("AskUserQuestion", "ExitPlanMode")
 AWAY_ONLY = ("PermissionRequest", "PermissionDenied")
 # The variables that move git's directory away from the `.git` beside the work tree (git(1), "ENVIRONMENT").
 GIT_PLACES = ("GIT_DIR", "GIT_COMMON_DIR")
+# The project root where the session started, which Claude Code exports to every hook's process and which, unlike
+# the input's `cwd`, no `cd` moves (hooks.md, "Reference scripts by path").
+PROJECT_DIR = "CLAUDE_PROJECT_DIR"
 # What a HEAD file holding a branch opens with, the branch's name following.
 BRANCH_HEAD = "ref: refs/heads/"
 # The branch a reftable repository's HEAD file names, so that an older git still reads the folder as a
@@ -62,9 +65,12 @@ REFTABLE_STUB = ".invalid"
 
 
 class Events(Protocol):
-    """What `events` exposes: the stdout text answering one event, None for nothing."""
+    """What `events` exposes: the stdout text answering one event, None for nothing.
 
-    def answer(self, event: str, data: dict[str, object], *, held: Path | bool) -> str | None: ...
+    `place` is the folder `held` was read from: the input's `cwd`, or the project root where that held no fleet.
+    """
+
+    def answer(self, event: str, data: dict[str, object], *, held: Path | bool, place: Path | None) -> str | None: ...
 
 
 def add(verb: str, parser: argparse.ArgumentParser) -> None:
@@ -83,7 +89,16 @@ def main(event: str) -> int:
     if event not in EVENTS:
         return DONE
     cwd = data.get("cwd")
-    held = _pointers(Path(cwd)) if isinstance(cwd, str) else False
+    place = Path(cwd) if isinstance(cwd, str) else None
+    held = _pointers(place) if place is not None else False
+    project = os.environ.get(PROJECT_DIR)
+    if held is False and project and (place is None or Path(project) != place):
+        # The main session's Bash `cd` moves the input's `cwd` (hooks.md, "Reference scripts by path"), and the state's
+        # folder is a working directory a `cd` may stay in, so the session is found from the project root too,
+        # which stays put. An agent's `cwd`, its worktree or the checkout, finds the session by itself.
+        found = _pointers(Path(project))
+        if found is not False:
+            place, held = Path(project), found
     if held is False and not concerns_plugin(event, data):
         return DONE
     asks = event == "PreToolUse" and data.get("tool_name") in ASKING
@@ -91,7 +106,7 @@ def main(event: str) -> int:
         # Each prompt and question of a session at work would otherwise load `events` to learn only that.
         return DONE
     events = cast("Events", importlib.import_module("orchestra.events"))
-    said = events.answer(event, data, held=held)
+    said = events.answer(event, data, held=held, place=place)
     if said:
         sys.stdout.buffer.write(said.encode("utf-8"))
     return DONE
