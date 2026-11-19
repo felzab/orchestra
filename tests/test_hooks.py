@@ -325,10 +325,11 @@ def test_a_dispatch_is_refused_until_its_brief_is_checked_then_filled(project: P
     code, said = hook("PreToolUse", project, tool_name="Agent", tool_input=call)
     verdict, updated = decision(said)
     assert verdict == "allow"
+    # The report's title names round 1, which only the dispatch knows: an agent's name may suggest another.
     assert updated == {
         "description": "W",
-        "prompt": f"Brief: {path}\nMessages: {path.with_name('W.messages.md')}\nReport: {report.path(state, 'W')}"
-        "\nAddendum: none",
+        "prompt": f"Brief: {path}\nMessages: {path.with_name('W.messages.md')}\nReport: {report.path(state, 'W')},"
+        " titled `# W · writer · round 1`\nAddendum: none",
         "subagent_type": "orchestra:writer",
         "name": "W",
         "model": "opus",

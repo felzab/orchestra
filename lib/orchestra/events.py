@@ -402,7 +402,11 @@ def _start(where: Where, given: Record, agent: model.Agent, root: Path) -> str |
 
 
 def _prompt(state: Path, root: Path, agent: model.Agent) -> str:
-    """The agent's paths, the project's addendum for its type among them or `none`, so no agent probes for one."""
+    """The agent's paths, the project's addendum for its type among them or `none`, so no agent probes for one.
+
+    The report's line names its title too, as a resume names its round: the dispatch alone knows the round is 1,
+    and an agent left to guess one from its name was seen titling its first report round 2.
+    """
     name = agent.name
     held = brief.brief_path(state, name)
     addendum = root / ADDENDA / f"{agent.type}.md"
@@ -410,7 +414,7 @@ def _prompt(state: Path, root: Path, agent: model.Agent) -> str:
         [
             f"Brief: {held}",
             f"Messages: {held.with_name(f'{name}.messages.md')}",
-            f"Report: {report.path(state, name)}",
+            f"Report: {report.path(state, name)}, titled `# {name} · {agent.type} · round 1`",
             f"Addendum: {addendum if addendum.is_file() else 'none'}",
         ]
     )
