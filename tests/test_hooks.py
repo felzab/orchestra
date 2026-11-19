@@ -1133,8 +1133,8 @@ def test_a_prompt_past_the_compaction_window_tells_the_coordinator_and_the_owner
     main.write_bytes(line("assistant", "m0", 900_000) + line("user") + line("assistant", "m1", 500_000))
     said = hook("UserPromptSubmit", project, prompt="go", transcript_path=str(main))[1]
     assert context_of(said, "UserPromptSubmit").endswith(
-        " Your context is 500,474 tokens, past the 500,000-token compaction window, which has not applied:"
-        " suggest the owner type `/compact` at the next seam."
+        " Your context is 500,474 tokens, past the 500,000-token compaction window, which has not applied;"
+        " only the owner can type `/compact`."
     )
     assert field(said, "systemMessage") == (
         "orchestra: this session's context is 500,474 tokens, past its 500,000-token compaction window, which has not"

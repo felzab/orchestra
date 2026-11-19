@@ -1053,9 +1053,10 @@ def user_prompt_submit(where: Where) -> str | None:
     if past is None:
         return _context("UserPromptSubmit", said)
     size, window = f"{past[0]:,}", f"{past[1]:,}"
+    # Facts, not an order: an imperative in added context can read as an injection (hooks.md, "Add context for Claude").
     said += (
-        f" Your context is {size} tokens, past the {window}-token compaction window, which has not applied:"
-        " suggest the owner type `/compact` at the next seam."
+        f" Your context is {size} tokens, past the {window}-token compaction window, which has not applied;"
+        " only the owner can type `/compact`."
     )
     shown = (
         f"orchestra: this session's context is {size} tokens, past its {window}-token compaction window, which"
