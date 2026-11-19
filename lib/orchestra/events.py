@@ -556,9 +556,11 @@ def _resume(where: Where, given: Record) -> str | None:
     elif (unjudged := findings.unjudged(agent)) is not None:
         # `judge` reads an agent's latest round alone, so a round begun before it would leave this one's unread.
         why = unjudged
-    elif agent.outcome not in report.STOPPED:
+    elif agent.outcome not in report.STOPPED or agent.status not in ("reported", "running"):
         # A report stopped on a question is no ceiling's: its answer is the one message that closes the round,
         # and until then `judge`, `land` and `prune --discard` hold the agent, so a successor could take nothing.
+        # `running` lets a resend through whose first send failed; a usage stop keeps the old outcome but waits
+        # on no answer, so the ceiling applies again.
         size, ceiling = context.size(agent, where.session), config.load(root).context_ceiling
         if size is not None and size > ceiling:
             why = (

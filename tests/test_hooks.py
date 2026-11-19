@@ -623,6 +623,10 @@ def test_a_writer_stopped_on_a_question_past_the_ceiling_is_answered_and_a_finis
         told = f"Keep the old name.\n\nThis continues round 1: complete your report at {report.path(state, 'W')}."
         said = hook("PreToolUse", project, tool_name="SendMessage", tool_input=sent)[1]
         assert decision(said) == ("allow", sent | {"message": told}), outcome
+    # A question answered before a usage stop keeps its outcome, but nothing waits on that answer any more.
+    changed(state, "W", status="stopped", outcome="NEEDS-ANSWER")
+    said = hook("PreToolUse", project, tool_name="SendMessage", tool_input=sent)[1]
+    assert decision(said)[0] == "deny"
 
 
 def test_a_reported_agent_is_set_running_in_its_next_round_before_the_message_reaches_it(
