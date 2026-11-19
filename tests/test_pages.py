@@ -28,13 +28,13 @@ BUDGETS = {
     "skills/run/handoff.md": 2600,
     "skills/run/resume.md": 4400,
     "skills/status/SKILL.md": 500,
-    "skills/estimate/SKILL.md": 2924,
+    "skills/estimate/SKILL.md": 2940,
     "skills/checkpoint/SKILL.md": 500,
-    "skills/away/SKILL.md": 2350,
+    "skills/away/SKILL.md": 2366,
     "skills/back/SKILL.md": 1550,
     "skills/end/SKILL.md": 500,
     "skills/resume/SKILL.md": 500,
-    "skills/plan/SKILL.md": 1900,
+    "skills/plan/SKILL.md": 1913,
     "skills/agent/SKILL.md": 6500,
     "agents/writer.md": 7150,
     "agents/driver.md": 5000,
@@ -82,19 +82,13 @@ RULES = {
         "To give a running writer a file outside its `Owns:`, edit its brief's `Owns:`, run `orchestra brief",
     ),
 }
-# Pages whose `!` output Claude Code re-attaches after a compaction cut to their first 5,000 tokens
-# (https://code.claude.com/docs/en/skills, "Skill content lifecycle"): the output goes last, so the cut drops it first.
-INJECTING = (
-    "skills/run/SKILL.md",
-    "skills/estimate/SKILL.md",
-    "skills/away/SKILL.md",
-    "skills/back/SKILL.md",
-    "skills/checkpoint/SKILL.md",
-    "skills/end/SKILL.md",
-    "skills/plan/SKILL.md",
-    "skills/resume/SKILL.md",
-    "skills/status/SKILL.md",
-)
+# Claude Code re-attaches each invoked skill's body after a compaction, cut to its first 5,000 tokens, while a
+# tool result is summarized (https://code.claude.com/docs/en/skills, "Skill content lifecycle"), so `!` output
+# is sent again with every call. The run page alone injects, its output last so the cut drops it first; every
+# other command page runs its command as a step.
+INJECTING = ("skills/run/SKILL.md",)
+# An injection: `!` and a backtick at a line's start or after whitespace, where Claude Code runs it.
+INJECTION_RE = re.compile(r"(?:^|\s)!`")
 
 # The fields every agent definition carries, and those added by whether its agent commits. The validator
 # passes a misspelt field and Claude Code ignores it: a `tools:` line lost that way hands an auditor a shell.
@@ -218,7 +212,7 @@ def test_every_command_a_page_names_parses(page: str) -> None:
 
 def test_the_core_and_the_owner_skills_name_commands() -> None:
     """The check above passes on a page it finds no command in, so the finder is held to the pages that name some."""
-    assert "orchestra status || true" in commands(_text("skills/status/SKILL.md"))
+    assert "orchestra status" in commands(_text("skills/status/SKILL.md"))
     assert "orchestra land NAME --preview" in commands(_text("skills/run/SKILL.md"))
     assert not parses("orchestra land NAME --dry-run")
 
@@ -234,6 +228,14 @@ def test_a_page_s_injected_output_comes_last(page: str) -> None:
     injected = [k for k, block in enumerate(blocks) if block.startswith("!`")]
     assert injected
     assert injected == list(range(len(blocks) - len(injected), len(blocks)))
+
+
+@pytest.mark.parametrize(
+    "page",
+    [page for page in PAGES if page.startswith("skills/") and page.endswith("/SKILL.md") and page not in INJECTING],
+)
+def test_any_other_skill_runs_its_command_as_a_step(page: str) -> None:
+    assert INJECTION_RE.search(_text(page)) is None
 
 
 @pytest.mark.parametrize("page", [page for page in PAGES if page.startswith("skills/") and page.endswith("/SKILL.md")])

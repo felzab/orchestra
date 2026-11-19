@@ -32,7 +32,9 @@ The fixes from the second project session that ran on the plugin.
 - An agent's rules say a turn ended to wait on its own background command is a stop, that a long
   check runs in the foreground with its timeout named, and that a command in a worktree runs plain,
   with no `;`, `$?`, `$(...)`, loop or heredoc.
-- Every command page puts its injected output last, so a compaction's cut keeps its orders.
+- The run page puts its injected output last, so a compaction's cut keeps its orders, and every
+  other command page runs its command as a step, so a compaction re-attaches no stale output
+  with it.
 - The estimate projects the weekly usage window beside the end time, and the first estimate may
   follow the researchers that map the plan.
 - The ending's cold audit also reads what is left undone, before the coordinator says finished.
