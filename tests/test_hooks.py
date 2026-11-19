@@ -1144,6 +1144,15 @@ def test_a_prompt_past_the_compaction_window_tells_the_coordinator_and_the_owner
     said = hook("UserPromptSubmit", project, prompt="go", transcript_path=str(main))[1]
     assert "compaction" not in context_of(said, "UserPromptSubmit")
     assert "systemMessage" not in cast("dict[str, object]", said)
+    # With no window set the session runs at Claude Code's default, a figure no file holds, so none is assumed.
+    local = project / ".claude" / "settings.local.json"
+    settings = json.loads(local.read_bytes())
+    del settings["autoCompactWindow"]
+    local.write_bytes(json.dumps(settings).encode())
+    main.write_bytes(line("assistant", "m1", 900_000))
+    said = hook("UserPromptSubmit", project, prompt="go", transcript_path=str(main))[1]
+    assert "compaction" not in context_of(said, "UserPromptSubmit")
+    assert "systemMessage" not in cast("dict[str, object]", said)
 
 
 def test_a_hook_reads_each_agents_transcript_in_the_session_its_input_names(project: Path, state: Path) -> None:

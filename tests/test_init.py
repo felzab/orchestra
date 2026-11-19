@@ -370,7 +370,8 @@ def test_the_window_in_force_is_the_variables_else_the_first_files_for_the_model
     """The window a coordinator's prompt compares its context with (settings-reference.md, "modelSettings")."""
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(project.parent / "claude-config"))
     model = "claude-opus-5-5"
-    assert init.window(project, model) == init.WINDOW_TOKENS
+    # With nothing set the session runs at Claude Code's default window, which no file names.
+    assert init.window(project, model) is None
     models = {"modelSettings": {model: {"autoCompactWindow": 300000}}}
     _settings(project, "user").write_bytes(json.dumps({"autoCompactWindow": 900000, **models}).encode())
     # In one file a model's own window outranks the window for every model, and binds that model alone.

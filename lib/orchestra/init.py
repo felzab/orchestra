@@ -308,8 +308,9 @@ def window(root: Path, model: str | None) -> int | None:
     `WINDOW_ENV` outranks every settings key; else the first settings file that sets a window for the model
     or for every model decides, its window for the model first (settings-reference.md, "modelSettings"),
     where Claude Code writes each entry under the model's canonical name, the name a transcript records.
-    `WINDOW_TOKENS`, init's own, where nothing sets one; `"auto"`, the model's tuned window, is None. A
-    window given by `--autocompact` for one launch is the session's alone, and not read.
+    None where nothing sets one, as `_window` says such a session runs at Claude Code's default window, a
+    figure no file holds; `"auto"`, the model's tuned window, is None too. A window given by `--autocompact`
+    for one launch is the session's alone, and not read.
     """
     if held := _tokens(os.environ.get(WINDOW_ENV, "")):
         return held
@@ -318,7 +319,7 @@ def window(root: Path, model: str | None) -> int | None:
         found = found if found is not None else _setting(path, WINDOW)
         if found is not None:
             return found if isinstance(found, int) and not isinstance(found, bool) else None
-    return WINDOW_TOKENS
+    return None
 
 
 def _tokens(value: str) -> int | None:
