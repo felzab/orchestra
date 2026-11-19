@@ -302,6 +302,33 @@ def _window(root: Path) -> str | None:
     return None
 
 
+def window(root: Path, model: str | None) -> int | None:
+    """The auto-compact window a session of `model` in this checkout is set to; None where it runs at the model's own.
+
+    `WINDOW_ENV` outranks every settings key; else the first settings file that sets a window for the model
+    or for every model decides, its window for the model first (settings-reference.md, "modelSettings"),
+    where Claude Code writes each entry under the model's canonical name, the name a transcript records.
+    `WINDOW_TOKENS`, init's own, where nothing sets one; `"auto"`, the model's tuned window, is None. A
+    window given by `--autocompact` for one launch is the session's alone, and not read.
+    """
+    if held := _tokens(os.environ.get(WINDOW_ENV, "")):
+        return held
+    for path in _settings_files(root):
+        found = _setting(path, "modelSettings", model, WINDOW) if model else None
+        found = found if found is not None else _setting(path, WINDOW)
+        if found is not None:
+            return found if isinstance(found, int) and not isinstance(found, bool) else None
+    return WINDOW_TOKENS
+
+
+def _tokens(value: str) -> int | None:
+    """A token count as `WINDOW_ENV` takes one, `500000`, `500k` or `1M` (model-config.md); None for any other."""
+    held = re.fullmatch(r"\s*([0-9]+)\s*([kKmM]?)\s*", value)
+    if held is None:
+        return None
+    return int(held[1]) * {"": 1, "k": 1_000, "m": 1_000_000}[held[2].lower()]
+
+
 def _on(name: str) -> bool:
     # An on-or-off variable is on at `1`, `true`, `yes` or `on`, in any casing (env-vars.md).
     return os.environ.get(name, "").strip().lower() in {"1", "true", "yes", "on"}
@@ -407,10 +434,15 @@ def _rewrite(root: Path, folder: Path | None, yourself: str, *, set_window: bool
         said.append(f"added {folder} to `permissions.{DIRECTORIES}` in {path}")
     if set_window:
         settings[WINDOW] = WINDOW_TOKENS
-        # Claude Code documents no reload of this key in a running session.
+        # Claude Code applies most edits to a running session, and its page names this key nowhere among those read
+        # only at the start (settings.md, "When edits take effect"); but a desktop session started from a pre-warmed
+        # process reads neither the project's file nor this one (anthropics/claude-code issue 105316), so the owner
+        # is told the scope it reads. The user's settings reach every project, so writing there is the owner's call.
+        said.append(f"set `{WINDOW}` to {WINDOW_TOKENS} in {path}, as no settings file sets a window")
         said.append(
-            f"set `{WINDOW}` to {WINDOW_TOKENS} in {path}, as no settings file sets a window;"
-            " it applies from the next session"
+            "a desktop session started from a pre-warmed process skips the project's settings files"
+            " (anthropics/claude-code issue 105316), and a window in the user settings reaches it:"
+            f' `"{WINDOW}": {WINDOW_TOKENS}` at the top level of {config.claude_dir() / "settings.json"}'
         )
     store.replace_bytes(path, dumped(settings, text).encode("utf-8"))
     return said

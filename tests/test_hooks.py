@@ -64,16 +64,17 @@ def hook(
     *parts: dict[str, object],
     process: str | None = SID,
     quiet: bool = True,
+    env: dict[str, str] | None = None,
     **more: object,
 ) -> tuple[int, object]:
     """The event answered, its input the common fields, then `parts` and `more`: its exit code and its stdout.
 
-    `quiet` holds stderr empty; an event that cannot be judged says why there.
+    `quiet` holds stderr empty; an event that cannot be judged says why there. `env` adds to the hook's environment.
     """
     data: dict[str, object] = {"session_id": SID, "cwd": str(cwd), "hook_event_name": event}
     for part in (*parts, more):
         data |= part
-    env = {store.SESSION_ID: process} if process else None
+    env = ({store.SESSION_ID: process} if process else {}) | (env or {})
     done = inprocess("hook", event, cwd=cwd, stdin=json.dumps(data).encode(), env=env)
     assert done.stderr == "" or not quiet, done.stderr
     if not done.stdout:
@@ -252,6 +253,30 @@ def test_another_session_in_the_same_checkout_gets_no_answer(project: Path) -> N
     assert hook("UserPromptSubmit", project, prompt="hi")[1] is not None
 
 
+def test_a_coordinator_whose_shell_left_the_checkout_is_found_from_the_project_root(project: Path, state: Path) -> None:
+    """A Bash `cd` moves the input's `cwd`, and the state's folder is a working directory a `cd` stays in.
+
+    Claude Code exports the project root where the session started as `CLAUDE_PROJECT_DIR`, which no `cd` moves;
+    an agent's `cwd` stays its own folder, from which its branch is read.
+    """
+    root = {"CLAUDE_PROJECT_DIR": str(project)}
+    briefed(project, "A", "auditor")
+    call = {"description": "A", "prompt": "A", "subagent_type": "orchestra:auditor"}
+    assert decision(hook("PreToolUse", state, tool_name="Agent", tool_input=call, env=root)[1])[0] == "allow"
+    assert decision(hook("PreToolUse", state, edit(state / "lease.json"), env=root)[1])[0] == "deny"
+    said = hook("UserPromptSubmit", state, prompt="go", env=root)[1]
+    assert context_of(said, "UserPromptSubmit").startswith("The clock reads ")
+    briefed(project, "W", "writer", owns="lib/a.py")
+    dispatched(project, "W", "writer", "w1")
+    tree = project.parent / "trees" / "agent-w1"
+    git(project, "worktree", "add", "-b", "worktree-agent-w1", str(tree))
+    assert hook("PreToolUse", project, inside(project, "w1", "writer", cwd=tree), edit(tree / "README"), env=root) == (
+        0,
+        None,
+    )
+    assert model.read_agent(state, "W").branch == "worktree-agent-w1"
+
+
 def test_an_agents_stop_is_recorded_whichever_session_holds_the_lease(project: Path, state: Path) -> None:
     """An agent's own facts pass the lease: after a coordinator's `/clear` or a takeover its stop still lands."""
     briefed(project, "A", "auditor")
@@ -325,10 +350,11 @@ def test_a_dispatch_is_refused_until_its_brief_is_checked_then_filled(project: P
     code, said = hook("PreToolUse", project, tool_name="Agent", tool_input=call)
     verdict, updated = decision(said)
     assert verdict == "allow"
+    # The report's title names round 1, which only the dispatch knows: an agent's name may suggest another.
     assert updated == {
         "description": "W",
-        "prompt": f"Brief: {path}\nMessages: {path.with_name('W.messages.md')}\nReport: {report.path(state, 'W')}"
-        "\nAddendum: none",
+        "prompt": f"Brief: {path}\nMessages: {path.with_name('W.messages.md')}\nReport: {report.path(state, 'W')},"
+        " titled `# W · writer · round 1`\nAddendum: none",
         "subagent_type": "orchestra:writer",
         "name": "W",
         "model": "opus",
@@ -575,6 +601,28 @@ def test_a_resume_past_the_context_ceiling_is_refused_naming_the_figure(project:
     write_config(project, {"stateRoot": (project.parent / "state").as_posix(), "contextCeiling": 200_000})
     said = hook("PreToolUse", project, tool_name="SendMessage", tool_input={"to": "A", "message": "fix F1"})[1]
     assert decision(said)[0] == "allow"
+
+
+def test_a_writer_stopped_on_a_question_past_the_ceiling_is_answered_and_a_finished_one_is_not_resumed(
+    project: Path, state: Path
+) -> None:
+    """Until its question is answered, `judge`, `land` and `prune --discard` hold it, so no successor takes over."""
+    write_config(project, {"stateRoot": (project.parent / "state").as_posix(), "contextCeiling": 100_000})
+    briefed(project, "W", "writer", owns="lib/a.py")
+    dispatched(project, "W", "writer", "w1")
+    git(project, "worktree", "add", "-b", "worktree-agent-w1", str(project.parent / "trees" / "agent-w1"))
+    transcript(project.parent / "claude-config", "w1", line("assistant", "m1", 150_000))
+    sent = {"to": "W", "message": "Keep the old name."}
+    changed(state, "W", status="judged", outcome="DONE", branch="worktree-agent-w1")
+    said = hook("PreToolUse", project, tool_name="SendMessage", tool_input=sent)[1]
+    assert str(decision(said)[1]).startswith(
+        "W's context is 150,474 tokens, over the configuration's contextCeiling of 100,000"
+    )
+    for outcome in ("BLOCKED", "NEEDS-ANSWER"):
+        changed(state, "W", status="reported", outcome=outcome, reports={1: "reports/W.md"})
+        told = f"Keep the old name.\n\nThis continues round 1: complete your report at {report.path(state, 'W')}."
+        said = hook("PreToolUse", project, tool_name="SendMessage", tool_input=sent)[1]
+        assert decision(said) == ("allow", sent | {"message": told}), outcome
 
 
 def test_a_reported_agent_is_set_running_in_its_next_round_before_the_message_reaches_it(
@@ -1069,6 +1117,29 @@ def test_each_prompt_carries_the_clock_and_a_gap_past_half_an_hour_names_usage(p
     (state / "prompt.json").write_bytes(json.dumps({"time": earlier.isoformat(timespec="seconds")}).encode())
     shown = context_of(hook("UserPromptSubmit", project, prompt="go")[1], "UserPromptSubmit")
     assert " 31 minutes have passed since the previous prompt. A usage figure read before that is stale:" in shown
+
+
+@pytest.mark.usefixtures("state")
+def test_a_prompt_past_the_compaction_window_tells_the_coordinator_and_the_owner(project: Path) -> None:
+    """A desktop session started from a pre-warmed process was seen skipping the window its project's settings set.
+
+    The window is the one `init` wrote to the local settings; the transcript's last call decides, not its largest.
+    """
+    main = project.parent / "main.jsonl"
+    main.write_bytes(line("assistant", "m0", 900_000) + line("user") + line("assistant", "m1", 500_000))
+    said = hook("UserPromptSubmit", project, prompt="go", transcript_path=str(main))[1]
+    assert context_of(said, "UserPromptSubmit").endswith(
+        " Your context is 500,474 tokens, past the 500,000-token compaction window, which has not applied:"
+        " suggest the owner type `/compact` at the next seam."
+    )
+    assert field(said, "systemMessage") == (
+        "orchestra: this session's context is 500,474 tokens, past its 500,000-token compaction window, which has not"
+        " applied: type `/compact` at the next seam."
+    )
+    main.write_bytes(line("assistant", "m0", 900_000) + line("user") + line("assistant", "m1", 499_000))
+    said = hook("UserPromptSubmit", project, prompt="go", transcript_path=str(main))[1]
+    assert "compaction" not in context_of(said, "UserPromptSubmit")
+    assert "systemMessage" not in cast("dict[str, object]", said)
 
 
 def test_a_hook_reads_each_agents_transcript_in_the_session_its_input_names(project: Path, state: Path) -> None:
