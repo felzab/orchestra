@@ -14,7 +14,8 @@ The fixes from the second project session that ran on the plugin.
 ### Added
 
 - The coordinator's prompt hook reads its own context from the session's transcript and, past the
-  compaction window, tells the coordinator to suggest `/compact` and shows the owner the same line.
+  compaction window the environment or a settings file sets, tells the coordinator so and that only
+  the owner can type `/compact`, and shows the owner a line asking for it.
 - `orchestra status` names two unticked slices of the plan that share a file with no `after:` edge
   between them.
 - `orchestra status --end` holds a line that no frozen review tree is left.
@@ -27,7 +28,8 @@ The fixes from the second project session that ran on the plugin.
   change that cuts across the tree gets a reader of its own, and the fixes are read again while a
   reading finds defects in them. `orchestra status --end` counts a lens read beside others.
 - The `waits` lines of `judge` and `land` name each holding agent once with a count of its files.
-- `orchestra status --measure` measures an agent from its dispatch, not from its last resume.
+- `orchestra status --measure` sums an agent's rounds, each from its dispatch or resume to its
+  report or stop, where it counted only the last round.
 - The dispatch names the first report's title and its round.
 - An agent's rules say a turn ended to wait on its own background command is a stop, that a long
   check runs in the foreground with its timeout named, and that a command in a worktree runs plain,
