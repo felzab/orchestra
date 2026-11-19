@@ -69,6 +69,8 @@ LABEL = 10
 WAITS_SHOWN = 5
 # What a slice line ends with to name the slices whose contract it needs, none of whose files it writes.
 AFTER = " after:"
+# The most pairs of unticked slices sharing files that the drift names; a count says how many more.
+PAIRS_SHOWN = 5
 # The usage limits as `/usage` reports them run headless, with no customisation loaded and no transcript
 # kept; its assistant message carries `usage_report` (the Agent SDK's TypeScript reference, `SDKUsageReport`).
 USAGE_RUN = ("-p", "/usage", "--safe-mode", "--no-session-persistence", "--output-format", "stream-json", "--verbose")
@@ -323,7 +325,8 @@ def slices(state: Path) -> dict[str, bool]:
 
 
 def _drift(snap: Snapshot) -> list[str]:
-    """What drifted from the plan: files no landed brief or ticked slice owns, and agents on no slice.
+    """What drifted from the plan: files no landed brief or ticked slice owns, agents on no slice, and slices
+    planned as parallel that share files.
 
     A ticked slice's line names the files it wrote in backticks, `` - [x] <SLICE> `<file>`... ``, which
     owns them as a brief would: the coordinator makes the edits it can spell out itself, with no brief.
@@ -355,7 +358,50 @@ def _drift(snap: Snapshot) -> list[str]:
     for path in filter(None, changed.split("\0")):
         if not brief.owned(owned, path):
             lines.append(_row("drift", f"{path}: changed since the base, and no landed brief or ticked slice owns it"))
+    return lines + _parallel(snap.state)
+
+
+def _parallel(state: Path) -> list[str]:
+    """Each two unticked slices whose files overlap while neither is after the other, however many steps back.
+
+    The plan and the estimate read such a pair as parallel, while `brief --check` refuses the second's
+    brief as long as the first's agent runs.
+    """
+    heading = init.SLICES
+    planned = [(ticked, _slice(text)) for section, ticked, text in plan_lines(state) if section == heading and text]
+    after = {name: named for _, (name, _, named) in planned}
+    unticked = [(name, files) for ticked, (name, files, _) in planned if not ticked and files]
+    reach = {name: _before(name, after) for name, _ in unticked}
+    lines: list[str] = []
+    for at, (one, mine) in enumerate(unticked):
+        for other, theirs in unticked[at + 1 :]:
+            if one in reach[other] or other in reach[one]:
+                continue
+            if shared := [path for path in theirs if any(brief.overlap(path, held) for held in mine)]:
+                said = f"share {len(shared)} file(s), `{shared[0]}` first, and neither is after the other"
+                lines.append(
+                    _row(
+                        "drift",
+                        f"slices {one} and {other} {said}: the second's brief is refused while the first runs,"
+                        f" so name {one} in {other}'s `after:`",
+                    )
+                )
+    if len(lines) > PAIRS_SHOWN:
+        # A plan ordered by its sections alone held 258 such pairs, which would push every later line out.
+        more = f"{len(lines) - PAIRS_SHOWN} more pair(s) of slices share files likewise"
+        lines = [*lines[:PAIRS_SHOWN], _row("drift", f"{more}: each is named here once those above are ordered")]
     return lines
+
+
+def _before(name: str, after: dict[str, list[str]]) -> set[str]:
+    """Every slice the named one's `after:` reaches, through the slices it names in turn."""
+    seen: set[str] = set()
+    todo = list(after.get(name, ()))
+    while todo:
+        if (held := todo.pop()) not in seen:
+            seen.add(held)
+            todo += after.get(held, ())
+    return seen
 
 
 def _untaken(state: Path, agents: list[model.Agent]) -> list[str]:
@@ -427,9 +473,15 @@ def _now(state: Path, *, shown: bool = True) -> list[str]:
 def measure(snap: Snapshot) -> tuple[list[str], str]:
     # First, so a cut at forty lines never drops the figure a wide wave is weighed against.
     lines, _ = _guarded("usage", lambda: usage(snap.state, snap.root, snap.clock))
+    try:
+        dispatched = _dispatched(snap.state)
+    except Refused as refused:
+        dispatched = {}
+        lines.append(_row("spans", f"unknown: {refused}"))
     spans: dict[str, list[float]] = {}
     for agent in snap.agents:
-        started, reported = _stamp(agent, "running"), _stamp(agent, "reported")
+        # The whole run: a resume stamps `running` again, so the record alone keeps only the last round.
+        started, reported = dispatched.get(agent.name), _stamp(agent, "reported")
         if agent.status in FINISHED and started and reported and reported >= started:
             spans.setdefault(agent.type, []).append((reported - started).total_seconds() / 60)
     for kind, held in sorted(spans.items()):
@@ -437,17 +489,17 @@ def measure(snap: Snapshot) -> tuple[list[str], str]:
             _row(
                 kind,
                 f"{len(held)} finished, median {statistics.median(held):.0f} min,"
-                f" longest {max(held):.0f} min from running to reported",
+                f" longest {max(held):.0f} min from dispatch to last report",
             )
         )
     running = [agent for agent in snap.agents if agent.status == "running"]
     for agent in running:
-        started = _stamp(agent, "running")
-        took = f"{_minutes(snap.clock - started)} min" if started else "minutes unknown"
+        started = dispatched.get(agent.name)
+        took = f"{_minutes(snap.clock - started)} min since its dispatch" if started else "minutes unknown"
         size = context.size(agent)
         lines.append(_row("running", f"{agent.name} ({agent.type}): {took}, context {_tokens(size)}"))
     holds, _ = _guarded("holds", lambda: _holders(snap.state, snap.agents))
-    waiting, _ = _guarded("waits", lambda: waits(snap.state, snap.agents, snap.clock))
+    waiting, _ = _guarded("waits", lambda: waits(snap.state, snap.agents, snap.clock, paths=True))
     ci, _ = _guarded("CI", lambda: _ci_minutes(snap.state))
     plan, unticked = _guarded(
         "unticked", lambda: [_row("unticked", text) for _, ticked, text in plan_lines(snap.state) if not ticked]
@@ -471,6 +523,16 @@ def measure(snap: Snapshot) -> tuple[list[str], str]:
         _count(asked_count, "asked and not ruled"),
     ]
     return lines, "measure: " + ", ".join(parts)
+
+
+def _dispatched(state: Path) -> dict[str, datetime.datetime]:
+    """Each agent's first dispatch, from the log's `dispatch` lines, which nothing overwrites."""
+    first: dict[str, datetime.datetime] = {}
+    for entry in log.entries(state):
+        # The line reads `<NAME> as <id> on <model>`, and a name holds no space.
+        if entry.kind == log.DISPATCH and (at := _parsed(entry.time)) is not None:
+            first.setdefault(entry.text.partition(" ")[0], at)
+    return first
 
 
 def usage(state: Path, root: Path, clock: datetime.datetime) -> list[str]:
@@ -604,12 +666,14 @@ def _slice(text: str) -> tuple[str, list[str], list[str]]:
     return name, CODE_RE.findall(rest), [other for word in after.split() if (other := word.strip("`,"))]
 
 
-def waits(state: Path, agents: list[model.Agent], clock: datetime.datetime) -> list[str]:
+def waits(state: Path, agents: list[model.Agent], clock: datetime.datetime, *, paths: bool = False) -> list[str]:
     """Each unticked slice no agent took and each queue item whose event has not happened: work that may start now.
 
-    A slice's line names each running agent whose brief owns one of its files and each unticked slice
-    its `after:` names, or says its files are free, so a slice planned after another without needing
-    its files or its contract reads as free.
+    A slice's line names each running agent whose brief owns one of its files, once with how many, and
+    each unticked slice its `after:` names, or says its files are free, so a slice planned after another
+    without needing its files or its contract reads as free. Only `paths` lists the files themselves:
+    `--measure` lists every line, and `land` and `judge` close on the count alone, since a wide slice's
+    paths ran a line to kilobytes at every landing.
     """
     heading = init.SLICES
     planned = [(ticked, _slice(text)) for section, ticked, text in plan_lines(state) if section == heading and text]
@@ -635,12 +699,13 @@ def waits(state: Path, agents: list[model.Agent], clock: datetime.datetime) -> l
                 for other in after
                 if other not in done
             ]
-            held += [
-                f"{path} is in the `Owns:` of {agent.name}, {report.article(agent.type)} {_for(agent, clock)}"
-                for path in files
-                for agent in writing
-                if any(brief.overlap(path, pattern) for pattern in heads[agent.name].owns)
-            ]
+            for agent in writing:
+                hit = [path for path in files if any(brief.overlap(path, owns) for owns in heads[agent.name].owns)]
+                if not hit:
+                    continue
+                count = "1 of its files is" if len(hit) == 1 else f"{len(hit)} of its files are"
+                said = f"{count} in the `Owns:` of {agent.name}, {report.article(agent.type)} {_for(agent, clock)}"
+                held.append(said + (": " + ", ".join(f"`{path}`" for path in hit) if paths else ""))
             said = "; ".join(held) if held else "its files are free"
             lines.append(_row("waits", f"slice {name}, which no agent took: {said}"))
     due = {item.number for item in queue.due(state)}
@@ -692,6 +757,7 @@ def end(snap: Snapshot) -> tuple[list[str], str]:
         ("each due lens judged or declined", lambda: _lenses(snap)),
         ("no override waiting", lambda: _armed(snap.state)),
         ("no planned slice untaken", lambda: _drifted(_untaken(snap.state, snap.agents))),
+        ("no frozen tree left", lambda: _frozen(snap.state)),
     ]
     lines: list[str] = []
     held = 0
@@ -714,6 +780,15 @@ def _armed(state: Path) -> str | None:
     since = str(held.get("time") or "")[:16].replace("T", " ")
     caller = held.get("for") or "the coordinator"
     return f"for {caller} since {since}: {held.get('reason')}; `orchestra override --drop` removes it"
+
+
+def _frozen(state: Path) -> str | None:
+    """The review's frozen trees the state still holds, each a registered git worktree; None where none is left."""
+    folder = state / store.TREES
+    # The trash a removal renames a tree into is being deleted already.
+    entries = folder.iterdir() if folder.is_dir() else ()
+    held = [entry for entry in entries if entry.is_dir() and entry.name != prune.TRASH]
+    return f"{len(held)} in {folder}: `orchestra prune --ending` removes each" if held else None
 
 
 def _drifted(untaken: list[str]) -> str | None:
@@ -796,25 +871,21 @@ def _green(snap: Snapshot) -> str | None:
 def _lenses(snap: Snapshot) -> str | None:
     """Each lens the session's change makes due or leaves undeclared, held by a judged report or a note declining it.
 
-    A report counts where the agent's brief names the lens alone on its `Lens:` line and the agent is
-    of the type the lens's `**Run by.**` line names, since another type cannot answer its question and
-    a reader given several lenses reads each less closely. An undeclared lens is held as a due one is,
-    since nothing else says whether the change touches what it reads.
+    A report counts where the agent's brief names the lens on its `Lens:` line, alone or beside others,
+    and the agent is of the type the lens's `**Run by.**` line names, since another type cannot answer
+    its question. How many lenses one reader takes is the coordinator's judgement of the review's width.
+    An undeclared lens is held as a due one is, since nothing else says whether the change touches what
+    it reads.
     """
     changed = diff.changed_paths(snap.root, f"{snap.session.base_commit}..{_head(snap)}")
     read: dict[str, set[str]] = {}
-    shared: dict[str, list[str]] = {}
     for agent in snap.agents:
         # `judge` sets the verdict, which landing and pruning keep: a pruned agent never judged held no lens.
         if agent.verdict is not None:
             # A brief that cannot be read is named by the overview's drift.
             with contextlib.suppress(Refused):
-                named = brief.header(snap.state, agent.name).lens
-                if len(named) == 1:
-                    read.setdefault(named[0], set()).add(agent.type)
-                else:
-                    for name in named:
-                        shared.setdefault(name, []).append(agent.name)
+                for name in brief.header(snap.state, agent.name).lens:
+                    read.setdefault(name, set()).add(agent.type)
     declined = diff.declined(snap.state)
     missing: list[str] = []
     excused: list[str] = []
@@ -827,8 +898,6 @@ def _lenses(snap: Snapshot) -> str | None:
         elif lens.name in read:
             types = " and ".join(report.article(kind) for kind in sorted(read[lens.name]))
             missing.append(f"{lens.name} (read by {types}; its Run by line names {report.article(lens.run_by)})")
-        elif lens.name in shared:
-            missing.append(f"{lens.name} (read beside other lenses by {', '.join(shared[lens.name])})")
         else:
             missing.append(f"{lens.name} (undeclared)" if held.undeclared and not held.due else lens.name)
     if missing:
