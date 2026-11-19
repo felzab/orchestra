@@ -434,10 +434,15 @@ def _rewrite(root: Path, folder: Path | None, yourself: str, *, set_window: bool
         said.append(f"added {folder} to `permissions.{DIRECTORIES}` in {path}")
     if set_window:
         settings[WINDOW] = WINDOW_TOKENS
-        # Claude Code documents no reload of this key in a running session.
+        # Claude Code applies most edits to a running session, and its page names this key nowhere among those read
+        # only at the start (settings.md, "When edits take effect"); but a desktop session started from a pre-warmed
+        # process reads neither the project's file nor this one (anthropics/claude-code issue 105316), so the owner
+        # is told the scope it reads. The user's settings reach every project, so writing there is the owner's call.
+        said.append(f"set `{WINDOW}` to {WINDOW_TOKENS} in {path}, as no settings file sets a window")
         said.append(
-            f"set `{WINDOW}` to {WINDOW_TOKENS} in {path}, as no settings file sets a window;"
-            " it applies from the next session"
+            "a desktop session started from a pre-warmed process skips the project's settings files"
+            " (anthropics/claude-code issue 105316), and a window in the user settings reaches it:"
+            f' `"{WINDOW}": {WINDOW_TOKENS}` at the top level of {config.claude_dir() / "settings.json"}'
         )
     store.replace_bytes(path, dumped(settings, text).encode("utf-8"))
     return said

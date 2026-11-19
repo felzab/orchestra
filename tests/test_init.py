@@ -42,8 +42,14 @@ def test_init_makes_the_state_the_pointer_and_the_two_skeletons(project: Path) -
         "autoCompactWindow": 500000,
     }
     path = project / init.SETTINGS_LOCAL
-    said = f"set `autoCompactWindow` to 500000 in {path}, as no settings file sets a window;"
-    assert f"{said} it applies from the next session" in done.stdout
+    assert f"set `autoCompactWindow` to 500000 in {path}, as no settings file sets a window\n" in done.stdout
+    # A desktop session started from a pre-warmed process reads only the user's settings among the files.
+    user = project.parent / "claude-config" / "settings.json"
+    assert (
+        "a desktop session started from a pre-warmed process skips the project's settings files (anthropics/claude-code"
+        ' issue 105316), and a window in the user settings reaches it: `"autoCompactWindow": 500000` at the top level'
+        f" of {user}\n"
+    ) in done.stdout
     assert done.stdout.splitlines()[-1] == "doctor: every check holds"
 
 
