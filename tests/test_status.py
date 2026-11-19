@@ -430,6 +430,28 @@ def test_end_holds_each_machine_checkable_line_or_names_what_breaks_it(project: 
     assert lines[-1] == "end: 1 of 9 lines held"
 
 
+def _reader(state: Path, name: str, kind: model.AgentType, lens: str) -> None:
+    """A reader judged with a verdict, as `judge` leaves it, whose brief's `Lens:` line reads `lens`."""
+    write_agent(state, model.Agent(name, kind, "judged", reports={1: "r"}, outcome="DONE", verdict="ok"))
+    header = (
+        f"Agent: {name}            Type: {kind}            Slice: none\nBase: main at 0000000\n"
+        f"Report: {state / 'reports' / f'{name}.md'}\nOwns: none\nRows: none\nWrites: none\nLens: {lens}\n"
+    )
+    (state / "briefs" / f"{name}.md").write_bytes(header.encode())
+
+
+def test_a_lens_read_beside_others_by_its_type_holds_at_the_end(project: Path, built: Path) -> None:
+    """How many lenses one reader takes is the coordinator's judgement; the type still answers the question."""
+    _reader(built, "GROUPED", "auditor", "security, contract")
+    # Both run by an auditor, so a driver's reading holds neither, grouped or not.
+    _reader(built, "WRONG", "driver", "essential, document")
+    (lens,) = [line for line in _lines(inprocess("status", "--end", cwd=project)) if "each due lens" in line]
+    missing = lens.partition(" note for ")[2].split(", ")
+    assert not {"security", "contract"} & {said.split()[0] for said in missing}
+    assert "essential (read by a driver; its Run by line names an auditor)" in missing
+    assert "document (read by a driver; its Run by line names an auditor)" in missing
+
+
 def test_an_override_waiting_is_listed_and_holds_the_end_open_until_dropped(project: Path, built: Path) -> None:
     """One left armed lets its caller's next refused hook call through unseen, with an unrelated reason."""
     assert "held      no override waiting" in _lines(inprocess("status", "--end", cwd=project))

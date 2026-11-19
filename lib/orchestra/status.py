@@ -861,25 +861,21 @@ def _green(snap: Snapshot) -> str | None:
 def _lenses(snap: Snapshot) -> str | None:
     """Each lens the session's change makes due or leaves undeclared, held by a judged report or a note declining it.
 
-    A report counts where the agent's brief names the lens alone on its `Lens:` line and the agent is
-    of the type the lens's `**Run by.**` line names, since another type cannot answer its question and
-    a reader given several lenses reads each less closely. An undeclared lens is held as a due one is,
-    since nothing else says whether the change touches what it reads.
+    A report counts where the agent's brief names the lens on its `Lens:` line, alone or beside others,
+    and the agent is of the type the lens's `**Run by.**` line names, since another type cannot answer
+    its question. How many lenses one reader takes is the coordinator's judgement of the review's width.
+    An undeclared lens is held as a due one is, since nothing else says whether the change touches what
+    it reads.
     """
     changed = diff.changed_paths(snap.root, f"{snap.session.base_commit}..{_head(snap)}")
     read: dict[str, set[str]] = {}
-    shared: dict[str, list[str]] = {}
     for agent in snap.agents:
         # `judge` sets the verdict, which landing and pruning keep: a pruned agent never judged held no lens.
         if agent.verdict is not None:
             # A brief that cannot be read is named by the overview's drift.
             with contextlib.suppress(Refused):
-                named = brief.header(snap.state, agent.name).lens
-                if len(named) == 1:
-                    read.setdefault(named[0], set()).add(agent.type)
-                else:
-                    for name in named:
-                        shared.setdefault(name, []).append(agent.name)
+                for name in brief.header(snap.state, agent.name).lens:
+                    read.setdefault(name, set()).add(agent.type)
     declined = diff.declined(snap.state)
     missing: list[str] = []
     excused: list[str] = []
@@ -892,8 +888,6 @@ def _lenses(snap: Snapshot) -> str | None:
         elif lens.name in read:
             types = " and ".join(report.article(kind) for kind in sorted(read[lens.name]))
             missing.append(f"{lens.name} (read by {types}; its Run by line names {report.article(lens.run_by)})")
-        elif lens.name in shared:
-            missing.append(f"{lens.name} (read beside other lenses by {', '.join(shared[lens.name])})")
         else:
             missing.append(f"{lens.name} (undeclared)" if held.undeclared and not held.due else lens.name)
     if missing:
