@@ -395,6 +395,52 @@ def test_measure_names_an_unticked_slice_by_its_id_its_count_of_files_and_its_ed
     assert "unticked  S7, 30 file(s), after S2, S3: landed, so done; tick its line" in lines
 
 
+def test_measure_names_the_longest_chain_of_slices_still_to_do_and_each_tied_with_it(
+    project: Path, built: Path
+) -> None:
+    """The estimate's critical path starts from it, which coordinators counted by hand and missed."""
+    added = "- [ ] S5 `a.md`\n- [ ] S6 `b.md` after: S5\n- [ ] S7 `c.md` after: S5, S1\n- [ ] S8 `d.md` after: S6, S7\n"
+    store.write_text(built / store.PLAN, PLAN.replace("- [ ] S3 tests/\n", f"- [ ] S3 tests/\n{added}"))
+
+    def chain() -> list[str]:
+        return [line for line in _lines(inprocess("status", "--measure", cwd=project)) if line.startswith("chain")]
+
+    # S1 is ticked, so the edge to it holds nothing back.
+    assert chain() == ["chain     3 slice(s) deep, 2 chains tied, each first to last: S5, S6, S8; S5, S7, S8"]
+    more = PLAN.replace("- [ ] S3 tests/\n", f"- [ ] S3 tests/\n{added}- [ ] S9 `e.md` after: S6, S7\n")
+    store.write_text(built / store.PLAN, more)
+    tied = "S5, S6, S8; S5, S7, S8; S5, S6, S9; and 1 more"
+    assert chain() == [f"chain     3 slice(s) deep, 4 chains tied, each first to last: {tied}"]
+    # A slice landed ends the chain as a ticked one does.
+    _agent(built, model.Agent("W5", "writer", "landed", reports={1: "r"}), slice_="S5", owns="a.md")
+    tied = "S6, S8; S7, S8; S6, S9; and 1 more"
+    assert chain() == [f"chain     2 slice(s) deep, 4 chains tied, each first to last: {tied}"]
+    store.write_text(built / store.PLAN, "# Plan\n\n## Slices and their files\n\n- [ ] S5 `a.md`\n- [x] S2 `b.md`\n")
+    assert chain() == ["chain     no unfinished slice"]
+    store.write_text(built / store.PLAN, "# Plan\n\n## Slices and their files\n\n- [ ] S2 `b.md`\n")
+    assert chain() == ["chain     1 slice(s) deep, first to last: S2"]
+    # A plan whose edges close a cycle still gets its row, the edge closing it not followed.
+    cycle = "# Plan\n\n## Slices and their files\n\n- [ ] S2 `b.md` after: S3\n- [ ] S3 `c.md` after: S2\n"
+    store.write_text(built / store.PLAN, cycle)
+    assert chain() == ["chain     2 slice(s) deep, first to last: S3, S2"]
+
+
+def test_measure_gives_the_minutes_from_each_landing_to_the_next_dispatch(project: Path, built: Path) -> None:
+    def hop() -> list[str]:
+        return [line for line in _lines(inprocess("status", "--measure", cwd=project)) if line.startswith("hop")]
+
+    assert hop() == ["hop       no landing has been followed by a dispatch yet"]
+    # A dispatch with no landing before it is no hop, and a landing with no dispatch after it is none yet.
+    _dispatch(built, "W0", 60)
+    _logged(built, "land", "W1 landed as abc1234", 50)
+    _dispatch(built, "W2", 46)
+    _dispatch(built, "W3", 40)
+    _logged(built, "land", "W2 landed as def5678", 30)
+    _dispatch(built, "W4", 20)
+    _logged(built, "land", "W4 landed as 0123456", 5)
+    assert hop() == ["hop       2 hop(s) from a landing to the next dispatch, median 7 min, longest 10 min"]
+
+
 def test_measure_lists_what_waits_and_the_context_of_each_agent_holding_rows(project: Path, built: Path) -> None:
     """A slice no agent took reads free unless a running writer's brief owns one of its files."""
     plan = PLAN.replace("- [ ] S3 tests/\n", "- [ ] S3 tests/\n- [ ] S7 `docs/`\n")

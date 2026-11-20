@@ -12,6 +12,7 @@ import argparse
 import contextlib
 import dataclasses
 import datetime
+import itertools
 import json
 import re
 import shutil
@@ -71,6 +72,8 @@ WAITS_SHOWN = 5
 AFTER = " after:"
 # The most pairs of unticked slices sharing files that the drift names; a count says how many more.
 PAIRS_SHOWN = 5
+# The most chains tied for the longest that `--measure` names; a count says how many more.
+CHAINS_SHOWN = 3
 # The usage limits as `/usage` reports them run headless, with no customisation loaded and no transcript
 # kept; its assistant message carries `usage_report` (the Agent SDK's TypeScript reference, `SDKUsageReport`).
 USAGE_RUN = ("-p", "/usage", "--safe-mode", "--no-session-persistence", "--output-format", "stream-json", "--verbose")
@@ -549,6 +552,8 @@ def measure(snap: Snapshot) -> tuple[list[str], str]:
     waiting, _ = _guarded("waits", lambda: waits(snap.state, snap.agents, snap.clock, paths=True))
     ci, _ = _guarded("CI", lambda: _ci_minutes(snap.state))
     plan, unticked = _guarded("unticked", lambda: _unticked_lines(snap.state, snap.agents))
+    chain, _ = _guarded("chain", lambda: _chain(snap.state, snap.agents))
+    hop, _ = _guarded("hop", lambda: _hops(snap.state))
     due, due_count = _guarded("due", lambda: [_row("due", _item(item)) for item in queue.due(snap.state)])
     asked, asked_count = _guarded(
         "asked",
@@ -558,7 +563,7 @@ def measure(snap: Snapshot) -> tuple[list[str], str]:
             if ruling.open
         ],
     )
-    lines += [*holds, *ci, *plan, *due, *waiting, *asked]
+    lines += [*holds, *ci, *plan, *chain, *hop, *due, *waiting, *asked]
     finished = sum(len(held) for held in spans.values())
     parts = [
         f"{finished} finished",
@@ -609,6 +614,71 @@ def _unticked_lines(state: Path, agents: list[model.Agent]) -> list[str]:
         said = f"{name}, {len(files)} file(s)" + (f", after {', '.join(after)}" if after else "")
         lines.append(_row("unticked", said + (": landed, so done; tick its line" if name in landed else "")))
     return lines
+
+
+def _chain(state: Path, agents: list[model.Agent]) -> list[str]:
+    """The longest chain of unfinished slices by their `after:` edges: its depth, and each chain tied for it.
+
+    It is where an estimate's critical path starts. An edge to a slice finished or not listed holds
+    nothing back, so it ends the chain; an edge closing a cycle is not followed.
+    """
+    planned = [_slice(text) for section, _, text in plan_lines(state) if section == init.SLICES and text]
+    finished = _finished(state, agents)
+    open_ = [name for name, _, _ in planned if name not in finished]
+    after = {name: [other for other in named if other in open_] for name, _, named in planned if name in open_}
+    if not after:
+        return [_row("chain", "no unfinished slice")]
+    depth: dict[str, int] = {}
+
+    def deep(name: str, seen: frozenset[str]) -> int:
+        if name not in depth:
+            behind = [deep(other, seen | {name}) for other in after[name] if other not in seen | {name}]
+            depth[name] = 1 + max(behind, default=0)
+        return depth[name]
+
+    longest = max(deep(name, frozenset()) for name in open_)
+
+    def chains(name: str) -> Iterable[list[str]]:
+        """Each chain of the slice's depth that ends at it, first to last."""
+        if depth[name] == 1:
+            yield [name]
+            return
+        for other in after[name]:
+            if depth.get(other) == depth[name] - 1:
+                for held in chains(other):
+                    yield [*held, name]
+
+    # Counted rather than listed, since waves of slices each after the whole wave before tie in a number
+    # of chains that grows as a power of their count.
+    count: dict[str, int] = {}
+    for name in sorted(open_, key=depth.__getitem__):
+        behind = [count[other] for other in after[name] if depth.get(other) == depth[name] - 1]
+        count[name] = sum(behind) if depth[name] > 1 else 1
+    ends = [name for name in open_ if depth[name] == longest]
+    found = sum(count[name] for name in ends)
+    first = itertools.islice((chain for end in ends for chain in chains(end)), CHAINS_SHOWN)
+    shown = "; ".join(", ".join(chain) for chain in first)
+    more = f"; and {found - CHAINS_SHOWN} more" if found > CHAINS_SHOWN else ""
+    tied = f", {found} chains tied, each" if found > 1 else ","
+    return [_row("chain", f"{longest} slice(s) deep{tied} first to last: {shown}{more}")]
+
+
+def _hops(state: Path) -> list[str]:
+    """The minutes from each `land` line of the log to the next `dispatch` line: what a landing leaves idle."""
+    hops: list[float] = []
+    landed: list[datetime.datetime] = []
+    for entry in log.entries(state):
+        if (at := _parsed(entry.time)) is None:
+            continue
+        if entry.kind == "land":
+            landed.append(at)
+        elif entry.kind == log.DISPATCH:
+            hops += [(at - since).total_seconds() / 60 for since in landed]
+            landed = []
+    if not hops:
+        return [_row("hop", "no landing has been followed by a dispatch yet")]
+    said = f"median {statistics.median(hops):.0f} min, longest {max(hops):.0f} min"
+    return [_row("hop", f"{len(hops)} hop(s) from a landing to the next dispatch, {said}")]
 
 
 def usage(state: Path, root: Path, clock: datetime.datetime) -> list[str]:
