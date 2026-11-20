@@ -19,7 +19,7 @@ from typing import cast
 
 import pytest
 
-from conftest import LIB, MakeRepo, git, inprocess, write_config
+from conftest import LIB, MakeRepo, git, inprocess, write_agent, write_config
 from orchestra import context, events, findings, hooks, log, model, queue, report, store
 from test_context import line, transcript
 from test_report import text
@@ -240,6 +240,8 @@ def test_a_fleets_edit_loads_no_status_and_a_prompt_at_work_loads_no_events(proj
     assert loaded(project, "PermissionRequest", BASH) == []
     assert loaded(project, "PreToolUse", QUESTION) == []
     store.write_text(state / store.PLAN, "## Slices\n\n- [ ] S1: the store\n")
+    # Only a writer's dispatch makes the first checkpoint due.
+    write_agent(state, model.Agent("A", "writer", "running"))
     log.record(state, log.DISPATCH, "A as a1 on the inherited model")
     stopped = context_of(hook("Stop", project, stop_hook_active=False)[1], "Stop")
     assert "1 plan line is unticked: the checkpoint in checkpoint.md is due" in stopped
