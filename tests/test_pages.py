@@ -28,7 +28,7 @@ BUDGETS = {
     "skills/run/handoff.md": 2770,
     "skills/run/resume.md": 4400,
     "skills/status/SKILL.md": 500,
-    "skills/estimate/SKILL.md": 3073,
+    "skills/estimate/SKILL.md": 3232,
     "skills/checkpoint/SKILL.md": 500,
     "skills/away/SKILL.md": 2366,
     "skills/back/SKILL.md": 1550,
@@ -49,7 +49,6 @@ BUDGETS = {
             "contract",
             "tests",
             "document",
-            "estimate",
             "prompt",
             "conformance",
             "necessity",
@@ -64,6 +63,8 @@ BUDGETS = {
     "lenses/essential.md": 1650,
     # Its sixth item names the plugin's own merge subject as no hit, which outgrew the shared budget.
     "lenses/disclosure.md": 1594,
+    # Its checklist asks after every kind of saving the owner named: timing, scoping, batching and the rest.
+    "lenses/estimate.md": 2114,
 }
 BUDGETED = ("skills/", "agents/", "lenses/")
 # Every folder whose pages name commands and links: the plugin's own, and the documents beside them.
