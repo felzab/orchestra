@@ -19,7 +19,7 @@ from typing import cast
 
 import pytest
 
-from conftest import LIB, MakeRepo, git, inprocess, write_config
+from conftest import LIB, MakeRepo, git, inprocess, write_agent, write_config
 from orchestra import context, events, findings, hooks, log, model, queue, report, store
 from test_context import line, transcript
 from test_report import text
@@ -159,7 +159,9 @@ def edit(target: Path) -> dict[str, object]:
 
 def test_each_event_is_one_registration_calling_the_launcher_by_the_plugin_root() -> None:
     held = json.loads(HOOKS_JSON.read_bytes())
-    assert list(held) == ["hooks"]
+    # The registrations, and at most a `modules` key beside them.
+    assert "hooks" in held
+    assert set(held) <= {"hooks", "modules"}
     assert set(held["hooks"]) == set(hooks.EVENTS)
     matchers = {}
     for event, groups in held["hooks"].items():
@@ -238,6 +240,8 @@ def test_a_fleets_edit_loads_no_status_and_a_prompt_at_work_loads_no_events(proj
     assert loaded(project, "PermissionRequest", BASH) == []
     assert loaded(project, "PreToolUse", QUESTION) == []
     store.write_text(state / store.PLAN, "## Slices\n\n- [ ] S1: the store\n")
+    # Only a writer's dispatch makes the first checkpoint due.
+    write_agent(state, model.Agent("A", "writer", "running"))
     log.record(state, log.DISPATCH, "A as a1 on the inherited model")
     stopped = context_of(hook("Stop", project, stop_hook_active=False)[1], "Stop")
     assert "1 plan line is unticked: the checkpoint in checkpoint.md is due" in stopped
@@ -593,7 +597,16 @@ def test_a_resume_of_a_writer_whose_worktree_is_gone_is_refused(project: Path, s
     said = hook("PreToolUse", project, tool_name="SendMessage", tool_input={"to": "W", "message": "fix F1"})[1]
     assert decision(said) == (
         "deny",
-        "W's worktree is gone (gone), so a resume would run it in the coordinator's checkout: dispatch a successor",
+        "W's worktree is gone (gone), so a resume has no worktree to run in: `orchestra judge W` banks its report,"
+        " then dispatch a successor briefed with what is left",
+    )
+    # A judged record has nothing left to bank.
+    changed(state, "W", status="judged")
+    said = hook("PreToolUse", project, tool_name="SendMessage", tool_input={"to": "W", "message": "fix F1"})[1]
+    assert decision(said) == (
+        "deny",
+        "W's worktree is gone (gone), so a resume has no worktree to run in: dispatch a successor briefed with what"
+        " is left",
     )
 
 
@@ -616,7 +629,7 @@ def test_a_resume_past_the_context_ceiling_is_refused_naming_the_figure(project:
 def test_a_writer_stopped_on_a_question_past_the_ceiling_is_answered_and_a_finished_one_is_not_resumed(
     project: Path, state: Path
 ) -> None:
-    """Until its question is answered, `judge`, `land` and `prune --discard` hold it, so no successor takes over."""
+    """While its worktree stands and its question waits, `judge`, `land` and `prune --discard` hold it."""
     write_config(project, {"stateRoot": (project.parent / "state").as_posix(), "contextCeiling": 100_000})
     briefed(project, "W", "writer", owns="lib/a.py")
     dispatched(project, "W", "writer", "w1")
@@ -839,6 +852,51 @@ def test_the_turn_continues_once_with_what_is_undone(project: Path, state: Path)
     assert hook("Stop", project, stop_hook_active=True, background_tasks=[]) == (0, None)
 
 
+def test_a_writer_stopped_on_a_question_whose_worktree_is_gone_is_judged_and_leaves_the_turns_end(
+    project: Path, state: Path
+) -> None:
+    """Claude Code removes a commit-less writer's worktree when it stops (worktrees.md), so no answer reaches it."""
+    briefed(project, "W", "writer", owns="lib/a.py")
+    dispatched(project, "W", "writer", "w1")
+    asked = text("writer", "W", status="NEEDS-ANSWER: which queue takes it?").replace("Commits: 2,", "Commits: 0,")
+    report.path(state, "W").write_bytes(asked.encode())
+    changed(state, "W", status="reported", outcome="NEEDS-ANSWER", branch="worktree-agent-w1")
+
+    def undone() -> list[str]:
+        said = hook("Stop", project, stop_hook_active=False, background_tasks=[])[1]
+        return [] if said is None else context_of(said, "Stop").splitlines()
+
+    assert undone() == [
+        "Undone in this orchestra session:",
+        "- W stopped NEEDS-ANSWER, and its worktree is gone (worktree-agent-w1), so no answer reaches it:"
+        " `orchestra judge W` banks its report as it stands",
+    ]
+    # A discard waits for the judge too, since a pruned agent's report can no longer be judged.
+    kept = run("prune", "--discard", "W", cwd=project)
+    assert "kept its record (W): W stopped NEEDS-ANSWER, and its worktree is gone" in kept.stdout, kept.stdout
+    judged = run("judge", "W", "F1=route:owner", "F2=route:owner", "--verdict", "superseded by W2", cwd=project)
+    assert judged.returncode == 0, judged.stderr
+    assert model.read_agent(state, "W").status == "judged"
+    assert undone() == []
+
+
+def test_a_writer_stopped_on_a_question_whose_worktree_stands_waits_on_its_answer(project: Path, state: Path) -> None:
+    """Its answer resumes it in its worktree, so `judge` waits for the report that answer completes."""
+    briefed(project, "W", "writer", owns="lib/a.py")
+    dispatched(project, "W", "writer", "w1")
+    git(project, "worktree", "add", "-b", "worktree-agent-w1", str(project.parent / "trees" / "agent-w1"))
+    report.path(state, "W").write_bytes(text("writer", "W", status="NEEDS-ANSWER: which queue takes it?").encode())
+    changed(state, "W", status="reported", outcome="NEEDS-ANSWER", branch="worktree-agent-w1")
+    said = context_of(hook("Stop", project, stop_hook_active=False, background_tasks=[])[1], "Stop")
+    assert "- W stopped NEEDS-ANSWER and waits on your answer by message" in said.splitlines()
+    judged = run("judge", "W", "F1=route:owner", "F2=route:owner", "--verdict", "v", cwd=project)
+    assert (judged.returncode, judged.stderr) == (
+        2,
+        "orchestra judge: W stopped NEEDS-ANSWER: which queue takes it?. Answer it by message, and judge the report"
+        " it writes\n",
+    )
+
+
 def test_notes_after_now_md_leave_it_current_and_as_many_decisions_or_other_entries_do_not(
     project: Path, state: Path
 ) -> None:
@@ -1043,10 +1101,10 @@ def _judged(project: Path, name: str, kind: str, lens: str = "none") -> subproce
     return judged
 
 
-def test_a_falsely_sequenced_slice_waits_free_and_four_judged_reports_not_disclosure_only_make_the_checkpoint_due(
+def test_a_falsely_sequenced_slice_waits_free_and_eight_judged_reports_not_disclosure_only_make_the_checkpoint_due(
     project: Path, state: Path
 ) -> None:
-    """S2 needs nothing of S1, so the program names it free; the estimate is looked at again every four reports.
+    """S2 needs nothing of S1, so the program names it free; the estimate is looked at again every eight reports.
 
     A researcher whose `Lens:` names disclosure alone frees no planned work, before a push or in the review, in
     any round; a report whose brief cannot be read, or whose `Lens:` names another lens beside, counts.
@@ -1055,9 +1113,13 @@ def test_a_falsely_sequenced_slice_waits_free_and_four_judged_reports_not_disclo
     briefed(project, "W", "writer", owns="lib/a.py")
     free = "waits     slice S2, which no agent took: its files are free"
     assert _due(project) == []
+    # A researcher settling the plan's premises goes out before the first estimate (start.md, step 5).
+    briefed(project, "MAP", "researcher")
+    dispatched(project, "MAP", "researcher", "map")
+    assert _due(project) == []
     dispatched(project, "W", "writer", "w1")
     assert free in run("status", "--measure", cwd=project).stdout.splitlines()
-    first = "- agents have been dispatched, and no estimate is saved, and 3 plan lines are unticked"
+    first = "- a writer has been dispatched, and no estimate is saved, and 3 plan lines are unticked"
     assert _due(project) == [f"{first}: the checkpoint in checkpoint.md is due"]
     # Once per turn: a turn the hook already continued is let end.
     assert hook("Stop", project, stop_hook_active=True, background_tasks=[]) == (0, None)
@@ -1074,15 +1136,16 @@ def test_a_falsely_sequenced_slice_waits_free_and_four_judged_reports_not_disclo
     second = run("judge", "DISCLOSE", "F1=close:MOOT:x", "F2=close:MOOT:x", "--verdict", "v", cwd=project)
     assert second.returncode == 0, second.stderr
     at = datetime.datetime.fromtimestamp(saved.stat().st_mtime).astimezone()
-    fourth = f"- 4 reports were judged since the last saved estimate ({at:%H:%M}), and 3 plan lines are unticked"
-    for k in range(1, 5):
+    eighth = f"- 8 reports were judged since the last saved estimate ({at:%H:%M}), and 3 plan lines are unticked"
+    # W and MAP stay at work throughout, so no wave ends: the count alone makes the checkpoint due.
+    for k in range(1, 9):
         # A lens beside disclosure makes the read more than a disclosure-only one, so its report counts.
-        judged = _judged(project, f"A{k}", "auditor", lens="disclosure, contract" if k == 4 else "none")
+        judged = _judged(project, f"A{k}", "auditor", lens="disclosure, contract" if k == 8 else "none")
         assert free in judged.stdout.splitlines()
         if k == 1:
             # A brief that cannot be read is counted, as the report of any other agent is.
             (state / "briefs" / "A1.md").unlink()
-        assert _due(project) == ([] if k < 4 else [f"{fourth}: the checkpoint in checkpoint.md is due"])
+        assert _due(project) == ([] if k < 8 else [f"{eighth}: the checkpoint in checkpoint.md is due"])
     # A landing closes on what still waits.
     tree = project.parent / "trees" / "agent-w1"
     git(project, "worktree", "add", "-b", "worktree-agent-w1", str(tree))
@@ -1092,6 +1155,35 @@ def test_a_falsely_sequenced_slice_waits_free_and_four_judged_reports_not_disclo
     landed = run("land", "W", cwd=project)
     assert landed.returncode == 0, landed.stderr
     assert free in landed.stdout.splitlines()
+
+
+def test_the_checkpoint_is_due_at_a_waves_end_once_no_agent_is_live_and_a_writer_has_landed(
+    project: Path, state: Path
+) -> None:
+    """checkpoint.md runs at each wave's end; a landing while another agent works, or is briefed to, ends none."""
+    store.write_text(state / store.PLAN, PACED_PLAN)
+    briefed(project, "W", "writer", owns="lib/a.py")
+    dispatched(project, "W", "writer", "w1")
+    briefed(project, "R", "auditor")
+    dispatched(project, "R", "auditor", "r1")
+    saved = state / "estimates" / "first.md"
+    saved.write_bytes(b"# Estimate\n")
+    at = datetime.datetime.fromtimestamp(saved.stat().st_mtime).astimezone()
+    assert _due(project) == []
+    changed(state, "W", status="landed")
+    assert _due(project) == []
+    changed(state, "R", status="judged")
+    briefed(project, "N", "auditor")
+    assert _due(project) == []
+    changed(state, "N", status="pruned")
+    ended = f"- no agent is live, and 1 writer(s) landed since the last saved estimate ({at:%H:%M})"
+    assert _due(project) == [f"{ended}, and 3 plan lines are unticked: the checkpoint in checkpoint.md is due"]
+    # An estimate saved after the landing starts the next wave's count.
+    newer = state / "estimates" / "second.md"
+    newer.write_bytes(b"# Estimate\n")
+    later = time.time() + 2
+    os.utime(newer, (later, later))
+    assert _due(project) == []
 
 
 def test_a_compaction_or_a_resume_reads_the_state_back_from_disk(project: Path, state: Path) -> None:
@@ -1109,6 +1201,27 @@ def test_a_compaction_or_a_resume_reads_the_state_back_from_disk(project: Path, 
     assert context.endswith("\nNOW.md:\n" + (state / "NOW.md").read_bytes().decode())
     # NOW.md follows whole, so status's `now` lines would give it twice.
     assert not any(line.startswith("now ") for line in context.splitlines())
+
+
+def test_the_overview_after_a_compaction_leaves_out_judged_and_pruned_agents_and_keeps_what_waits(
+    project: Path, state: Path
+) -> None:
+    """Nothing after a compaction acts on a finished agent; `agents` still counts it and `status` still names it."""
+    for name, ident in (("RUN", "r1"), ("TOJUDGE", "t1"), ("ASKS", "q1"), ("DONE", "d1"), ("GONE", "g1")):
+        briefed(project, name, "auditor")
+        dispatched(project, name, "auditor", ident)
+    changed(state, "TOJUDGE", status="reported", outcome="DONE")
+    changed(state, "ASKS", status="reported", outcome="NEEDS-ANSWER")
+    changed(state, "DONE", status="judged", outcome="DONE")
+    changed(state, "GONE", status="pruned", outcome="DONE")
+    lines = context_of(hook("SessionStart", project, source="compact")[1], "SessionStart").splitlines()
+    assert "agents    1 running, 2 reported, 1 judged, 1 pruned" in lines
+    assert "suspect   RUN (auditor, round 1): running, but no transcript found for r1" in lines
+    assert "to judge  TOJUDGE (auditor, round 1, DONE)" in lines
+    assert "NEEDS-ANSWER ASKS (auditor, round 1): its report waits on you" in lines
+    assert not [line for line in lines if line.startswith(("judged ", "pruned "))]
+    shown = run("status", cwd=project).stdout.splitlines()
+    assert [line for line in shown if line.startswith(("judged ", "pruned "))] == ["judged    DONE", "pruned    GONE"]
 
 
 def test_each_prompt_carries_the_clock_and_a_gap_past_half_an_hour_names_usage(project: Path, state: Path) -> None:
@@ -1134,23 +1247,33 @@ def test_each_prompt_carries_the_clock_and_a_gap_past_half_an_hour_names_usage(p
 
 
 @pytest.mark.usefixtures("state")
-def test_a_prompt_past_the_compaction_window_tells_the_coordinator_and_the_owner(project: Path) -> None:
-    """A desktop session started from a pre-warmed process was seen skipping the window its project's settings set.
+def test_a_prompt_nearing_the_compaction_window_tells_the_coordinator_and_past_it_the_owner(project: Path) -> None:
+    """From three quarters of the window the coordinator reads that its compact tool compacts at the next seam.
 
-    The window is the one `init` wrote to the local settings; the transcript's last call decides, not its largest.
+    Past the window, which a desktop session started from a pre-warmed process was seen skipping, the owner reads
+    it too. The window is the one `init` wrote to the local settings; the transcript's last call decides, not its
+    largest.
     """
     main = project.parent / "main.jsonl"
+    seam = "`mcp__orchestra__compact`, where the session has it, or else the owner's `/compact`, compacts"
+    seam += " at the next seam."
     main.write_bytes(line("assistant", "m0", 900_000) + line("user") + line("assistant", "m1", 500_000))
     said = hook("UserPromptSubmit", project, prompt="go", transcript_path=str(main))[1]
     assert context_of(said, "UserPromptSubmit").endswith(
-        " Your context is 500,474 tokens, past the 500,000-token compaction window, which has not applied;"
-        " only the owner can type `/compact`."
+        " Your context is 500,474 tokens, past the 500,000-token compaction window, which has not applied; " + seam
     )
     assert field(said, "systemMessage") == (
         "orchestra: this session's context is 500,474 tokens, past its 500,000-token compaction window, which has not"
-        " applied: type `/compact` at the next seam."
+        " applied: the coordinator compacts at its next seam where its compact tool loads, or type `/compact` then."
     )
-    main.write_bytes(line("assistant", "m0", 900_000) + line("user") + line("assistant", "m1", 499_000))
+    # 375,000 is three quarters of the window; the line adds 474 tokens to the figure given.
+    main.write_bytes(line("assistant", "m0", 900_000) + line("user") + line("assistant", "m1", 374_526))
+    said = hook("UserPromptSubmit", project, prompt="go", transcript_path=str(main))[1]
+    assert context_of(said, "UserPromptSubmit").endswith(
+        " Your context is 375,000 tokens, at least 75% of the 500,000-token compaction window; " + seam
+    )
+    assert "systemMessage" not in cast("dict[str, object]", said)
+    main.write_bytes(line("assistant", "m0", 900_000) + line("user") + line("assistant", "m1", 374_525))
     said = hook("UserPromptSubmit", project, prompt="go", transcript_path=str(main))[1]
     assert "compaction" not in context_of(said, "UserPromptSubmit")
     assert "systemMessage" not in cast("dict[str, object]", said)

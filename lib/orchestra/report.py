@@ -4,11 +4,11 @@ The grammar, each heading once and in this order:
 
     # <NAME> · <type> · round <n>
     ## Summary              the status line, one sentence, the commit line, for a writer an optional
-                            `Rows fixed: <id>, <id>.`, one line per finding repeating its
-                            heading, `Not verified: ...`, `Wrong in the brief: ...`
+                            `Rows fixed: <id>, <id>.` or `Rows fixed: none.`, one line per finding
+                            repeating its heading, `Not verified: ...`, `Wrong in the brief: ...`
     ## Done
     ## Findings             `### F<n> · <defect or optional> · <silent or loud> · <anchor>`, its first
-                            line `Harm: ... Likelihood: ...`; or the line `none`
+                            paragraph `Harm: ... Likelihood: ...`; or the line `none`
     ## Not verified
     ## Wrong in the brief
     ## Outside the scope
@@ -58,6 +58,8 @@ NO_COMMITS = "Commits: none"
 # The optional line after a writer's commit line naming the rows its branch fixes, which its landing closes;
 # it stays out of every commit message, since a push publishes those. A driver's work never lands.
 ROWS_FIXED = "Rows fixed:"
+# The word a `Rows fixed:` line holds for no row, as a brief's `Rows:` line does.
+NO_ROWS = "none"
 FIXING = "writer"
 FINDING_RE = re.compile(r"F(?P<n>[1-9][0-9]*) · (?P<kind>defect|optional) · (?P<noise>silent|loud) · (?P<anchor>\S.*)")
 VERDICT_RE = re.compile(rf"(?P<row>{model.ROW_RE.pattern}) · (?P<verdict>{'|'.join(VERDICTS)})")
@@ -274,7 +276,10 @@ class _Reader:
         return _Summary(status, reason, count, tip, self.named(middle, items), claimed)
 
     def fixed(self, k: int, line: str) -> tuple[str, ...]:
-        """The row ids a `Rows fixed:` line names, each token that is none faulted."""
+        """The row ids a `Rows fixed:` line names, each token that is none faulted; `none` names no row."""
+        # A brief's header writes `Rows: none` for a slice with no row, and `brief.py :: _entries` reads it so.
+        if line.removeprefix(ROWS_FIXED).strip().rstrip(".").strip().lower() == NO_ROWS:
+            return ()
         # A row id never ends in `.`, so the line's closing full stop comes off its last token.
         split = re.split(r"[,\s]+", line.removeprefix(ROWS_FIXED))
         tokens = [token for token in (part.rstrip(".") for part in split) if token]
@@ -343,8 +348,12 @@ class _Reader:
                 self.fault(k, f"F{number} where F{expected} is next: the numbers start at 1 and do not skip")
             expected = number + 1
             rows = self.filled(k + 1, end)
-            if not rows or not HARM_RE.fullmatch(rows[0][1]):
-                self.fault(k, "its first line is no `Harm: <the concrete harm>. Likelihood: <how likely, and why>.`")
+            # The first paragraph, its lines joined, so a hard-wrapped `Harm: ... Likelihood: ...` reads whole.
+            first = [line for n, (j, line) in enumerate(rows) if j == rows[0][0] + n]
+            if not HARM_RE.fullmatch(" ".join(first)):
+                self.fault(
+                    k, "its first paragraph is no `Harm: <the concrete harm>. Likelihood: <how likely, and why>.`"
+                )
                 continue
             kind = typing.cast("Kind", held["kind"])
             body = self.body(k, end)

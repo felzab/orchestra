@@ -81,13 +81,47 @@ def unjudged(agent: model.Agent) -> str | None:
     )
 
 
+def worktrees(root: Path) -> dict[str, Path]:
+    """Each agent's worktree git lists that still stands, by its branch; the primary checkout left out."""
+    listed = config.worktrees(root)[1:]
+    return {
+        tree["branch"]: Path(tree["worktree"])
+        for tree in listed
+        if "branch" in tree and Path(tree["worktree"]).is_dir()
+    }
+
+
+def gone(agent: model.Agent, root: Path) -> str | None:
+    """The branch of a writer or a driver whose worktree is gone, so that no resume reaches it; None otherwise.
+
+    Claude Code removes a subagent's worktree when it finishes with no change (worktrees.md), so a writer
+    that committed nothing, and any driver, has no worktree left once it stops, and none to resume in.
+    """
+    if agent.type not in report.COMMITTING:
+        return None
+    if agent.branch is None:
+        return "no branch recorded"
+    return None if agent.branch in worktrees(root) else agent.branch
+
+
+def unreached(agent: model.Agent, root: Path) -> str | None:
+    """Why the report of an agent stopped on a question is judged as it stands, no answer reaching it; else None."""
+    if agent.outcome not in report.STOPPED or (branch := gone(agent, root)) is None:
+        return None
+    return (
+        f"{agent.name} stopped {agent.outcome}, and its worktree is gone ({branch}), so no answer reaches it:"
+        f" `orchestra judge {agent.name}` banks its report as it stands"
+    )
+
+
 def waiting(state: Path, agent: model.Agent) -> str | None:
     """Why an agent no longer working stays as it is: its report waits to be judged, or its question answered.
 
     A `stopped` agent's report, written before a limit, a takeover or a refused stop ended it, is judged
     too where it reads and asks nothing, as is a `running` one's whose stop hook never ran; one that does
     not read holds nothing back, so it can be settled. A record `is_live` holds live cannot be judged, so
-    its report holds nothing back either: only a discard settles it.
+    its report holds nothing back either: only a discard settles it. A report stopped on a question that
+    no answer can reach, its worktree gone, is judged as it stands.
     """
     if agent.status == "stopped" or (agent.status == "running" and not is_live(agent)):
         round_ = max(agent.reports, default=1)
@@ -105,7 +139,9 @@ def waiting(state: Path, agent: model.Agent) -> str | None:
     if agent.status != "reported":
         return None
     return (
-        unjudged(agent) or f"{agent.name} stopped {agent.outcome}: answer it by message, and judge the report it writes"
+        unjudged(agent)
+        or unreached(agent, config.checkout().root)
+        or f"{agent.name} stopped {agent.outcome}: answer it by message, and judge the report it writes"
     )
 
 
@@ -323,7 +359,8 @@ def judge(args: argparse.Namespace, state: Path, owner: Callable[[str], str]) ->
         raise Refused("--verdict takes one line on the report")
     round_ = max(agent.reports, default=1)
     held = report.read(report.path(state, agent.name, round_), agent.type)
-    if held.status in report.STOPPED:
+    # A question no answer can reach, its agent's worktree gone, leaves the report as it stands to be judged.
+    if held.status in report.STOPPED and gone(agent, config.checkout().root) is None:
         raise Refused(
             f"{agent.name} stopped {held.status}: {held.reason}. Answer it by message, and judge the report it writes"
         )

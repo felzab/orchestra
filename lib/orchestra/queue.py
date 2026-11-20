@@ -10,7 +10,9 @@ from __future__ import annotations
 import argparse
 import dataclasses
 import datetime
+import importlib
 import typing
+from collections.abc import Callable
 from pathlib import Path
 
 from orchestra import DONE, Refused, cli, log, model, store
@@ -35,7 +37,11 @@ def add(_verb: str, parser: argparse.ArgumentParser) -> None:
     actions = parser.add_subparsers(dest="action", metavar="<action>")
     adding = actions.add_parser("add", help="queue an item for an event", description="queue an item for an event")
     adding.add_argument(
-        "--when", required=True, type=_when, metavar="ci|landed:NAME|reported:NAME", help="the event it waits on"
+        "--when",
+        required=True,
+        type=_when,
+        metavar="ci|landed:NAME|reported:NAME",
+        help="the event it waits on; NAME is an agent's, or a slice's that PLAN.md lists and no agent took yet",
     )
     adding.add_argument("text", nargs="+", help="what to do, or - to read it from stdin")
     ending = actions.add_parser("done", help="mark an item done", description="mark an item done")
@@ -71,6 +77,16 @@ def due(state: Path) -> list[model.QueueItem]:
     return [item for item in waiting if happened(item)]
 
 
+def _planned(state: Path) -> set[str]:
+    """Each slice PLAN.md lists, as `status` reads the plan; none where there is no plan to read."""
+    # Imported here, as `brief` does: the status view imports this module.
+    slices = typing.cast("Callable[[Path], dict[str, bool]]", importlib.import_module("orchestra.status").slices)
+    try:
+        return set(slices(state))
+    except Refused:
+        return set()
+
+
 def _shown(item: model.QueueItem, held: set[int]) -> str:
     when = item.trigger if item.agent is None else f"{item.trigger}:{item.agent}"
     return f"{item.number:>3}  {'DUE' if item.number in held else 'waits':<5}  {when:<24}  {item.text}"
@@ -80,8 +96,11 @@ def run(args: argparse.Namespace) -> int:
     state = store.state_dir()
     if args.action == "add":
         trigger, agent = args.when
-        if agent is not None:
-            model.read_agent(state, agent)
+        # A slice PLAN.md lists may be briefed later, under its own name; `due` waits for a name with no record.
+        if agent is not None and not model.agent_path(state, agent).exists() and agent not in _planned(state):
+            raise Refused(
+                f"no agent {agent} in this session and no slice of {store.PLAN}: `orchestra status` lists both"
+            )
         text = cli.one_line(cli.given(args.text))
         if not text:
             raise Refused("an item needs words: give them as arguments, or `-` and the text on stdin")
