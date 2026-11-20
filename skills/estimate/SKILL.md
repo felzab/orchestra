@@ -14,7 +14,7 @@ First run `orchestra status --measure` with the Bash tool. Every figure comes fr
    | Block | Agents | Depends on | Minutes | m or e | Source |
    | --- | --- | --- | --- | --- | --- |
 
-   An `e` row names the measured figure it scales from. Leave out a row that has no source.
+   An `e` row names the measured figure it scales from, for the review the handoff's measured minutes where this session has none. Leave out a row that has no source.
 2. **The critical path.** The chain of dependent blocks with the largest sum, the block that dominates it, and that block's share.
 3. **The end time.** The clock that output opens with, plus the path: a low figure from the medians and a high one from the longest runs. Beside it, the weekly window's use at that time: the share now of the weekly `usage` row nearest its limit, or of the app's `get_usage` where that reads unknown, plus the points it rose per agent since the earliest saved estimate after its last reset, a week before the reset it names, times the agents table A holds, since one round of agents can spend points of the week in an hour. With no such estimate, give the share now alone and say so.
 4. **The second look.** Read `.claude/orchestra/lenses/estimate.md` where the project holds one, otherwise [the plugin's](../../lenses/estimate.md), and answer each of its questions as it says. A wave costs its longest agent, so a change that leaves the dominating block alone saves nothing.
