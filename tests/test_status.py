@@ -392,6 +392,38 @@ def test_a_slice_after_another_waits_until_that_one_is_ticked(project: Path, bui
     ]
 
 
+def test_a_landed_slice_is_done_before_its_line_is_ticked(project: Path, built: Path) -> None:
+    """`land` writes no tick, so what is after a slice just landed reads free at once, and the end asks for the tick."""
+    added = "- [ ] S5 `notes/a.md`\n- [ ] S6 `notes/c.md` after: S5\n- [ ] S7 `notes/a.md`\n"
+    store.write_text(built / store.PLAN, PLAN.replace("- [ ] S3 tests/\n", f"- [ ] S3 tests/\n{added}"))
+    _agent(built, model.Agent("W5", "writer", "landed", reports={1: "r"}), slice_="S5", owns="notes/a.md")
+    measured = _lines(inprocess("status", "--measure", cwd=project))
+    assert "waits     slice S6, which no agent took: its files are free" in measured
+    # A landed slice shares no file with what is still planned.
+    assert not any("slices S5 and S7" in line for line in _lines(inprocess("status", cwd=project)))
+    ticked = "S5: its agents landed; tick its line in PLAN.md"
+    assert f"NOT held  no landed slice unticked: {ticked}" in _lines(inprocess("status", "--end", cwd=project))
+    # A second agent on the slice still at work keeps it open.
+    _agent(built, model.Agent("W5B", "writer", "briefed"), slice_="S5", owns="notes/a.md")
+    measured = _lines(inprocess("status", "--measure", cwd=project))
+    assert "waits     slice S6, which no agent took: it is after S5, which is unticked" in measured
+    assert any(line.startswith("drift     slices S5 and S7 share") for line in _lines(inprocess("status", cwd=project)))
+    assert "held      no landed slice unticked" in _lines(inprocess("status", "--end", cwd=project))
+
+
+def test_a_discarded_agents_slice_reads_planned_and_its_owns_excuses_no_drift(project: Path, built: Path) -> None:
+    """`prune --discard` settles an agent with nothing landed, so its slice is still to do and its files unowned."""
+    gone = model.Agent("GONE", "writer", "pruned", reports={1: "r"}, reason=model.DISCARDED)
+    _agent(built, gone, slice_="S3", owns="docs/stray.md")
+    lines = _lines(inprocess("status", cwd=project))
+    assert "planned   S3" in lines
+    assert "drift     docs/stray.md: changed since the base, and no landed brief or ticked slice owns it" in lines
+    untaken = "S3: no agent took it; dispatch it, tick it if you did it, or remove its line"
+    assert f"NOT held  no planned slice untaken: {untaken}" in _lines(inprocess("status", "--end", cwd=project))
+    measured = _lines(inprocess("status", "--measure", cwd=project))
+    assert "waits     slice S3, which no agent took: its files are free" in measured
+
+
 def test_a_wide_slice_names_each_holding_writer_once_with_a_count(project: Path, built: Path) -> None:
     """A clause a path ran a judge and a land to kilobytes a line; `--measure` alone lists the paths."""
     _brief(built, "FRESH", "writer", "S2", "docs/**")
@@ -446,7 +478,7 @@ def test_end_holds_each_machine_checkable_line_or_names_what_breaks_it(project: 
     untaken = "S3: no agent took it; dispatch it, tick it if you did it, or remove its line"
     assert f"NOT held  no planned slice untaken: {untaken}" in lines
     assert "held      no frozen tree left" in lines
-    assert lines[-1] == "end: 2 of 10 lines held"
+    assert lines[-1] == "end: 3 of 11 lines held"
 
 
 def test_an_override_waiting_is_listed_and_holds_the_end_open_until_dropped(project: Path, built: Path) -> None:

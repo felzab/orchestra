@@ -353,26 +353,28 @@ def _drift(snap: Snapshot) -> list[str]:
         # A reader or a driver briefed with no slice works outside the plan, which is no drift: neither lands work.
         if header.slice not in planned and not (header.slice == brief.NONE and agent.type != brief.SLICED):
             lines.append(_row("drift", f"agent {agent.name}: on no slice of PLAN.md (its slice is {header.slice!r})"))
-        if agent.status in model.SETTLED:
+        # A discarded agent landed nothing, so its `Owns:` excuses no change.
+        if agent.status in model.SETTLED and not _discarded(agent):
             owned += header.owns
     branch = f"refs/heads/{snap.session.branch}"
     changed = config.git(snap.root, "diff", "--name-only", "--no-renames", "-z", snap.session.base_commit, branch)
     for path in filter(None, changed.split("\0")):
         if not brief.owned(owned, path):
             lines.append(_row("drift", f"{path}: changed since the base, and no landed brief or ticked slice owns it"))
-    return lines + _parallel(snap.state)
+    return lines + _parallel(snap.state, snap.agents)
 
 
-def _parallel(state: Path) -> list[str]:
-    """Each two unticked slices whose files overlap while neither is after the other, however many steps back.
+def _parallel(state: Path, agents: list[model.Agent]) -> list[str]:
+    """Each two unfinished slices whose files overlap while neither is after the other, however many steps back.
 
     The plan and the estimate read such a pair as parallel, while `brief --check` refuses the second's
-    brief as long as the first's agent runs.
+    brief as long as the first's agent runs. A landed slice shares nothing, ticked or not.
     """
     heading = init.SLICES
-    planned = [(ticked, _slice(text)) for section, ticked, text in plan_lines(state) if section == heading and text]
-    after = {name: named for _, (name, _, named) in planned}
-    unticked = [(name, files) for ticked, (name, files, _) in planned if not ticked and files]
+    planned = [_slice(text) for section, _, text in plan_lines(state) if section == heading and text]
+    after = {name: named for name, _, named in planned}
+    finished = _finished(state, agents)
+    unticked = [(name, files) for name, files, _ in planned if name not in finished and files]
     reach = {name: _before(name, after) for name, _ in unticked}
     lines: list[str] = []
     for at, (one, mine) in enumerate(unticked):
@@ -406,16 +408,46 @@ def _before(name: str, after: dict[str, list[str]]) -> set[str]:
     return seen
 
 
+def _discarded(agent: model.Agent) -> bool:
+    """Whether `prune --discard` settled the agent, which then landed nothing, as `queue.due` reads it."""
+    return agent.status in model.SETTLED and agent.reason == model.DISCARDED
+
+
+def _on(state: Path, agents: list[model.Agent]) -> dict[str, list[model.Agent]]:
+    """The agents on each slice their briefs name, a discarded agent left out: it took nothing.
+
+    A brief that cannot be read takes nothing; `_drift` names it.
+    """
+    held: dict[str, list[model.Agent]] = {}
+    for agent in agents:
+        if _discarded(agent):
+            continue
+        with contextlib.suppress(Refused):
+            held.setdefault(brief.header(state, agent.name).slice, []).append(agent)
+    return held
+
+
+def _landed(state: Path, agents: list[model.Agent]) -> set[str]:
+    """Each slice an agent on it has landed, with no agent on it still unsettled: done, whether ticked or not.
+
+    `land` writes no tick, so a slice reads as done the moment its last agent lands, not once the
+    coordinator ticks its line.
+    """
+    return {name for name, held in _on(state, agents).items() if all(a.status in model.SETTLED for a in held)}
+
+
+def _finished(state: Path, agents: list[model.Agent]) -> set[str]:
+    """Each slice ticked or landed: what no `waits`, overlap or chain line reads as still to do."""
+    return {name for name, ticked in slices(state).items() if ticked} | _landed(state, agents)
+
+
 def _untaken(state: Path, agents: list[model.Agent]) -> list[str]:
     """Each unticked slice no agent's brief names: work planned ahead while running, drift once the session ends.
 
     The overview, the ending and `waits` all read it here, so `status` and `land` never disagree on what
-    waits. A brief that cannot be read takes nothing; `_drift` names it.
+    waits. A discarded agent's brief takes nothing, since its work never landed.
     """
-    taken: set[str] = set()
-    for agent in agents:
-        with contextlib.suppress(Refused):
-            taken.add(brief.header(state, agent.name).slice)
+    taken = _on(state, agents)
     return [name for name, ticked in slices(state).items() if not ticked and name not in taken]
 
 
@@ -688,11 +720,12 @@ def waits(state: Path, agents: list[model.Agent], clock: datetime.datetime, *, p
     paths ran a line to kilobytes at every landing.
     """
     heading = init.SLICES
-    planned = [(ticked, _slice(text)) for section, ticked, text in plan_lines(state) if section == heading and text]
-    done = {name for ticked, (name, _, _) in planned if ticked}
-    listed = {name for _, (name, _, _) in planned}
+    planned = [_slice(text) for section, _, text in plan_lines(state) if section == heading and text]
+    # A slice landed is done at once, so what is after it reads free before anyone ticks its line.
+    done = _finished(state, agents)
+    listed = {name for name, _, _ in planned}
     named = set(_untaken(state, agents))
-    untaken = {name: (files, after) for _, (name, files, after) in planned if name in named}
+    untaken = {name: (files, after) for name, files, after in planned if name in named}
     lines: list[str] = []
     if untaken:
         heads: dict[str, brief.Header] = {}
@@ -769,6 +802,7 @@ def end(snap: Snapshot) -> tuple[list[str], str]:
         ("each due lens judged or declined", lambda: _lenses(snap)),
         ("no override waiting", lambda: _armed(snap.state)),
         ("no planned slice untaken", lambda: _drifted(_untaken(snap.state, snap.agents))),
+        ("no landed slice unticked", lambda: _unticked(snap.state, snap.agents)),
         ("no frozen tree left", lambda: _frozen(snap.state)),
     ]
     lines: list[str] = []
@@ -807,6 +841,13 @@ def _drifted(untaken: list[str]) -> str | None:
     """At the end a slice no agent took is drift: its work was planned and never done, or done and never ticked."""
     said = _named(untaken)
     return None if said is None else f"{said}: no agent took it; dispatch it, tick it if you did it, or remove its line"
+
+
+def _unticked(state: Path, agents: list[model.Agent]) -> str | None:
+    """Each slice landed whose line is unticked, which the ending asks to be ticked against its landed commit."""
+    landed = _landed(state, agents)
+    said = _named(name for name, ticked in slices(state).items() if not ticked and name in landed)
+    return None if said is None else f"{said}: its agents landed; tick its line in PLAN.md"
 
 
 def _named(names: Iterable[str]) -> str | None:
