@@ -31,8 +31,9 @@ TEAMS = "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS"
 SETTINGS_LOCAL = Path(".claude", "settings.local.json")
 DIRECTORIES = "additionalDirectories"
 # The auto-compact window `init` sets where none is set: each call sends the whole conversation again, and on
-# long coordinator sessions of a model with a 1M context this window cost about 0.7 of the default there,
-# which compacts near 1M. The variable outranks every settings key (model-config.md).
+# one long coordinator day of a model with a 1M context, replayed request by request, this window cost about 0.67
+# of the default there, which compacts near 967,000 tokens, and 600,000 about 1.1 of this one. The variable
+# outranks every settings key (model-config.md).
 WINDOW = "autoCompactWindow"
 WINDOW_TOKENS = 500_000
 WINDOW_ENV = "CLAUDE_CODE_AUTO_COMPACT_WINDOW"
