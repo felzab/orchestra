@@ -116,6 +116,23 @@ def test_an_event_naming_no_agent_or_no_kind_is_refused(project: Path, state: Pa
     assert model.read_queue(state) == {}
 
 
+def test_an_item_may_wait_on_a_planned_slice_no_agent_took_yet(project: Path, state: Path) -> None:
+    """The agent of a slice is briefed under its name later; until then the item waits as for any record."""
+    store.write_text(state / store.PLAN, "# Plan\n\n## Slices and their files\n\n- [ ] LATER `b.txt`\n")
+    added = inprocess("queue", "add", "--when", "landed:LATER", "dispatch", "C", cwd=project)
+    assert added.returncode == 0, added.stderr
+    assert added.stdout.splitlines() == ["  1  waits  landed:LATER              dispatch C"]
+    assert numbers(state) == []
+    write_agent(state, model.Agent("LATER", "writer", "landed"))
+    assert numbers(state) == [1]
+    unplanned = inprocess("queue", "add", "--when", "landed:NOBODY", "x", cwd=project)
+    assert (unplanned.returncode, unplanned.stderr) == (
+        2,
+        "orchestra queue: no agent NOBODY in this session and no slice of PLAN.md: `orchestra status` lists both\n",
+    )
+    assert list(model.read_queue(state)) == [1]
+
+
 def test_a_fault_exits_with_a_code_of_its_own_and_prints_its_trace(project: Path, state: Path) -> None:
     """Python's own exit 1 would read as done with something remaining; a fault is no verdict at all."""
     status(state, "A", "reported")
