@@ -36,7 +36,7 @@ BUDGETS = {
     "skills/resume/SKILL.md": 500,
     "skills/plan/SKILL.md": 1913,
     "skills/agent/SKILL.md": 7009,
-    "agents/writer.md": 7150,
+    "agents/writer.md": 7249,
     "agents/driver.md": 5000,
     "agents/researcher.md": 4500,
     "agents/auditor.md": 3000,
@@ -94,11 +94,11 @@ INJECTING = ("skills/run/SKILL.md",)
 # An injection: `!` and a backtick at a line's start or after whitespace, where Claude Code runs it.
 INJECTION_RE = re.compile(r"(?:^|\s)!`")
 
-# The fields every agent definition carries, and those added by whether its agent commits. The validator
-# passes a misspelt field and Claude Code ignores it: a `tools:` line lost that way hands an auditor a shell.
-SHARED = frozenset({"name", "description", "background", "autoCompactWindow", "skills"})
+# The fields every agent definition carries, and those a committing agent adds. The validator passes a
+# misspelt field and Claude Code ignores it: a `tools:` line lost that way hands an auditor a shell, and
+# a writer every tool of the session, such as a 48,000-character schema it never calls.
+SHARED = frozenset({"name", "description", "tools", "background", "autoCompactWindow", "skills"})
 COMMITTING = frozenset({"disallowedTools", "isolation"})
-READING = frozenset({"tools"})
 
 FIELD_RE = re.compile(r"(?P<key>[A-Za-z_-]+):(?: (?P<value>.+))?")
 ITEM_RE = re.compile(r"  - (?P<value>\S.*)")
@@ -253,7 +253,7 @@ def test_only_the_preloaded_skill_is_open_to_the_model(page: str) -> None:
 def test_an_agent_definition_holds_its_type_s_fields_and_no_other(page: str) -> None:
     fields = frontmatter(_text(page))
     # No definition names a model, which the project's configuration chooses for each agent.
-    assert set(fields) == SHARED | (COMMITTING if Path(page).stem in {"writer", "driver"} else READING)
+    assert set(fields) == SHARED | (COMMITTING if Path(page).stem in {"writer", "driver"} else frozenset())
     assert fields["skills"] == [f"orchestra:{PRELOADED}"]
     # A plain integer: Claude Code reads `500k` as 500, outside the field's range, and ignores the field.
     assert fields["autoCompactWindow"] == "500000"

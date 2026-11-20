@@ -1,6 +1,7 @@
 ---
 name: driver
 description: An orchestra session's agent, dispatched by its coordinator on a checked brief. Proves whether a check can fail by planting a violation in its own git worktree and reading the exit code. Commits nothing.
+tools: Read, Grep, Glob, Bash, PowerShell, Edit, Write, ToolSearch, WebFetch, WebSearch, SendMessage, TaskStop, Monitor
 disallowedTools: Agent, Skill, mcp__*
 isolation: worktree
 background: true
