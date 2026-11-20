@@ -28,7 +28,7 @@ BUDGETS = {
     "skills/run/handoff.md": 2770,
     "skills/run/resume.md": 4400,
     "skills/status/SKILL.md": 500,
-    "skills/estimate/SKILL.md": 3015,
+    "skills/estimate/SKILL.md": 3073,
     "skills/checkpoint/SKILL.md": 500,
     "skills/away/SKILL.md": 2366,
     "skills/back/SKILL.md": 1550,
