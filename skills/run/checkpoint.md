@@ -10,4 +10,4 @@ Run at each wave's end, once its branches have landed and, where the clone has a
 6. **The estimate.** Read [the estimate's steps](../estimate/SKILL.md) and run steps 1 to 4 and 7 from `orchestra status --measure` every time, since the turn-end hook counts judged reports from the newest saved estimate. Run steps 5 and 6 where step 4 gave a change, and step 8 at the two moments it names.
 7. **Now.** Rewrite `NOW.md` under its two labels.
 
-Reply with what landed, what drifted, what is next, and what waits on the owner or that nothing does. At a wave's end, unless the session is away, suggest the owner type `/compact` now: the state then holds everything in flight, so a compaction loses least.
+Reply with what landed, what drifted, what is next, and what waits on the owner or that nothing does. At a wave's end the state holds all in flight, so compacting loses least: call `mcp__orchestra__compact` and end the turn, away or not; lacking it, suggest an attended owner type `/compact`.
