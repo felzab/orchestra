@@ -63,7 +63,7 @@ Harm: <the concrete harm>. Likelihood: <how likely, and on what evidence>.
 - `<n>` is the round your `Report:` line names, or the round your latest resume names.
 - `STATUS` reads `IN-PROGRESS` until the report is final, then `DONE`, `DONE-WITH-CONCERNS`, `BLOCKED` or `NEEDS-ANSWER`. A researcher, an auditor and a verifier write `Commits: none`.
 - Copy each finding's heading line, after its `### `, into `## Summary` unchanged, since the stop hook compares the two. The summary's other lines hold at most 1,500 bytes together, in words a reader who saw none of your work understands. Your final message is that section followed by the report's path.
-- A finding's first line holds both `Harm:` and `Likelihood:`, since the stop hook reads that one line.
+- A finding's first paragraph holds both `Harm:` and `Likelihood:`, since the stop hook reads no further.
 - Record every finding and classify it; the coordinator filters. `defect` affects correctness or the stated requirements and `optional` is anything else; `silent` means nothing fails or shows when it bites. Numbers start at 1 without gaps, and another report's finding is `<NAME>-F<n>`.
 - `## Done` holds what you read or ran, with exit codes. A section with nothing to say holds `nothing`, and `## Findings` holds `none`. `## Outside the scope` describes what you found beyond your brief and leaves it unfixed.
 

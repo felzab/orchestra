@@ -92,7 +92,8 @@ loaded"), so it shows whether such a session read the project's and the local fi
 Your user settings reach every project on the machine, which is why `init` writes none there. Each
 agent definition also sets 500,000, which lowers a larger window an agent would inherit. Where the
 window still does not apply, the hook on each of your prompts tells you and the coordinator once its
-context has passed the window. Claude Code lets no model run `/compact` itself (the
+context has passed the window. From three quarters of the window, applied or not, it tells the
+coordinator alone that the compact tool compacts at the next seam. Claude Code lets no model run `/compact` itself (the
 [skills page](https://code.claude.com/docs/en/skills), "Restrict Claude's skill access"), so where
 the compact tool is absent, only you can.
 
