@@ -1099,10 +1099,10 @@ def _judged(project: Path, name: str, kind: str, lens: str = "none") -> subproce
     return judged
 
 
-def test_a_falsely_sequenced_slice_waits_free_and_four_judged_reports_not_disclosure_only_make_the_checkpoint_due(
+def test_a_falsely_sequenced_slice_waits_free_and_eight_judged_reports_not_disclosure_only_make_the_checkpoint_due(
     project: Path, state: Path
 ) -> None:
-    """S2 needs nothing of S1, so the program names it free; the estimate is looked at again every four reports.
+    """S2 needs nothing of S1, so the program names it free; the estimate is looked at again every eight reports.
 
     A researcher whose `Lens:` names disclosure alone frees no planned work, before a push or in the review, in
     any round; a report whose brief cannot be read, or whose `Lens:` names another lens beside, counts.
@@ -1134,15 +1134,16 @@ def test_a_falsely_sequenced_slice_waits_free_and_four_judged_reports_not_disclo
     second = run("judge", "DISCLOSE", "F1=close:MOOT:x", "F2=close:MOOT:x", "--verdict", "v", cwd=project)
     assert second.returncode == 0, second.stderr
     at = datetime.datetime.fromtimestamp(saved.stat().st_mtime).astimezone()
-    fourth = f"- 4 reports were judged since the last saved estimate ({at:%H:%M}), and 3 plan lines are unticked"
-    for k in range(1, 5):
+    eighth = f"- 8 reports were judged since the last saved estimate ({at:%H:%M}), and 3 plan lines are unticked"
+    # W and MAP stay at work throughout, so no wave ends: the count alone makes the checkpoint due.
+    for k in range(1, 9):
         # A lens beside disclosure makes the read more than a disclosure-only one, so its report counts.
-        judged = _judged(project, f"A{k}", "auditor", lens="disclosure, contract" if k == 4 else "none")
+        judged = _judged(project, f"A{k}", "auditor", lens="disclosure, contract" if k == 8 else "none")
         assert free in judged.stdout.splitlines()
         if k == 1:
             # A brief that cannot be read is counted, as the report of any other agent is.
             (state / "briefs" / "A1.md").unlink()
-        assert _due(project) == ([] if k < 4 else [f"{fourth}: the checkpoint in checkpoint.md is due"])
+        assert _due(project) == ([] if k < 8 else [f"{eighth}: the checkpoint in checkpoint.md is due"])
     # A landing closes on what still waits.
     tree = project.parent / "trees" / "agent-w1"
     git(project, "worktree", "add", "-b", "worktree-agent-w1", str(tree))
@@ -1152,6 +1153,35 @@ def test_a_falsely_sequenced_slice_waits_free_and_four_judged_reports_not_disclo
     landed = run("land", "W", cwd=project)
     assert landed.returncode == 0, landed.stderr
     assert free in landed.stdout.splitlines()
+
+
+def test_the_checkpoint_is_due_at_a_waves_end_once_no_agent_is_live_and_a_writer_has_landed(
+    project: Path, state: Path
+) -> None:
+    """checkpoint.md runs at each wave's end; a landing while another agent works, or is briefed to, ends none."""
+    store.write_text(state / store.PLAN, PACED_PLAN)
+    briefed(project, "W", "writer", owns="lib/a.py")
+    dispatched(project, "W", "writer", "w1")
+    briefed(project, "R", "auditor")
+    dispatched(project, "R", "auditor", "r1")
+    saved = state / "estimates" / "first.md"
+    saved.write_bytes(b"# Estimate\n")
+    at = datetime.datetime.fromtimestamp(saved.stat().st_mtime).astimezone()
+    assert _due(project) == []
+    changed(state, "W", status="landed")
+    assert _due(project) == []
+    changed(state, "R", status="judged")
+    briefed(project, "N", "auditor")
+    assert _due(project) == []
+    changed(state, "N", status="pruned")
+    ended = f"- no agent is live, and 1 writer(s) landed since the last saved estimate ({at:%H:%M})"
+    assert _due(project) == [f"{ended}, and 3 plan lines are unticked: the checkpoint in checkpoint.md is due"]
+    # An estimate saved after the landing starts the next wave's count.
+    newer = state / "estimates" / "second.md"
+    newer.write_bytes(b"# Estimate\n")
+    later = time.time() + 2
+    os.utime(newer, (later, later))
+    assert _due(project) == []
 
 
 def test_a_compaction_or_a_resume_reads_the_state_back_from_disk(project: Path, state: Path) -> None:

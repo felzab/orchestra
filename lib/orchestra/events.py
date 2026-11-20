@@ -74,8 +74,10 @@ CONTEXT_CHARS = 10_000
 OWN = frozenset({store.PLAN, store.NOW})
 # The project's own rules for each agent type, `<type>.md`, in the primary checkout.
 ADDENDA = Path(".claude", "orchestra")
-# The reports judged after the newest saved estimate at which the checkpoint is due again.
-JUDGED = 4
+# The reports judged after the newest saved estimate at which the checkpoint is due again while agents stay at
+# work, for a fleet that dispatches as work frees and so has no quiet wave end. At 4, one long session saved 29
+# estimates in sixteen hours, 24 of them at up to 8% of its coordinator's tokens; 8 was estimated to halve that.
+JUDGED = 8
 # The `Lens:` line of a disclosure-only read, which frees no planned work, so its report leaves the
 # checkpoint's count alone. The brief alone is read, so the read before a push and the review's own
 # disclosure reader are both left out: nothing tells the two apart.
@@ -902,7 +904,7 @@ def stop(where: Where) -> str | None:
         )
         if later >= NOW_EVENTS:
             undone.append(f"NOW.md predates the last {later} log entries")
-    if due := _checkpoint(state, entries, agents):
+    if due := _checkpoint(state, entries, agents, where.session):
         undone.append(due)
     if not undone:
         return None
@@ -915,28 +917,40 @@ def _writer(agents: list[model.Agent], dispatched: str) -> bool:
     return any(agent.name == name and agent.type == "writer" for agent in agents)
 
 
-def _checkpoint(state: Path, entries: list[log.Entry], agents: list[model.Agent]) -> str | None:
+def _checkpoint(state: Path, entries: list[log.Entry], agents: list[model.Agent], session: str | None) -> str | None:
     """A line where the checkpoint is due and a plan line is unticked; None where it is not.
 
     It is due once a writer is dispatched while no estimate is saved, since start.md lets the researchers
-    that settle the plan's premises go out before the first estimate, and once `JUDGED` reports are
-    judged after the newest saved one, since each report can free work the plan holds back; a report
-    whose brief's `Lens:` line is `DISCLOSURE_ONLY`, a disclosure-only read, frees none, so it is not counted.
+    that settle the plan's premises go out before the first estimate. After the newest saved one it is due
+    at a wave's end, where checkpoint.md runs it: no agent is live and a writer has landed since. A fleet
+    that dispatches as work frees has no such end, so it is due too once `JUDGED` reports are judged since,
+    each able to free work the plan holds back; a report whose brief's `Lens:` line is `DISCLOSURE_ONLY`, a
+    disclosure-only read, frees none, so it is not counted.
     """
     saved = [path.stat().st_mtime for path in (state / store.ESTIMATES).glob("*") if path.is_file()]
     if saved:
         # Compared at the log's own precision, the second, as NOW.md is.
         newest = datetime.datetime.fromtimestamp(max(saved)).astimezone().replace(microsecond=0)
-        # The brief is read last, so only an entry judged since the estimate costs a read.
-        judged = sum(
-            entry.kind == log.JUDGE
-            and datetime.datetime.fromisoformat(entry.time) >= newest
-            and not _disclosure_only(state, entry.text)
-            for entry in entries
+        landed = sum(
+            agent.type == "writer"
+            and (stamp := agent.since.get("landed")) is not None
+            and datetime.datetime.fromisoformat(stamp) >= newest
+            for agent in agents
         )
-        if judged < JUDGED:
-            return None
-        why = f"{judged} reports were judged since the last saved estimate ({newest:%H:%M})"
+        # The transcripts are read last, and only where a landing could end a wave.
+        if landed and not any(findings.is_live(agent, session) for agent in agents):
+            why = f"no agent is live, and {landed} writer(s) landed since the last saved estimate ({newest:%H:%M})"
+        else:
+            # The brief is read last, so only an entry judged since the estimate costs a read.
+            judged = sum(
+                entry.kind == log.JUDGE
+                and datetime.datetime.fromisoformat(entry.time) >= newest
+                and not _disclosure_only(state, entry.text)
+                for entry in entries
+            )
+            if judged < JUDGED:
+                return None
+            why = f"{judged} reports were judged since the last saved estimate ({newest:%H:%M})"
     elif any(entry.kind == log.DISPATCH and _writer(agents, entry.text) for entry in entries):
         why = "a writer has been dispatched, and no estimate is saved"
     else:
