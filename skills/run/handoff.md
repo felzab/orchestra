@@ -30,6 +30,7 @@ A handoff tells the next session what this one believed and how much of it was v
 - the branch and its commit subjects
 - the gate: its exit code and the commit it ran at
 - each count, with who measured it and when
+- the measured minutes from the review's first reader to the end, the slice count and the weekly window's points per agent, each with the log lines it was read from, which the next estimate scales from
 - what could not be established, and why
 ```
 

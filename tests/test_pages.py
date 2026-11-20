@@ -19,24 +19,24 @@ ROOT = Path(__file__).resolve().parents[1]
 
 # The most bytes each page under these folders may hold, counted as git stores it.
 BUDGETS = {
-    "skills/run/SKILL.md": 12500,
-    "skills/run/start.md": 2650,
-    "skills/run/brief.md": 3810,
-    "skills/run/review.md": 5092,
+    "skills/run/SKILL.md": 13673,
+    "skills/run/start.md": 2701,
+    "skills/run/brief.md": 4189,
+    "skills/run/review.md": 5616,
     "skills/run/checkpoint.md": 2050,
     "skills/run/end.md": 2600,
-    "skills/run/handoff.md": 2600,
+    "skills/run/handoff.md": 2770,
     "skills/run/resume.md": 4400,
     "skills/status/SKILL.md": 500,
-    "skills/estimate/SKILL.md": 2940,
+    "skills/estimate/SKILL.md": 3232,
     "skills/checkpoint/SKILL.md": 500,
     "skills/away/SKILL.md": 2366,
     "skills/back/SKILL.md": 1550,
     "skills/end/SKILL.md": 500,
     "skills/resume/SKILL.md": 500,
     "skills/plan/SKILL.md": 1913,
-    "skills/agent/SKILL.md": 6500,
-    "agents/writer.md": 7150,
+    "skills/agent/SKILL.md": 7131,
+    "agents/writer.md": 7249,
     "agents/driver.md": 5000,
     "agents/researcher.md": 4500,
     "agents/auditor.md": 3000,
@@ -49,7 +49,6 @@ BUDGETS = {
             "contract",
             "tests",
             "document",
-            "estimate",
             "prompt",
             "conformance",
             "necessity",
@@ -58,11 +57,14 @@ BUDGETS = {
             "use",
             "operations",
             "accessibility",
-            "disclosure",
         )
     },
     # Its twelfth checklist item, the built-the-right-way questions, outgrew the shared budget.
     "lenses/essential.md": 1650,
+    # Its sixth item names the plugin's own merge subject as no hit, which outgrew the shared budget.
+    "lenses/disclosure.md": 1594,
+    # Its checklist asks after every kind of saving the owner named: timing, scoping, batching and the rest.
+    "lenses/estimate.md": 2114,
 }
 BUDGETED = ("skills/", "agents/", "lenses/")
 # Every folder whose pages name commands and links: the plugin's own, and the documents beside them.
@@ -75,7 +77,10 @@ RULES = {
     "skills/agent/SKILL.md": (
         "A turn you end to wait on your own background command or monitor is a stop",
         "so append no `; echo exit=$?`",
-        "in a worktree, run each command plain, with no `;`, `$?`, `$(...)`, loop or heredoc",
+        "in a worktree, run each command plain from its root, with no `;`, `$?`, `$VAR`, `$(...)`, loop, heredoc"
+        " or `git -C`",
+        "A worktree holding no commit goes at the stop, so a writer commits what is done before it stops",
+        "since a successor takes the answer",
     ),
     "skills/run/SKILL.md": (
         "a dispatch waits for nothing but its `after:` edges and its files",
@@ -90,11 +95,11 @@ INJECTING = ("skills/run/SKILL.md",)
 # An injection: `!` and a backtick at a line's start or after whitespace, where Claude Code runs it.
 INJECTION_RE = re.compile(r"(?:^|\s)!`")
 
-# The fields every agent definition carries, and those added by whether its agent commits. The validator
-# passes a misspelt field and Claude Code ignores it: a `tools:` line lost that way hands an auditor a shell.
-SHARED = frozenset({"name", "description", "background", "autoCompactWindow", "skills"})
+# The fields every agent definition carries, and those a committing agent adds. The validator passes a
+# misspelt field and Claude Code ignores it: a `tools:` line lost that way hands an auditor a shell, and
+# a writer every tool of the session, such as a 48,000-character schema it never calls.
+SHARED = frozenset({"name", "description", "tools", "background", "autoCompactWindow", "skills"})
 COMMITTING = frozenset({"disallowedTools", "isolation"})
-READING = frozenset({"tools"})
 
 FIELD_RE = re.compile(r"(?P<key>[A-Za-z_-]+):(?: (?P<value>.+))?")
 ITEM_RE = re.compile(r"  - (?P<value>\S.*)")
@@ -249,7 +254,7 @@ def test_only_the_preloaded_skill_is_open_to_the_model(page: str) -> None:
 def test_an_agent_definition_holds_its_type_s_fields_and_no_other(page: str) -> None:
     fields = frontmatter(_text(page))
     # No definition names a model, which the project's configuration chooses for each agent.
-    assert set(fields) == SHARED | (COMMITTING if Path(page).stem in {"writer", "driver"} else READING)
+    assert set(fields) == SHARED | (COMMITTING if Path(page).stem in {"writer", "driver"} else frozenset())
     assert fields["skills"] == [f"orchestra:{PRELOADED}"]
     # A plain integer: Claude Code reads `500k` as 500, outside the field's range, and ignores the field.
     assert fields["autoCompactWindow"] == "500000"
