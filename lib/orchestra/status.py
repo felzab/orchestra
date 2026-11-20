@@ -77,8 +77,10 @@ USAGE_RUN = ("-p", "/usage", "--safe-mode", "--no-session-persistence", "--outpu
 # The state file keeping the last reading, and how long it is printed again rather than read anew.
 USAGE = "usage.json"
 USAGE_FRESH = datetime.timedelta(minutes=5)
-# Past this the `/usage` run is given up on.
-USAGE_SECONDS = 120
+# Past this the `/usage` run is given up on. It stays short of the Bash tool's default limit of 120 s
+# (`BASH_DEFAULT_TIMEOUT_MS`, Claude Code's environment variables page), with room for the rest of the view,
+# so a hung run prints its unknown row with the reason rather than timing out the call that ran `status`.
+USAGE_SECONDS = 90
 # The severity of a usage row far from its limit; any other, such as `warning`, is printed.
 NORMAL = "normal"
 
