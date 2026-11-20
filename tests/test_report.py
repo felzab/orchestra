@@ -139,6 +139,21 @@ def test_a_writers_rows_fixed_line_reading_none_names_no_row(fixed: str) -> None
     assert held.rows == ()
 
 
+def test_a_findings_first_paragraph_holds_its_harm_and_likelihood_however_it_wraps() -> None:
+    """A hard-wrapped paragraph reads as one line; a `Likelihood:` past the paragraph's end is still missing."""
+    one = "Harm: a crash tears the file. Likelihood: rare, on a power cut."
+    wrapped = "Harm: a crash tears the file, so the next\nread fails. Likelihood: rare, on a power cut."
+    held, said = report.parse(text().replace(one, wrapped), "writer", "FE", 1)
+    assert said == []
+    assert held is not None
+    assert held.findings[0].body.startswith(wrapped)
+    _, said = report.parse(text().replace(one, "Harm: a crash tears the file.\n\nLikelihood: rare."), "writer", "FE", 1)
+    assert [str(violation) for violation in said] == [
+        f"line 16 `### {FINDING}`: its first paragraph is no"
+        " `Harm: <the concrete harm>. Likelihood: <how likely, and why>.`"
+    ]
+
+
 def test_a_writers_rows_fixed_line_is_left_out_of_the_summarys_byte_cap() -> None:
     """The line names every row the branch fixes, an earlier round's included, so it grows with the work as the
     item lines do: sixty rows pass beside a sentence that fits the cap only without them."""
@@ -186,7 +201,7 @@ def test_a_report_with_no_finding_holds_none() -> None:
         (
             "Harm: a long line wraps. Likelihood: often, on any phone.",
             "A long line wraps.",
-            "its first line is no `Harm:",
+            "its first paragraph is no `Harm:",
         ),
         (
             f"\n{SECOND}\n",
@@ -339,8 +354,8 @@ def test_a_refused_finding_heading_gets_no_second_fault_from_its_summary_line() 
     """Its summary line matches a heading that exists; naming it "no heading" would mislead."""
     broken = text("auditor").replace(
         "Harm: a crash tears the file. Likelihood: rare, on a power cut.",
-        "Harm: a crash tears the file.\nLikelihood: rare.",
+        "Harm: a crash tears the file.\n\nLikelihood: rare.",
     )
     _, said = report.parse(broken, "auditor")
     assert len(said) == 1, said
-    assert "its first line is no `Harm:" in str(said[0])
+    assert "its first paragraph is no `Harm:" in str(said[0])

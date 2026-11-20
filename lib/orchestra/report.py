@@ -8,7 +8,7 @@ The grammar, each heading once and in this order:
                             repeating its heading, `Not verified: ...`, `Wrong in the brief: ...`
     ## Done
     ## Findings             `### F<n> · <defect or optional> · <silent or loud> · <anchor>`, its first
-                            line `Harm: ... Likelihood: ...`; or the line `none`
+                            paragraph `Harm: ... Likelihood: ...`; or the line `none`
     ## Not verified
     ## Wrong in the brief
     ## Outside the scope
@@ -348,8 +348,12 @@ class _Reader:
                 self.fault(k, f"F{number} where F{expected} is next: the numbers start at 1 and do not skip")
             expected = number + 1
             rows = self.filled(k + 1, end)
-            if not rows or not HARM_RE.fullmatch(rows[0][1]):
-                self.fault(k, "its first line is no `Harm: <the concrete harm>. Likelihood: <how likely, and why>.`")
+            # The first paragraph, its lines joined, so a hard-wrapped `Harm: ... Likelihood: ...` reads whole.
+            first = [line for n, (j, line) in enumerate(rows) if j == rows[0][0] + n]
+            if not HARM_RE.fullmatch(" ".join(first)):
+                self.fault(
+                    k, "its first paragraph is no `Harm: <the concrete harm>. Likelihood: <how likely, and why>.`"
+                )
                 continue
             kind = typing.cast("Kind", held["kind"])
             body = self.body(k, end)
