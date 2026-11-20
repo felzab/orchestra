@@ -196,6 +196,19 @@ def test_the_drift_names_five_pairs_of_slices_and_counts_the_rest(project: Path,
     assert lines[-1] == f"drift     {more}"
 
 
+def test_a_path_the_session_deleted_or_moved_on_a_line_still_to_do_drifts(project: Path, built: Path) -> None:
+    """`waits` and the overlaps read a line's paths as written, so a path a landing moved misses a real overlap."""
+    plan = PLAN.replace("- [ ] S3 tests/\n", "- [ ] S3 tests/\n- [ ] S5 `README`, `notes/a.md`\n- [x] S6 `README`\n")
+    store.write_text(built / store.PLAN, plan)
+    git(project, "rm", "-q", "README")
+    git(project, "commit", "-m", "moved")
+    lines = _lines(inprocess("status", cwd=project))
+    # The ticked slice is done, so its line names nothing still to do.
+    assert [line for line in lines if "deleted or moved" in line] == [
+        "drift     slice S5 names `README`, which the session deleted or moved since its base"
+    ]
+
+
 def test_a_row_is_marked_for_a_re_plan_once_routed_to_three_agents_and_never_for_its_queues(
     project: Path, built: Path
 ) -> None:

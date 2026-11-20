@@ -357,10 +357,24 @@ def _drift(snap: Snapshot) -> list[str]:
         if agent.status in model.SETTLED and not _discarded(agent):
             owned += header.owns
     branch = f"refs/heads/{snap.session.branch}"
-    changed = config.git(snap.root, "diff", "--name-only", "--no-renames", "-z", snap.session.base_commit, branch)
-    for path in filter(None, changed.split("\0")):
+    # `-z` gives each change as its status letter and its path, in fields of their own; under `--no-renames`
+    # a move is a deletion and an addition, so `D` names every path the session moved or deleted.
+    fields = config.git(snap.root, "diff", "--name-status", "--no-renames", "-z", snap.session.base_commit, branch)
+    parts = fields.split("\0")
+    changed = list(zip(parts[::2], parts[1::2], strict=False))
+    for _, path in changed:
         if not brief.owned(owned, path):
             lines.append(_row("drift", f"{path}: changed since the base, and no landed brief or ticked slice owns it"))
+    # A path a landing moved stays on the lines still to do, where `waits` and the overlaps read it as written.
+    gone = {path for letter, path in changed if letter == "D"}
+    finished = _finished(snap.state, snap.agents)
+    for name, files, _ in (_slice(text) for section, _, text in plan_lines(snap.state) if section == heading and text):
+        if name not in finished:
+            lines += [
+                _row("drift", f"slice {name} names `{path}`, which the session deleted or moved since its base")
+                for path in files
+                if path in gone
+            ]
     return lines + _parallel(snap.state, snap.agents)
 
 
