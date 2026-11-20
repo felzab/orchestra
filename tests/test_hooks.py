@@ -159,7 +159,9 @@ def edit(target: Path) -> dict[str, object]:
 
 def test_each_event_is_one_registration_calling_the_launcher_by_the_plugin_root() -> None:
     held = json.loads(HOOKS_JSON.read_bytes())
-    assert list(held) == ["hooks"]
+    # The registrations, and at most a `modules` key beside them.
+    assert "hooks" in held
+    assert set(held) <= {"hooks", "modules"}
     assert set(held["hooks"]) == set(hooks.EVENTS)
     matchers = {}
     for event, groups in held["hooks"].items():
