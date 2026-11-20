@@ -341,8 +341,8 @@ def test_measure_gives_the_figures_an_estimate_starts_from(project: Path, built:
     # QUIET's dispatch has no line in the log, so its minutes are not guessed from its record.
     assert any(line.startswith("running   QUIET (writer): minutes unknown, context ") for line in lines)
     assert [line for line in lines if line.startswith("unticked")] == [
-        "unticked  S2 docs/guide.md",
-        "unticked  S3 tests/",
+        "unticked  S2, 0 file(s)",
+        "unticked  S3, 0 file(s)",
         "unticked  S2 before S3",
         "unticked  the ending's checklist",
     ]
@@ -374,6 +374,25 @@ def test_measure_sums_a_resumed_agents_rounds_and_counts_no_wait_between_them(pr
     assert "auditor   1 finished, median 2 min, longest 2 min, each agent's rounds summed" in lines
     assert "driver    1 finished, median 10 min, longest 10 min, each agent's rounds summed" in lines
     assert any(line.startswith("running   FRESH (writer): 7 min since its dispatch or resume,") for line in lines)
+
+
+def test_measure_names_an_unticked_slice_by_its_id_its_count_of_files_and_its_edges(project: Path, built: Path) -> None:
+    """PLAN.md holds every path, and a wide slice's line repeated whole ran a reading to kilobytes."""
+    files = ", ".join(f"`docs/part{k}.md`" for k in range(30))
+    wide = f"- [ ] S7 the parts {files} after: S2, S3\n"
+    store.write_text(built / store.PLAN, PLAN.replace("- [ ] S3 tests/\n", f"- [ ] S3 tests/\n{wide}"))
+    lines = _lines(inprocess("status", "--measure", cwd=project))
+    assert [line for line in lines if line.startswith("unticked")] == [
+        "unticked  S2, 0 file(s)",
+        "unticked  S3, 0 file(s)",
+        "unticked  S7, 30 file(s), after S2, S3",
+        "unticked  S2 before S3",
+        "unticked  the ending's checklist",
+    ]
+    # A slice landed and not ticked is said to be done.
+    _agent(built, model.Agent("W7", "writer", "landed", reports={1: "r"}), slice_="S7", owns="docs/**")
+    lines = _lines(inprocess("status", "--measure", cwd=project))
+    assert "unticked  S7, 30 file(s), after S2, S3: landed, so done; tick its line" in lines
 
 
 def test_measure_lists_what_waits_and_the_context_of_each_agent_holding_rows(project: Path, built: Path) -> None:

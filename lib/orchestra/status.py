@@ -548,9 +548,7 @@ def measure(snap: Snapshot) -> tuple[list[str], str]:
     holds, _ = _guarded("holds", lambda: _holders(snap.state, snap.agents))
     waiting, _ = _guarded("waits", lambda: waits(snap.state, snap.agents, snap.clock, paths=True))
     ci, _ = _guarded("CI", lambda: _ci_minutes(snap.state))
-    plan, unticked = _guarded(
-        "unticked", lambda: [_row("unticked", text) for _, ticked, text in plan_lines(snap.state) if not ticked]
-    )
+    plan, unticked = _guarded("unticked", lambda: _unticked_lines(snap.state, snap.agents))
     due, due_count = _guarded("due", lambda: [_row("due", _item(item)) for item in queue.due(snap.state)])
     asked, asked_count = _guarded(
         "asked",
@@ -591,6 +589,26 @@ def _rounds(state: Path) -> tuple[dict[str, float], dict[str, datetime.datetime]
         elif entry.kind in ("report", "stopped") and (since := started.pop(name, None)) is not None:
             ran[name] = ran.get(name, 0.0) + (at - since).total_seconds() / 60
     return ran, started
+
+
+def _unticked_lines(state: Path, agents: list[model.Agent]) -> list[str]:
+    """Each unticked line of PLAN.md, a slice's as its id, its count of files and the slices it is after.
+
+    A wide slice's paths ran a line to kilobytes at every reading, of a file the coordinator wrote and
+    holds whole; the overlaps its files make are on the `waits` lines.
+    """
+    landed = _landed(state, agents)
+    lines: list[str] = []
+    for section, ticked, text in plan_lines(state):
+        if ticked:
+            continue
+        if section != init.SLICES or not text:
+            lines.append(_row("unticked", text))
+            continue
+        name, files, after = _slice(text)
+        said = f"{name}, {len(files)} file(s)" + (f", after {', '.join(after)}" if after else "")
+        lines.append(_row("unticked", said + (": landed, so done; tick its line" if name in landed else "")))
+    return lines
 
 
 def usage(state: Path, root: Path, clock: datetime.datetime) -> list[str]:
