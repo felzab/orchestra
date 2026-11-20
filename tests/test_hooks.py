@@ -1190,23 +1190,33 @@ def test_each_prompt_carries_the_clock_and_a_gap_past_half_an_hour_names_usage(p
 
 
 @pytest.mark.usefixtures("state")
-def test_a_prompt_past_the_compaction_window_tells_the_coordinator_and_the_owner(project: Path) -> None:
-    """A desktop session started from a pre-warmed process was seen skipping the window its project's settings set.
+def test_a_prompt_nearing_the_compaction_window_tells_the_coordinator_and_past_it_the_owner(project: Path) -> None:
+    """From three quarters of the window the coordinator reads that its compact tool compacts at the next seam.
 
-    The window is the one `init` wrote to the local settings; the transcript's last call decides, not its largest.
+    Past the window, which a desktop session started from a pre-warmed process was seen skipping, the owner reads
+    it too. The window is the one `init` wrote to the local settings; the transcript's last call decides, not its
+    largest.
     """
     main = project.parent / "main.jsonl"
+    seam = "`mcp__orchestra__compact`, where the session has it, or else the owner's `/compact`, compacts"
+    seam += " at the next seam."
     main.write_bytes(line("assistant", "m0", 900_000) + line("user") + line("assistant", "m1", 500_000))
     said = hook("UserPromptSubmit", project, prompt="go", transcript_path=str(main))[1]
     assert context_of(said, "UserPromptSubmit").endswith(
-        " Your context is 500,474 tokens, past the 500,000-token compaction window, which has not applied;"
-        " only the owner can type `/compact`."
+        " Your context is 500,474 tokens, past the 500,000-token compaction window, which has not applied; " + seam
     )
     assert field(said, "systemMessage") == (
         "orchestra: this session's context is 500,474 tokens, past its 500,000-token compaction window, which has not"
-        " applied: type `/compact` at the next seam."
+        " applied: the coordinator compacts at its next seam where its compact tool loads, or type `/compact` then."
     )
-    main.write_bytes(line("assistant", "m0", 900_000) + line("user") + line("assistant", "m1", 499_000))
+    # 375,000 is three quarters of the window; the line adds 474 tokens to the figure given.
+    main.write_bytes(line("assistant", "m0", 900_000) + line("user") + line("assistant", "m1", 374_526))
+    said = hook("UserPromptSubmit", project, prompt="go", transcript_path=str(main))[1]
+    assert context_of(said, "UserPromptSubmit").endswith(
+        " Your context is 375,000 tokens, at least 75% of the 500,000-token compaction window; " + seam
+    )
+    assert "systemMessage" not in cast("dict[str, object]", said)
+    main.write_bytes(line("assistant", "m0", 900_000) + line("user") + line("assistant", "m1", 374_525))
     said = hook("UserPromptSubmit", project, prompt="go", transcript_path=str(main))[1]
     assert "compaction" not in context_of(said, "UserPromptSubmit")
     assert "systemMessage" not in cast("dict[str, object]", said)

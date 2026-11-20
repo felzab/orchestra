@@ -82,6 +82,13 @@ JUDGED = 4
 DISCLOSURE_ONLY = ("disclosure",)
 # When the previous prompt arrived, for the clock line.
 PROMPT = "prompt.json"
+# The share of the compaction window from which each prompt tells the coordinator its context nears it, so that it
+# compacts at its next seam before Claude Code compacts wherever the work stands. On one long coordinator day of the
+# maintainer's, the owner's six compactions at seams fell at 0.75 to 0.91 of the 500,000-token window, and the seven
+# automatic ones at 0.93.
+NEAR_WINDOW = 0.75
+# The tool `hooks/compact.js` registers, which compacts the coordinator once its turn ends.
+COMPACT_TOOL = "mcp__orchestra__compact"
 # The reason of a `SessionEnd` that `/clear` caused, whose session id never writes again, and the source
 # of the `SessionStart` that follows it.
 CLEARED = "clear"
@@ -1023,10 +1030,12 @@ def session_end(where: Where) -> str | None:
 
 
 def user_prompt_submit(where: Where) -> str | None:
-    """The clock read now, the minutes since the previous prompt, and a context past its compaction window.
+    """The clock read now, the minutes since the previous prompt, and a context nearing its compaction window.
 
-    The window's warning goes to the owner too, in a `systemMessage`, since only the owner can type `/compact`
-    (skills.md: the model cannot run it). A `Stop` hook would carry it at a model call each time it fired.
+    From `NEAR_WINDOW` of the window the coordinator reads that the compact tool compacts at its next seam. Past
+    the window, which an applied window never lets the context reach, the owner reads it too, in a `systemMessage`:
+    the window has not applied, and where mods do not load only the owner can type `/compact` (skills.md: the model
+    cannot run it). A `Stop` hook would carry it at a model call each time it fired.
     """
     state = where.state
     if not where.coordinator or state is None:
@@ -1047,18 +1056,21 @@ def user_prompt_submit(where: Where) -> str | None:
         said += f" {passed} passed since the previous prompt."
         if gap > STALE_MINUTES:
             said += " A usage figure read before that is stale: `orchestra status --measure` reads it again."
-    past = _past_window(where)
-    if past is None:
+    near = _near_window(where)
+    if near is None:
         return _context("UserPromptSubmit", said)
-    size, window = f"{past[0]:,}", f"{past[1]:,}"
+    size, window = f"{near[0]:,}", f"{near[1]:,}"
     # Facts, not an order: an imperative in added context can read as an injection (hooks.md, "Add context for Claude").
-    said += (
-        f" Your context is {size} tokens, past the {window}-token compaction window, which has not applied;"
-        " only the owner can type `/compact`."
-    )
+    tool = f"`{COMPACT_TOOL}`, where the session has it, or else the owner's `/compact`, compacts at the next seam"
+    if near[0] <= near[1]:
+        said += f" Your context is {size} tokens, at least {NEAR_WINDOW:.0%} of the {window}-token compaction"
+        said += f" window; {tool}."
+        return _context("UserPromptSubmit", said)
+    said += f" Your context is {size} tokens, past the {window}-token compaction window, which has not applied; {tool}."
     shown = (
         f"orchestra: this session's context is {size} tokens, past its {window}-token compaction window, which"
-        " has not applied: type `/compact` at the next seam."
+        " has not applied: the coordinator compacts at its next seam where its compact tool loads, or type"
+        " `/compact` then."
     )
     return _json(
         {
@@ -1068,8 +1080,8 @@ def user_prompt_submit(where: Where) -> str | None:
     )
 
 
-def _past_window(where: Where) -> tuple[int, int] | None:
-    """The main session's context and its compaction window, where the context is past it; None where it is not.
+def _near_window(where: Where) -> tuple[int, int] | None:
+    """The main session's context and its compaction window, from `NEAR_WINDOW` of it on; None below that.
 
     No hook input carries the main session's context, so it is read from its transcript, which may lag the
     conversation (hooks.md, "Common input fields"). A desktop session started from a pre-warmed process was
@@ -1090,7 +1102,7 @@ def _past_window(where: Where) -> tuple[int, int] | None:
     # Imported here, since no other event reads the settings files and every hook would pay for its imports.
     read = typing.cast("Callable[[Path, str | None], int | None]", importlib.import_module("orchestra.init").window)
     window = read(root, model if isinstance(model, str) else None)
-    return (size, window) if window is not None and size > window else None
+    return (size, window) if window is not None and size >= NEAR_WINDOW * window else None
 
 
 HANDLERS: dict[str, Callable[[Where], str | None]] = {
