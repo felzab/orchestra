@@ -305,15 +305,6 @@ def _relative(state: Path, path: Path) -> str:
     return path.relative_to(state).as_posix()
 
 
-def _worktrees(root: Path) -> dict[str, Path]:
-    listed = config.worktrees(root)[1:]
-    return {
-        tree["branch"]: Path(tree["worktree"])
-        for tree in listed
-        if "branch" in tree and Path(tree["worktree"]).is_dir()
-    }
-
-
 def _record_branch(where: Where, agent: model.Agent) -> None:
     """A writer's or a driver's branch, read from the worktree its event fires in, where its record has none."""
     if agent.branch is not None or agent.type not in report.COMMITTING or where.state is None:
@@ -547,18 +538,21 @@ def _resume(where: Where, given: Record) -> str | None:
         return None
     name = agent.name
     why = None
-    if agent.type in report.COMMITTING and (agent.branch is None or agent.branch not in _worktrees(root)):
-        held = agent.branch or "no branch recorded"
+    if (held := findings.gone(agent, root)) is not None:
+        # No answer reaches it, so `judge` takes its report as it stands, a question included, and a judged
+        # record holds nothing a successor's brief needs.
+        settle = "" if agent.status in findings.JUDGED else f"`orchestra judge {name}` banks its report, then "
         why = (
-            f"{name}'s worktree is gone ({held}), so a resume would run it in the coordinator's checkout:"
-            " dispatch a successor"
+            f"{name}'s worktree is gone ({held}), so a resume has no worktree to run in:"
+            f" {settle}dispatch a successor briefed with what is left"
         )
     elif (unjudged := findings.unjudged(agent)) is not None:
         # `judge` reads an agent's latest round alone, so a round begun before it would leave this one's unread.
         why = unjudged
     elif agent.outcome not in report.STOPPED or agent.status not in ("reported", "running"):
         # A report stopped on a question is no ceiling's: its answer is the one message that closes the round,
-        # and until then `judge`, `land` and `prune --discard` hold the agent, so a successor could take nothing.
+        # and while its worktree stands `judge`, `land` and `prune --discard` wait for that answer, so a
+        # successor could take nothing.
         # `running` lets a resend through whose first send failed; a usage stop keeps the old outcome but waits
         # on no answer, so the ceiling applies again.
         size, ceiling = context.size(agent, where.session), config.load(root).context_ceiling
@@ -861,14 +855,18 @@ def stop(where: Where) -> str | None:
     if not where.coordinator or state is None or where.data.get("stop_hook_active"):
         return None
     agents = model.agents(state)
-    # A report stopped on a question waits on an answer by message; `judge` refuses it until then.
-    undone = [
-        f"{agent.name} stopped {agent.outcome} and waits on your answer by message"
-        if agent.outcome in report.STOPPED
-        else f"{agent.name} reported ({agent.outcome}) and is not judged"
-        for agent in agents
-        if agent.status == "reported"
-    ]
+
+    def reported(agent: model.Agent) -> str:
+        if agent.outcome not in report.STOPPED:
+            return f"{agent.name} reported ({agent.outcome}) and is not judged"
+        # A report stopped on a question waits on an answer by message, which `judge` waits for too, unless
+        # no answer can reach the agent: its worktree is gone, and its report is judged as it stands. The
+        # root's git runs only here, so a turn's end with no such report pays nothing for it.
+        root = where.root
+        unreached = None if root is None else findings.unreached(agent, root)
+        return unreached or f"{agent.name} stopped {agent.outcome} and waits on your answer by message"
+
+    undone = [reported(agent) for agent in agents if agent.status == "reported"]
     # `status` lists it as to resume: resumed, or replaced by a successor once `prune` has settled it.
     undone += [
         f"{agent.name} stopped ({agent.reason or 'no reason recorded'}) and is not resumed"

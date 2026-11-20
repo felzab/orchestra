@@ -595,7 +595,16 @@ def test_a_resume_of_a_writer_whose_worktree_is_gone_is_refused(project: Path, s
     said = hook("PreToolUse", project, tool_name="SendMessage", tool_input={"to": "W", "message": "fix F1"})[1]
     assert decision(said) == (
         "deny",
-        "W's worktree is gone (gone), so a resume would run it in the coordinator's checkout: dispatch a successor",
+        "W's worktree is gone (gone), so a resume has no worktree to run in: `orchestra judge W` banks its report,"
+        " then dispatch a successor briefed with what is left",
+    )
+    # A judged record has nothing left to bank.
+    changed(state, "W", status="judged")
+    said = hook("PreToolUse", project, tool_name="SendMessage", tool_input={"to": "W", "message": "fix F1"})[1]
+    assert decision(said) == (
+        "deny",
+        "W's worktree is gone (gone), so a resume has no worktree to run in: dispatch a successor briefed with what"
+        " is left",
     )
 
 
@@ -618,7 +627,7 @@ def test_a_resume_past_the_context_ceiling_is_refused_naming_the_figure(project:
 def test_a_writer_stopped_on_a_question_past_the_ceiling_is_answered_and_a_finished_one_is_not_resumed(
     project: Path, state: Path
 ) -> None:
-    """Until its question is answered, `judge`, `land` and `prune --discard` hold it, so no successor takes over."""
+    """While its worktree stands and its question waits, `judge`, `land` and `prune --discard` hold it."""
     write_config(project, {"stateRoot": (project.parent / "state").as_posix(), "contextCeiling": 100_000})
     briefed(project, "W", "writer", owns="lib/a.py")
     dispatched(project, "W", "writer", "w1")
@@ -839,6 +848,51 @@ def test_the_turn_continues_once_with_what_is_undone(project: Path, state: Path)
         "- NOW.md predates the last 5 log entries",
     ]
     assert hook("Stop", project, stop_hook_active=True, background_tasks=[]) == (0, None)
+
+
+def test_a_writer_stopped_on_a_question_whose_worktree_is_gone_is_judged_and_leaves_the_turns_end(
+    project: Path, state: Path
+) -> None:
+    """Claude Code removes a commit-less writer's worktree when it stops (worktrees.md), so no answer reaches it."""
+    briefed(project, "W", "writer", owns="lib/a.py")
+    dispatched(project, "W", "writer", "w1")
+    asked = text("writer", "W", status="NEEDS-ANSWER: which queue takes it?").replace("Commits: 2,", "Commits: 0,")
+    report.path(state, "W").write_bytes(asked.encode())
+    changed(state, "W", status="reported", outcome="NEEDS-ANSWER", branch="worktree-agent-w1")
+
+    def undone() -> list[str]:
+        said = hook("Stop", project, stop_hook_active=False, background_tasks=[])[1]
+        return [] if said is None else context_of(said, "Stop").splitlines()
+
+    assert undone() == [
+        "Undone in this orchestra session:",
+        "- W stopped NEEDS-ANSWER, and its worktree is gone (worktree-agent-w1), so no answer reaches it:"
+        " `orchestra judge W` banks its report as it stands",
+    ]
+    # A discard waits for the judge too, since a pruned agent's report can no longer be judged.
+    kept = run("prune", "--discard", "W", cwd=project)
+    assert "kept its record (W): W stopped NEEDS-ANSWER, and its worktree is gone" in kept.stdout, kept.stdout
+    judged = run("judge", "W", "F1=route:owner", "F2=route:owner", "--verdict", "superseded by W2", cwd=project)
+    assert judged.returncode == 0, judged.stderr
+    assert model.read_agent(state, "W").status == "judged"
+    assert undone() == []
+
+
+def test_a_writer_stopped_on_a_question_whose_worktree_stands_waits_on_its_answer(project: Path, state: Path) -> None:
+    """Its answer resumes it in its worktree, so `judge` waits for the report that answer completes."""
+    briefed(project, "W", "writer", owns="lib/a.py")
+    dispatched(project, "W", "writer", "w1")
+    git(project, "worktree", "add", "-b", "worktree-agent-w1", str(project.parent / "trees" / "agent-w1"))
+    report.path(state, "W").write_bytes(text("writer", "W", status="NEEDS-ANSWER: which queue takes it?").encode())
+    changed(state, "W", status="reported", outcome="NEEDS-ANSWER", branch="worktree-agent-w1")
+    said = context_of(hook("Stop", project, stop_hook_active=False, background_tasks=[])[1], "Stop")
+    assert "- W stopped NEEDS-ANSWER and waits on your answer by message" in said.splitlines()
+    judged = run("judge", "W", "F1=route:owner", "F2=route:owner", "--verdict", "v", cwd=project)
+    assert (judged.returncode, judged.stderr) == (
+        2,
+        "orchestra judge: W stopped NEEDS-ANSWER: which queue takes it?. Answer it by message, and judge the report"
+        " it writes\n",
+    )
 
 
 def test_notes_after_now_md_leave_it_current_and_as_many_decisions_or_other_entries_do_not(
