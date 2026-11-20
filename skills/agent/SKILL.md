@@ -18,7 +18,7 @@ Your dispatch prompt names your brief, its messages file, your report and the pr
 ## The coordinator
 
 - `SendMessage` to `main` reaches the coordinator. Send what blocks the work: a broken premise, a file you need outside your paths, a question you cannot settle. The answer arrives at a later tool call, so go on with what it does not block. What blocks nothing goes in the report alone, since each message interrupts the coordinator every agent shares.
-- When everything left waits on an answer, finish the report with `BLOCKED` or `NEEDS-ANSWER` and stop; the answer resumes you. Wait in no sleep loop: the coordinator messages you when what you wait on lands.
+- When everything left waits on an answer, finish the report with `BLOCKED` or `NEEDS-ANSWER` and stop; the answer resumes you. A worktree holding no commit goes at the stop, so a writer commits what is done before it stops. A driver, which commits nothing, cannot be resumed: it asks by `SendMessage`, works on what the question does not block, writes into the report all a successor needs, and stops once nothing is left, since a successor takes the answer. Wait in no sleep loop: the coordinator messages you when what you wait on lands.
 - A hook's or a permission rule's refusal is a rule arriving: comply, report it, and re-run the command changed only as the refusal's text says. Reaching the same end through another tool or a reworded command defeats the rule, and a step reported as not done costs nothing.
 
 ## Claims
@@ -27,12 +27,13 @@ Your dispatch prompt names your brief, its messages file, your report and the pr
 - A hash, a figure or a quotation in your report is copied from a command's output or a source, where a recalled one is often wrong.
 - Where a change leaves one file contradicting its siblings, the siblings are evidence the change is wrong.
 - The Bash tool can turn a typed `\\` into `\` silently: write such text with the Write tool and pass it by file, as `git commit -F <file>`.
-- Where you hold a shell: run each check unfiltered and read its exit code from the command itself, because a filter drops the line naming the error and a pipe reports its last command's code. The tool's result names a failing command's exit code, so append no `; echo exit=$?`; in a worktree, run each command plain, with no `;`, `$?`, `$(...)`, loop or heredoc, which Claude Code's worktree check may refuse (issues 94040, 100806).
+- Where you hold a shell: run each check unfiltered and read its exit code from the command itself, because a filter drops the line naming the error and a pipe reports its last command's code. The tool's result names a failing command's exit code, so append no `; echo exit=$?`; in a worktree, run each command plain from its root, with no `;`, `$?`, `$VAR`, `$(...)`, loop, heredoc or `git -C`, which Claude Code's worktree check may refuse (issues 94040, 100806), and pass a path holding brackets as a quoted operand rather than `cd` into it.
+- Put tool calls whose inputs do not depend on each other's results in one message, since each message re-reads all you hold.
 - Start nothing on a fixed port, and act only on processes, containers and files you created: every agent shares the machine. To compare two timings, run the two variants alternately in one sitting and report the ratio with its spread, since the machine's load drifts. Stop each background command or monitor you started, with `TaskStop`, before your final message, since it outlives you. A turn you end to wait on your own background command or monitor is a stop: the stop hook reads your report then, and the coordinator may judge and land your branch while your task still runs; so run a check in the foreground (a Bash call given `timeout: 600000` allows ten minutes; split a longer check), and end your turn only when the report is final or you stop on a question.
 
 ## The report
 
-Create the file at your `Report:` path first, with these headings in this order, and fill it as each part stands, so a stop loses nothing you found. Write it and every scratch file with the Write and Edit tools, and read the plugin's own files with the Read tool, never through the shell, since Claude Code refuses a shell command reaching outside your working directories.
+Create the file at your `Report:` path, or the path your latest resume names, first, with these headings in this order, and fill it as each part stands, so a stop loses nothing you found. Write it and every scratch file with the Write and Edit tools, and read the plugin's own files with the Read tool, never through the shell, since Claude Code refuses a shell command reaching outside your working directories.
 
 ```text
 # <NAME> · <type> · round <n>
@@ -60,9 +61,9 @@ Harm: <the concrete harm>. Likelihood: <how likely, and on what evidence>.
 ```
 
 - `<n>` is the round your `Report:` line names, or the round your latest resume names.
-- `STATUS` is `DONE`, `DONE-WITH-CONCERNS`, `BLOCKED` or `NEEDS-ANSWER`. A researcher, an auditor and a verifier write `Commits: none`.
+- `STATUS` reads `IN-PROGRESS` until the report is final, then `DONE`, `DONE-WITH-CONCERNS`, `BLOCKED` or `NEEDS-ANSWER`. A researcher, an auditor and a verifier write `Commits: none`.
 - Copy each finding's heading line, after its `### `, into `## Summary` unchanged, since the stop hook compares the two. The summary's other lines hold at most 1,500 bytes together, in words a reader who saw none of your work understands. Your final message is that section followed by the report's path.
-- A finding's first line holds both `Harm:` and `Likelihood:`, since the stop hook reads that one line.
+- A finding's first paragraph holds both `Harm:` and `Likelihood:`, since the stop hook reads no further.
 - Record every finding and classify it; the coordinator filters. `defect` affects correctness or the stated requirements and `optional` is anything else; `silent` means nothing fails or shows when it bites. Numbers start at 1 without gaps, and another report's finding is `<NAME>-F<n>`.
 - `## Done` holds what you read or ran, with exit codes. A section with nothing to say holds `nothing`, and `## Findings` holds `none`. `## Outside the scope` describes what you found beyond your brief and leaves it unfixed.
 

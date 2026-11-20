@@ -107,6 +107,36 @@ def test_a_writers_owns_is_filled_from_its_slices_line_in_the_plan(project: Path
     assert brief.header(state, "E").labels["Owns"] == ""
 
 
+def test_a_body_file_is_written_below_the_header_and_the_brief_checked_in_the_same_call(
+    project: Path, state: Path, tmp_path: Path
+) -> None:
+    """Otherwise a brief costs the header verb, the body's write and the check: three calls where two serve."""
+    store.write_text(state / store.PLAN, "# Plan\n\n## Slices and their files\n\n- [ ] S1 `lib/a.py`\n")
+    body = tmp_path / "body.md"
+    body.write_bytes(f"Rows: none\nWrites: none\nLens: none\n\n{BODY}".encode())
+    done = inprocess("brief", "A", "--type", "writer", "--slice", "S1", "--body", str(body), cwd=project)
+    assert done.returncode == 0, done.stdout + done.stderr
+    path = state / "briefs" / "A.md"
+    assert done.stdout.splitlines() == [str(path), f"A's brief is checked: {path}"]
+    short = git(project, "rev-parse", "--short", "main")
+    head = f"Agent: A    Type: writer    Slice: S1\nBase: main at {short}\nReport: {state / 'reports' / 'A.md'}\n"
+    assert path.read_bytes().decode() == f"{head}Owns: lib/a.py\nRows: none\nWrites: none\nLens: none\n\n{BODY}"
+    assert brief.stamped(state, model.read_agent(state, "A"))
+    # A body naming its own `Owns:` keeps it, and one with a fault is written and refused as a check refuses it.
+    body.write_bytes(f"Owns: lib/b.py (new)\nRows: none\nWrites: none\nLens:\n\n{BODY}".encode())
+    done = inprocess("brief", "B", "--type", "writer", "--slice", "S1", "--body", str(body), cwd=project)
+    assert done.returncode == 2
+    assert done.stdout.splitlines()[1:-1] == ["`Lens:` has no value: name what it holds, or write `none`"]
+    assert brief.header(state, "B").owns == ("lib/b.py",)
+    # A body typing a line of the header the verb writes is refused before anything is written.
+    body.write_bytes(f"Base: main at 1234567\nRows: none\n\n{BODY}".encode())
+    done = inprocess("brief", "C", "--type", "writer", "--slice", "S1", "--body", str(body), cwd=project)
+    assert done.returncode == 2
+    assert "holds `Base: main at 1234567`: leave the header's first three lines to the verb" in done.stderr
+    assert not (state / "briefs" / "C.md").exists()
+    assert not model.agent_path(state, "C").exists()
+
+
 def test_a_reader_or_a_driver_is_briefed_outside_the_plan_with_no_slice_and_a_writer_on_none_is_drift(
     project: Path, state: Path
 ) -> None:

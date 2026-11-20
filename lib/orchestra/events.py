@@ -74,14 +74,26 @@ CONTEXT_CHARS = 10_000
 OWN = frozenset({store.PLAN, store.NOW})
 # The project's own rules for each agent type, `<type>.md`, in the primary checkout.
 ADDENDA = Path(".claude", "orchestra")
-# The reports judged after the newest saved estimate at which the checkpoint is due again.
-JUDGED = 4
+# The reports judged after the newest saved estimate at which the checkpoint is due again while agents stay at
+# work, for a fleet that dispatches as work frees and so has no quiet wave end. At 4, one long session saved 29
+# estimates in sixteen hours, 24 of them at up to 8% of its coordinator's tokens; 8 was estimated to halve that.
+JUDGED = 8
 # The `Lens:` line of a disclosure-only read, which frees no planned work, so its report leaves the
 # checkpoint's count alone. The brief alone is read, so the read before a push and the review's own
 # disclosure reader are both left out: nothing tells the two apart.
 DISCLOSURE_ONLY = ("disclosure",)
 # When the previous prompt arrived, for the clock line.
 PROMPT = "prompt.json"
+# The labels of the overview's rows naming judged and pruned agents, left out of the one given back after a
+# compaction or a resume: one long session spent 17% of those overviews' characters on them.
+FINISHED_ROWS = frozenset({"judged", "pruned"})
+# The share of the compaction window from which each prompt tells the coordinator its context nears it, so that it
+# compacts at its next seam before Claude Code compacts wherever the work stands. On one long coordinator day of the
+# maintainer's, the owner's six compactions at seams fell at 0.75 to 0.91 of the 500,000-token window, and the seven
+# automatic ones at 0.93.
+NEAR_WINDOW = 0.75
+# The tool `hooks/compact.js` registers, which compacts the coordinator once its turn ends.
+COMPACT_TOOL = "mcp__orchestra__compact"
 # The reason of a `SessionEnd` that `/clear` caused, whose session id never writes again, and the source
 # of the `SessionStart` that follows it.
 CLEARED = "clear"
@@ -303,15 +315,6 @@ def _resumed_round(agent: model.Agent) -> int:
 
 def _relative(state: Path, path: Path) -> str:
     return path.relative_to(state).as_posix()
-
-
-def _worktrees(root: Path) -> dict[str, Path]:
-    listed = config.worktrees(root)[1:]
-    return {
-        tree["branch"]: Path(tree["worktree"])
-        for tree in listed
-        if "branch" in tree and Path(tree["worktree"]).is_dir()
-    }
 
 
 def _record_branch(where: Where, agent: model.Agent) -> None:
@@ -547,18 +550,21 @@ def _resume(where: Where, given: Record) -> str | None:
         return None
     name = agent.name
     why = None
-    if agent.type in report.COMMITTING and (agent.branch is None or agent.branch not in _worktrees(root)):
-        held = agent.branch or "no branch recorded"
+    if (held := findings.gone(agent, root)) is not None:
+        # No answer reaches it, so `judge` takes its report as it stands, a question included, and a judged
+        # record holds nothing a successor's brief needs.
+        settle = "" if agent.status in findings.JUDGED else f"`orchestra judge {name}` banks its report, then "
         why = (
-            f"{name}'s worktree is gone ({held}), so a resume would run it in the coordinator's checkout:"
-            " dispatch a successor"
+            f"{name}'s worktree is gone ({held}), so a resume has no worktree to run in:"
+            f" {settle}dispatch a successor briefed with what is left"
         )
     elif (unjudged := findings.unjudged(agent)) is not None:
         # `judge` reads an agent's latest round alone, so a round begun before it would leave this one's unread.
         why = unjudged
     elif agent.outcome not in report.STOPPED or agent.status not in ("reported", "running"):
         # A report stopped on a question is no ceiling's: its answer is the one message that closes the round,
-        # and until then `judge`, `land` and `prune --discard` hold the agent, so a successor could take nothing.
+        # and while its worktree stands `judge`, `land` and `prune --discard` wait for that answer, so a
+        # successor could take nothing.
         # `running` lets a resend through whose first send failed; a usage stop keeps the old outcome but waits
         # on no answer, so the ceiling applies again.
         size, ceiling = context.size(agent, where.session), config.load(root).context_ceiling
@@ -861,14 +867,18 @@ def stop(where: Where) -> str | None:
     if not where.coordinator or state is None or where.data.get("stop_hook_active"):
         return None
     agents = model.agents(state)
-    # A report stopped on a question waits on an answer by message; `judge` refuses it until then.
-    undone = [
-        f"{agent.name} stopped {agent.outcome} and waits on your answer by message"
-        if agent.outcome in report.STOPPED
-        else f"{agent.name} reported ({agent.outcome}) and is not judged"
-        for agent in agents
-        if agent.status == "reported"
-    ]
+
+    def reported(agent: model.Agent) -> str:
+        if agent.outcome not in report.STOPPED:
+            return f"{agent.name} reported ({agent.outcome}) and is not judged"
+        # A report stopped on a question waits on an answer by message, which `judge` waits for too, unless
+        # no answer can reach the agent: its worktree is gone, and its report is judged as it stands. The
+        # root's git runs only here, so a turn's end with no such report pays nothing for it.
+        root = where.root
+        unreached = None if root is None else findings.unreached(agent, root)
+        return unreached or f"{agent.name} stopped {agent.outcome} and waits on your answer by message"
+
+    undone = [reported(agent) for agent in agents if agent.status == "reported"]
     # `status` lists it as to resume: resumed, or replaced by a successor once `prune` has settled it.
     undone += [
         f"{agent.name} stopped ({agent.reason or 'no reason recorded'}) and is not resumed"
@@ -897,36 +907,55 @@ def stop(where: Where) -> str | None:
         )
         if later >= NOW_EVENTS:
             undone.append(f"NOW.md predates the last {later} log entries")
-    if due := _checkpoint(state, entries):
+    if due := _checkpoint(state, entries, agents, where.session):
         undone.append(due)
     if not undone:
         return None
     return _context("Stop", "Undone in this orchestra session:\n" + "\n".join(f"- {line}" for line in undone))
 
 
-def _checkpoint(state: Path, entries: list[log.Entry]) -> str | None:
+def _writer(agents: list[model.Agent], dispatched: str) -> bool:
+    """Whether a dispatch entry, `<NAME> as <id> on <model>`, names a writer."""
+    name = dispatched.partition(" as ")[0]
+    return any(agent.name == name and agent.type == "writer" for agent in agents)
+
+
+def _checkpoint(state: Path, entries: list[log.Entry], agents: list[model.Agent], session: str | None) -> str | None:
     """A line where the checkpoint is due and a plan line is unticked; None where it is not.
 
-    It is due once an agent is dispatched while no estimate is saved, and once `JUDGED` reports are
-    judged after the newest saved one, since each report can free work the plan holds back; a report
-    whose brief's `Lens:` line is `DISCLOSURE_ONLY`, a disclosure-only read, frees none, so it is not counted.
+    It is due once a writer is dispatched while no estimate is saved, since start.md lets the researchers
+    that settle the plan's premises go out before the first estimate. After the newest saved one it is due
+    at a wave's end, where checkpoint.md runs it: no agent is live and a writer has landed since. A fleet
+    that dispatches as work frees has no such end, so it is due too once `JUDGED` reports are judged since,
+    each able to free work the plan holds back; a report whose brief's `Lens:` line is `DISCLOSURE_ONLY`, a
+    disclosure-only read, frees none, so it is not counted.
     """
     saved = [path.stat().st_mtime for path in (state / store.ESTIMATES).glob("*") if path.is_file()]
     if saved:
         # Compared at the log's own precision, the second, as NOW.md is.
         newest = datetime.datetime.fromtimestamp(max(saved)).astimezone().replace(microsecond=0)
-        # The brief is read last, so only an entry judged since the estimate costs a read.
-        judged = sum(
-            entry.kind == log.JUDGE
-            and datetime.datetime.fromisoformat(entry.time) >= newest
-            and not _disclosure_only(state, entry.text)
-            for entry in entries
+        landed = sum(
+            agent.type == "writer"
+            and (stamp := agent.since.get("landed")) is not None
+            and datetime.datetime.fromisoformat(stamp) >= newest
+            for agent in agents
         )
-        if judged < JUDGED:
-            return None
-        why = f"{judged} reports were judged since the last saved estimate ({newest:%H:%M})"
-    elif any(entry.kind == log.DISPATCH for entry in entries):
-        why = "agents have been dispatched, and no estimate is saved"
+        # The transcripts are read last, and only where a landing could end a wave.
+        if landed and not any(findings.is_live(agent, session) for agent in agents):
+            why = f"no agent is live, and {landed} writer(s) landed since the last saved estimate ({newest:%H:%M})"
+        else:
+            # The brief is read last, so only an entry judged since the estimate costs a read.
+            judged = sum(
+                entry.kind == log.JUDGE
+                and datetime.datetime.fromisoformat(entry.time) >= newest
+                and not _disclosure_only(state, entry.text)
+                for entry in entries
+            )
+            if judged < JUDGED:
+                return None
+            why = f"{judged} reports were judged since the last saved estimate ({newest:%H:%M})"
+    elif any(entry.kind == log.DISPATCH and _writer(agents, entry.text) for entry in entries):
+        why = "a writer has been dispatched, and no estimate is saved"
     else:
         return None
     try:
@@ -964,6 +993,8 @@ def _waits(agents: list[model.Agent], entries: list[log.Entry]) -> bool:
 def session_start(where: Where) -> str | None:
     """The state's path, the head of `orchestra status` and NOW.md, given back after a compaction or a resume.
 
+    The overview leaves out its rows naming judged and pruned agents, `FINISHED_ROWS`; `orchestra status` keeps them.
+
     After a `/clear` the new session holds no lease, and no input names the session it replaced, so it
     is told only that a `/clear` stopped this state a moment ago, never that the stopped session was its own.
     """
@@ -981,6 +1012,8 @@ def session_start(where: Where) -> str | None:
     )
     try:
         shown, summary = overview(clock, state, root, where.session)
+        # The rows naming finished agents, which nothing after a compaction acts on; the `agents` row counts them.
+        shown = [line for line in shown if line.split(" ", 1)[0] not in FINISHED_ROWS]
         lines += [f"`orchestra status` at {clock.isoformat(timespec='seconds')}:", *shown[: cli.LINES - 2], summary]
     except Refused as refused:
         lines.append(f"`orchestra status` cannot be read: {refused}")
@@ -1025,10 +1058,12 @@ def session_end(where: Where) -> str | None:
 
 
 def user_prompt_submit(where: Where) -> str | None:
-    """The clock read now, the minutes since the previous prompt, and a context past its compaction window.
+    """The clock read now, the minutes since the previous prompt, and a context nearing its compaction window.
 
-    The window's warning goes to the owner too, in a `systemMessage`, since only the owner can type `/compact`
-    (skills.md: the model cannot run it). A `Stop` hook would carry it at a model call each time it fired.
+    From `NEAR_WINDOW` of the window the coordinator reads that the compact tool compacts at its next seam. Past
+    the window, which an applied window never lets the context reach, the owner reads it too, in a `systemMessage`:
+    the window has not applied, and where mods do not load only the owner can type `/compact` (skills.md: the model
+    cannot run it). A `Stop` hook would carry it at a model call each time it fired.
     """
     state = where.state
     if not where.coordinator or state is None:
@@ -1049,18 +1084,21 @@ def user_prompt_submit(where: Where) -> str | None:
         said += f" {passed} passed since the previous prompt."
         if gap > STALE_MINUTES:
             said += " A usage figure read before that is stale: `orchestra status --measure` reads it again."
-    past = _past_window(where)
-    if past is None:
+    near = _near_window(where)
+    if near is None:
         return _context("UserPromptSubmit", said)
-    size, window = f"{past[0]:,}", f"{past[1]:,}"
+    size, window = f"{near[0]:,}", f"{near[1]:,}"
     # Facts, not an order: an imperative in added context can read as an injection (hooks.md, "Add context for Claude").
-    said += (
-        f" Your context is {size} tokens, past the {window}-token compaction window, which has not applied;"
-        " only the owner can type `/compact`."
-    )
+    tool = f"`{COMPACT_TOOL}`, where the session has it, or else the owner's `/compact`, compacts at the next seam"
+    if near[0] <= near[1]:
+        said += f" Your context is {size} tokens, at least {NEAR_WINDOW:.0%} of the {window}-token compaction"
+        said += f" window; {tool}."
+        return _context("UserPromptSubmit", said)
+    said += f" Your context is {size} tokens, past the {window}-token compaction window, which has not applied; {tool}."
     shown = (
         f"orchestra: this session's context is {size} tokens, past its {window}-token compaction window, which"
-        " has not applied: type `/compact` at the next seam."
+        " has not applied: the coordinator compacts at its next seam where its compact tool loads, or type"
+        " `/compact` then."
     )
     return _json(
         {
@@ -1070,8 +1108,8 @@ def user_prompt_submit(where: Where) -> str | None:
     )
 
 
-def _past_window(where: Where) -> tuple[int, int] | None:
-    """The main session's context and its compaction window, where the context is past it; None where it is not.
+def _near_window(where: Where) -> tuple[int, int] | None:
+    """The main session's context and its compaction window, from `NEAR_WINDOW` of it on; None below that.
 
     No hook input carries the main session's context, so it is read from its transcript, which may lag the
     conversation (hooks.md, "Common input fields"). A desktop session started from a pre-warmed process was
@@ -1092,7 +1130,7 @@ def _past_window(where: Where) -> tuple[int, int] | None:
     # Imported here, since no other event reads the settings files and every hook would pay for its imports.
     read = typing.cast("Callable[[Path, str | None], int | None]", importlib.import_module("orchestra.init").window)
     window = read(root, model if isinstance(model, str) else None)
-    return (size, window) if window is not None and size > window else None
+    return (size, window) if window is not None and size >= NEAR_WINDOW * window else None
 
 
 HANDLERS: dict[str, Callable[[Where], str | None]] = {

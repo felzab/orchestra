@@ -86,16 +86,26 @@ def emit(
 ) -> None:
     """The lines and the summary line, forty in all unless `--all`; `tail` keeps the last lines, not the first.
 
-    `rest` says where the lines cut are printed whole.
+    `rest` says where the lines cut are printed whole. The notice of a cut goes to standard error, so a
+    pipe filtering the lines never drops it unseen, and in its place among them where the two streams merge.
     """
     room = LINES - 2
     if getattr(args, "all", False) or len(lines) <= room + 1:
         shown, cut = list(lines), 0
     else:
         shown, cut = (list(lines[-room:]) if tail else list(lines[:room])), len(lines) - room
-    said = f"... {cut} {'earlier' if tail else 'more'} line(s): {rest}"
-    for line in [said, *shown] if cut and tail else [*shown, said] if cut else shown:
+
+    def notice() -> None:
+        # A pipe buffers standard output, so the lines before the notice are flushed first to keep its place.
+        sys.stdout.flush()
+        print(f"... {cut} {'earlier' if tail else 'more'} line(s): {rest}", file=sys.stderr, flush=True)
+
+    if cut and tail:
+        notice()
+    for line in shown:
         print(line)
+    if cut and not tail:
+        notice()
     print(summary)
 
 

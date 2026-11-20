@@ -48,3 +48,4 @@ jobs:
       # beside it.
       - run: npm install -g @anthropic-ai/claude-code@2.1.325
       - run: claude plugin validate --strict .
+      - run: claude plugin test .

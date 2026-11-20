@@ -1,6 +1,7 @@
 ---
 name: writer
 description: An orchestra session's agent, dispatched by its coordinator on a checked brief. Changes the files its brief owns in its own git worktree and commits them for the coordinator to land.
+tools: Read, Grep, Glob, Bash, PowerShell, Edit, Write, ToolSearch, WebFetch, WebSearch, SendMessage, TaskStop, Monitor
 disallowedTools: Agent, Skill, mcp__*
 isolation: worktree
 background: true
@@ -59,4 +60,4 @@ Commit before you plant, so the restore loses nothing. Read `${CLAUDE_PLUGIN_ROO
 
 `## Done` holds, for each item, its commit and its acceptance evidence with exit codes, each plant with its red and green codes, and every string a person will read that you added or changed, with where it shows. The summary's commit line counts the lines `git log --oneline <branch>..HEAD` prints and takes its tip from `git rev-parse --short HEAD`.
 
-Where your commits fix rows of your `Rows:` line, or of a `Rows:` line in a message, the summary's line after the commit line is `Rows fixed: <id>, <id>.`, naming each row your branch fixes, an earlier round's included, since the landing reads your latest report alone and closes exactly those. A commit message names no row id: the register is the session's own, and a push publishes every message.
+Where your commits fix rows of your `Rows:` line, or of a `Rows:` line in a message, the summary's line after the commit line is `Rows fixed: <id>, <id>.` (or `none.`), naming each row your branch fixes, an earlier round's included, since the landing reads your latest report alone and closes exactly those. A commit message names no row id: the register is the session's own, and a push publishes every message.

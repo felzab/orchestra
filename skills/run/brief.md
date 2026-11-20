@@ -1,6 +1,6 @@
 # Writing a brief
 
-A brief is read once, by an agent that knows nothing else about the work. Its definition holds the bar and every standing rule, so the brief holds only this work. The program writes the header's first three lines and a writer's `Owns:` from its slice's line, to which you add `(new)` where due; you fill the other lists and write the four sections.
+A brief is read once, by an agent that knows nothing else about the work. Its definition holds the bar and every standing rule, so the brief holds only this work. The program writes the header's first three lines and a writer's `Owns:` from its slice's line; your `--body` file holds the other lists and the four sections, and an `Owns:` of its own where `(new)` is due.
 
 ```text
 Agent: API-RETRY    Type: writer    Slice: S3
@@ -32,9 +32,10 @@ TRAPS     The tests share one fake clock: advance it, since a sleep makes the su
 ## The sections
 
 - `GOAL` says what is to be true afterwards and why the thing is as it is today, because an order written from a measurement alone removes what the code was built to do.
-- `WORK` is numbered items. Each carries `Accept:`, the check named by what it asserts; a writer's names a check that runs in its worktree, since an `orchestra` verb reads the session's branch and the primary checkout and so sees no unlanded commit. Where `Rows:` names rows, each item carries `At:`, a symbol, a path or a rule id, since a line number moves. An item that adds a mechanism carries `Harm:`, with the harm it prevents here, how likely that is and who would see it without the mechanism; an item you cannot fill that slot for is not briefed.
-- `PREMISES` holds everything the work rests on that the agent has not seen, each with its source. Another agent's conclusion goes here as a claim.
+- `WORK` is numbered items. Each carries `Accept:`, the check named by what it asserts; a writer's names a check that runs in its worktree, since an `orchestra` verb reads the session's branch and the primary checkout and so sees no unlanded commit. Where `Rows:` names rows, each item carries `At:`, a symbol, a path or a rule id, since a line number moves. An item that adds a mechanism, a new test included, carries `Harm:`, with the harm it prevents here, how likely that is and who would see it without the mechanism; an item you cannot fill that slot for is not briefed. A change a person sees is accepted by the look or the drive the session owes, not by a new test.
+- `PREMISES` holds everything the work rests on that the agent has not seen, each with the command that shows it at `Base:`, or with its source and, where nobody has checked it, words saying so. Another agent's conclusion goes here as a claim.
 - `TRAPS` holds only what is true of this work and stands in no definition.
+- A part the brief asks of the report is a `###` heading under `## Done`, since the stop hook refuses any other `## ` heading, and findings number from 1 without gaps.
 
 ## Sizing
 
@@ -47,4 +48,4 @@ Size a brief by what losing its agent's whole output would cost. It carries ever
 
 ## The check
 
-`orchestra brief NAME --check` stamps the brief, and an edit after it clears the stamp, so check again. A checked brief you will not dispatch goes on refusing every brief that overlaps it; edit it to clear the stamp.
+`orchestra brief NAME --check` stamps the brief, and an edit after it clears the stamp, so check again. A checked brief you will not dispatch goes on refusing every brief that overlaps it; `orchestra prune --discard NAME` removes it and returns its slice to `planned`.

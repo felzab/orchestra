@@ -7,6 +7,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-21
+
+The fixes from the third project session that ran on the plugin.
+
+### Added
+
+- The plugin's first mod, `hooks/compact.js`, gives the coordinator `mcp__orchestra__compact`. The
+  coordinator calls it at each wave's end, attended or away; the conversation compacts once the turn
+  ends, and a one-line prompt then resumes the session. The tool refuses a call from an agent and
+  from a checkout with no orchestra session. Where mods are off, the coordinator suggests `/compact`
+  to the owner, as before. `claude plugin test .` runs the mod's tests, in CI too.
+- The prompt hook tells the coordinator from 75% of its compaction window that the compact tool
+  compacts at the next seam; past the window, it still tells the owner as well.
+- `orchestra brief NAME --type writer --body FILE` writes the brief's header above a file holding its lists
+  and sections and checks it in the same call.
+- `orchestra status --measure` prints the longest chain of slices still to do by their `after:` edges,
+  with each chain tied for it, and the minutes from each landing to the next dispatch.
+- `orchestra status` names a path on a slice still to do that the session deleted or moved.
+- `orchestra status --end` names a slice whose agents landed while its line is unticked.
+- `orchestra queue add --when landed:NAME <what>` accepts a planned slice no agent has taken yet.
+
+### Changed
+
+- `orchestra status` reads a slice as done once its agents land, before its line is ticked, and a
+  discarded agent's slice as still to do, its `Owns:` excusing no drift.
+- `orchestra status --measure` prints an unticked slice as its id, its count of files and its `after:`
+  edges rather than its whole line.
+- The `/usage` reading gives up after 90 s rather than 120 s, short of the Bash tool's default limit.
+- The checkpoint falls due at a wave's end, when no agent is live and a writer has landed since the
+  last estimate, or after eight judged reports; only a writer's dispatch makes the first one due.
+- `judge` takes a stopped agent's `BLOCKED` or `NEEDS-ANSWER` report as it stands when its worktree is
+  gone, since no answer can reach it.
+- The report check reads a finding's whole first paragraph for `Harm:` and `Likelihood:`, and accepts
+  `Rows fixed: none.`.
+- A verb's notice that it cut its output goes to standard error, and the overview after a compaction
+  leaves out finished agents.
+- The writer and driver definitions name the tools they use.
+- The pages: the estimate's second look asks every kind of saving (timing, waits, scoping, batching,
+  repeats, context, owner waits) and applies each that lowers no review, check or reading; the
+  review's steps start as soon as their inputs exist, with a fresh reader over a landing whose defect
+  could reach later work; an agent commits or hands over before it stops; the run, brief, start,
+  handoff and disclosure pages close the gaps the earlier sessions met.
+- The guide carries the measured compaction figures and names `/status`'s setting sources.
+
 ## [0.3.0] - 2026-11-19
 
 The fixes from the second project session that ran on the plugin.

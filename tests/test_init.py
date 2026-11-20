@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import argparse
 import dataclasses
 import datetime
+import io
 import json
 import sys
 from pathlib import Path
@@ -11,7 +13,7 @@ from pathlib import Path
 import pytest
 
 from conftest import MakeRepo, git, inprocess, write_agent, write_config
-from orchestra import init, model, report, store
+from orchestra import cli, init, model, report, store
 from test_report import text
 
 
@@ -561,8 +563,25 @@ def test_the_log_prints_its_last_lines_and_says_how_many_are_cut(project: Path) 
         store.append_jsonl(
             _state(project) / store.LOG, {"time": "2026-11-17T10:00:00+01:00", "kind": "note", "text": f"n{k}"}
         )
-    lines = inprocess("log", cwd=project).stdout.splitlines()
-    assert len(lines) == 40
-    assert lines[0].startswith("... 8 earlier line(s)")
+    shown = inprocess("log", cwd=project)
+    lines = shown.stdout.splitlines()
+    # The notice of the cut stands on standard error, so `orchestra log | grep` never drops it unseen.
+    assert shown.stderr == "... 8 earlier line(s): --all prints every one\n"
+    assert len(lines) == 39
+    assert lines[0].endswith("n7")
     assert lines[-2].endswith("n44")
     assert len(inprocess("log", "--all", cwd=project).stdout.splitlines()) == 47
+
+
+def test_the_cut_notice_keeps_its_place_where_the_two_streams_merge(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The Bash tool and a skill's injection merge standard error into standard output, which a pipe buffers."""
+    monkeypatch.setattr(cli, "LINES", 4)
+    for tail, order in ((True, ["notice", "l2", "l3", "sum"]), (False, ["l0", "l1", "notice", "sum"])):
+        merged = io.BytesIO()
+        # Two streams over one sink, as `2>&1` makes them: standard output buffered as a pipe's is.
+        monkeypatch.setattr(sys, "stdout", io.TextIOWrapper(merged, encoding="utf-8"))
+        monkeypatch.setattr(sys, "stderr", io.TextIOWrapper(merged, encoding="utf-8", line_buffering=True))
+        cli.emit(argparse.Namespace(all=False), ["l0", "l1", "l2", "l3"], "sum", tail=tail)
+        sys.stdout.flush()
+        said = merged.getvalue().decode().splitlines()
+        assert ["notice" if line.startswith("... 2 ") else line for line in said] == order

@@ -86,9 +86,9 @@ def test_a_long_away_keeps_its_latest_lines_and_names_the_log_for_the_rest(proje
     assert _run("mode", "away", cwd=project).returncode == 0
     stamp = model.now()
     store.append_jsonl(session / store.LOG, *({"time": stamp, "kind": "note", "text": f"n{k}"} for k in range(45)))
-    lines = _run("mode", "attended", cwd=project).stdout.splitlines()
-    assert lines[0].endswith(" earlier line(s): `orchestra log --all` prints every one")
-    assert lines[-2].endswith("n44")
+    back = _run("mode", "attended", cwd=project)
+    assert back.stderr.endswith(" earlier line(s): `orchestra log --all` prints every one\n")
+    assert back.stdout.splitlines()[-2].endswith("n44")
 
 
 def test_the_lease_refuses_another_session_and_hands_over_only_after_a_stop(project: Path, session: Path) -> None:

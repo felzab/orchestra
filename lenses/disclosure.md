@@ -11,7 +11,7 @@
 3. A real person's name, address or identifier, in a fixture, an example or a log.
 4. Another person's words, quoted without their leave.
 5. A credential, token, key or internal host name, a revoked one included.
-6. A private register's rulings, reviewers, process or row ids, named in a commit message.
+6. A private register's rulings, reviewers, process or row ids, named in a commit message; the subject `Merge <NAME> into <branch>` that `orchestra land NAME` writes is the plugin's form, and no hit.
 
 Name each hit by file and line, or by commit and line.
 
