@@ -1111,9 +1111,13 @@ def test_a_falsely_sequenced_slice_waits_free_and_four_judged_reports_not_disclo
     briefed(project, "W", "writer", owns="lib/a.py")
     free = "waits     slice S2, which no agent took: its files are free"
     assert _due(project) == []
+    # A researcher settling the plan's premises goes out before the first estimate (start.md, step 5).
+    briefed(project, "MAP", "researcher")
+    dispatched(project, "MAP", "researcher", "map")
+    assert _due(project) == []
     dispatched(project, "W", "writer", "w1")
     assert free in run("status", "--measure", cwd=project).stdout.splitlines()
-    first = "- agents have been dispatched, and no estimate is saved, and 3 plan lines are unticked"
+    first = "- a writer has been dispatched, and no estimate is saved, and 3 plan lines are unticked"
     assert _due(project) == [f"{first}: the checkpoint in checkpoint.md is due"]
     # Once per turn: a turn the hook already continued is let end.
     assert hook("Stop", project, stop_hook_active=True, background_tasks=[]) == (0, None)

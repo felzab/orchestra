@@ -902,17 +902,24 @@ def stop(where: Where) -> str | None:
         )
         if later >= NOW_EVENTS:
             undone.append(f"NOW.md predates the last {later} log entries")
-    if due := _checkpoint(state, entries):
+    if due := _checkpoint(state, entries, agents):
         undone.append(due)
     if not undone:
         return None
     return _context("Stop", "Undone in this orchestra session:\n" + "\n".join(f"- {line}" for line in undone))
 
 
-def _checkpoint(state: Path, entries: list[log.Entry]) -> str | None:
+def _writer(agents: list[model.Agent], dispatched: str) -> bool:
+    """Whether a dispatch entry, `<NAME> as <id> on <model>`, names a writer."""
+    name = dispatched.partition(" as ")[0]
+    return any(agent.name == name and agent.type == "writer" for agent in agents)
+
+
+def _checkpoint(state: Path, entries: list[log.Entry], agents: list[model.Agent]) -> str | None:
     """A line where the checkpoint is due and a plan line is unticked; None where it is not.
 
-    It is due once an agent is dispatched while no estimate is saved, and once `JUDGED` reports are
+    It is due once a writer is dispatched while no estimate is saved, since start.md lets the researchers
+    that settle the plan's premises go out before the first estimate, and once `JUDGED` reports are
     judged after the newest saved one, since each report can free work the plan holds back; a report
     whose brief's `Lens:` line is `DISCLOSURE_ONLY`, a disclosure-only read, frees none, so it is not counted.
     """
@@ -930,8 +937,8 @@ def _checkpoint(state: Path, entries: list[log.Entry]) -> str | None:
         if judged < JUDGED:
             return None
         why = f"{judged} reports were judged since the last saved estimate ({newest:%H:%M})"
-    elif any(entry.kind == log.DISPATCH for entry in entries):
-        why = "agents have been dispatched, and no estimate is saved"
+    elif any(entry.kind == log.DISPATCH and _writer(agents, entry.text) for entry in entries):
+        why = "a writer has been dispatched, and no estimate is saved"
     else:
         return None
     try:
