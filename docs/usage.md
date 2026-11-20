@@ -41,12 +41,26 @@ defaults adds [a configuration file](#the-configuration-file) and
 [addenda](#the-projects-addenda).
 
 **Compact at 500,000 tokens.** Each call sends the whole conversation again, so a long session's
-cost is mostly that re-reading: on the maintainer's seven long coordinator sessions of a model with
-a 1M context, a 500,000-token window cost about 0.7 of Claude Code's default there, which compacts
-near 1M. Claude Code caps the window at the model's context, so on a model with a smaller context
-the window changes nothing. A compaction replaces the conversation with a summary, and the
-session-start hook gives the state back from its files; what it can lose is detail still in flight,
-so where you can, run `/compact` yourself at a natural break, such as after a wave lands.
+cost is mostly that re-reading. Replayed request by request on one long coordinator day of a model
+with a 1M context (2,729 requests over 15.6 hours, with 13 compactions), a 500,000-token window cost
+about 0.67 of Claude Code's default there, which compacts near 967,000 tokens. 600,000 would have
+cost 1.10 of 500,000 and saved 3 of the 13 compactions, and 400,000 would have cost 0.91 with 6
+more. One compaction cost about as much as 250,000 input tokens: the summary call, about 59,000
+tokens of instructions, skills and summary written again, and about 35,000 tokens read again in the
+following half hour. Claude Code caps the window at the model's context, so on a model with a
+smaller context the window changes nothing.
+
+A compaction replaces the conversation with a summary, and the session-start hook gives the state
+back from its files; what it can lose is detail still in flight. So the coordinator compacts itself
+at a seam: at each wave's end, attended or away, it calls `mcp__orchestra__compact`, a tool the
+plugin's mod (`hooks/compact.js`) adds. The tool refuses an agent and a checkout whose branch holds
+no session; otherwise the conversation compacts once the coordinator's turn ends, and a one-line
+prompt from the plugin then starts its next turn, so a coordinator with no agent left to report
+carries on. Mods are on by default in the terminal and the desktop app; `--safe-mode` and
+`"disableAllHooks": true` turn them off
+([mods overview](https://code.claude.com/docs/en/plugins/mods/overview), "Turn mods on or off").
+Without the tool, the coordinator suggests that you type `/compact` at the wave's end while you are
+there.
 
 `init` sets the window for you. Where the environment sets no `CLAUDE_CODE_AUTO_COMPACT_WINDOW`, in
 the shell or a settings file's `env`, which outranks every settings key, and none of the checkout's
@@ -71,11 +85,16 @@ tested it:
 { "autoCompactWindow": 500000 }
 ```
 
+The `Setting sources` line of `/status` names each settings file a session loaded, though not which
+file supplied each key ([settings page](https://code.claude.com/docs/en/settings), "Confirm what
+loaded"), so it shows whether such a session read the project's and the local file.
+
 Your user settings reach every project on the machine, which is why `init` writes none there. Each
 agent definition also sets 500,000, which lowers a larger window an agent would inherit. Where the
 window still does not apply, the hook on each of your prompts tells you and the coordinator once its
-context has passed the window, since only you can type `/compact`: Claude Code lets no model run it
-(the [skills page](https://code.claude.com/docs/en/skills), "Restrict Claude's skill access").
+context has passed the window. Claude Code lets no model run `/compact` itself (the
+[skills page](https://code.claude.com/docs/en/skills), "Restrict Claude's skill access"), so where
+the compact tool is absent, only you can.
 
 ## Starting a session
 
