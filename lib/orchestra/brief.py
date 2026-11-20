@@ -3,9 +3,10 @@
 The tool writes the header, so no value in it is typed, and a writer's `Owns:` with the files its
 slice's line in PLAN.md names in backticks; the coordinator fills `Rows:`, `Writes:`, `Lens:` and
 any `Owns:` left empty, adds `Model: <profile>` where the agent needs a profile of the configuration's
-`models` other than `default`, and writes the four sections below them. `--check` judges only what has a fixed
-shape, and stamps the agent's record with the SHA-256 of the brief's bytes, so an edit made after
-the check leaves the brief unchecked.
+`models` other than `default`, and writes the four sections below them; or writes all of that to a
+file first and gives it as `--body`, which writes the brief and checks it in one call. `--check`
+judges only what has a fixed shape, and stamps the agent's record with the SHA-256 of the brief's
+bytes, so an edit made after the check leaves the brief unchecked.
 
 An `Owns:` entry is a path, a folder holding every path under it, or a glob in which `*` matches
 within one folder and a `**` folder matches any number of folders; `?` and `[` are literal, since a
@@ -287,6 +288,12 @@ def add(_verb: str, parser: argparse.ArgumentParser) -> None:
         ),
     )
     parser.add_argument(
+        "--body",
+        type=Path,
+        metavar="FILE",
+        help="a file holding the lists and the four sections: written below the header, then the brief checked",
+    )
+    parser.add_argument(
         "--check", action="store_true", help="check the brief and stamp it, or refuse naming each fault"
     )
 
@@ -295,13 +302,32 @@ def run(args: argparse.Namespace) -> int:
     here = config.checkout()
     state = store.state_dir(held=here)
     if args.check:
-        if args.type or args.slice:
+        if args.type or args.slice or args.body:
             raise Refused("--check takes the name alone: the header already names the type and the slice")
         return check(args, state, here.root, args.name)
     slice_ = args.slice if args.slice is not None or args.type == SLICED else NONE
     if not args.type or not slice_ or not slice_.strip():
         raise Refused("a new brief needs --type, and --slice for a writer; `--check` checks one written")
-    return write(state, here.root, args.name, args.type, cli.one_line(slice_))
+    # Read before anything is written, so a body refused leaves no record and no brief behind.
+    body = None if args.body is None else _body(args.body)
+    made = write(state, here.root, args, cli.one_line(slice_), body)
+    return made if body is None else check(args, state, here.root, args.name)
+
+
+def _body(path: Path) -> list[str]:
+    """The lines of a brief's body file: its lists and its four sections, the header's first three lines left out.
+
+    The verb writes those three from the state and git, so a value typed there would stand in for them.
+    """
+    try:
+        text = path.read_bytes().decode("utf-8")
+    except (OSError, UnicodeDecodeError) as error:
+        raise Refused(f"the body {path} cannot be read: {error}") from None
+    lines = text.splitlines()
+    typed = [line for line in _head(lines) if FIRST_RE.match(line) or line.startswith(("Base:", "Report:"))]
+    if typed:
+        raise Refused(f"the body {path} holds `{typed[0]}`: leave the header's first three lines to the verb")
+    return lines
 
 
 def _planned(state: Path, slice_: str) -> list[str]:
@@ -323,7 +349,14 @@ def _planned(state: Path, slice_: str) -> list[str]:
     return []
 
 
-def write(state: Path, root: Path, name: str, kind: model.AgentType, slice_: str) -> int:
+def write(state: Path, root: Path, args: argparse.Namespace, slice_: str, body: list[str] | None) -> int:
+    """The header of the brief `args` names written from the state and git, with `body`'s lines below it where given.
+
+    A body naming no `Owns:` gets the one its slice's line in PLAN.md names; one naming it keeps its own,
+    such as the planned paths with `(new)` added.
+    """
+    name: str = args.name
+    kind: model.AgentType = args.type
     path = brief_path(state, name)
     if path.exists():
         raise Refused(f"{path} exists, and what is written in it would be lost: edit it, or choose another name")
@@ -339,20 +372,26 @@ def write(state: Path, root: Path, name: str, kind: model.AgentType, slice_: str
         return model.to_record(made)
 
     store.update_json(model.agent_path(state, name), create)
-    text = "\n".join(
-        [
-            f"Agent: {name}    Type: {kind}    Slice: {slice_}",
-            f"Base: {session.branch} at {commit}",
-            f"Report: {report.path(state, name)}",
+    first = [
+        f"Agent: {name}    Type: {kind}    Slice: {slice_}",
+        f"Base: {session.branch} at {commit}",
+        f"Report: {report.path(state, name)}",
+    ]
+    if body is None:
+        rest = [
             *(f"{label}: {', '.join(owns)}" if label == "Owns" and owns else f"{label}:" for label in LISTS),
             "",
             *SECTIONS,
-            "",
         ]
-    )
-    store.write_text(path, text)
+    else:
+        named = any((found := LABEL_RE.match(line)) and found["label"] == "Owns" for line in _head(body))
+        rest = [*([f"Owns: {', '.join(owns)}"] if owns and not named else []), *body]
+    store.write_text(path, "\n".join([*first, *rest, ""]))
     store.write_text(path.with_name(f"{name}.messages.md"), "")
     print(path)
+    if body is not None:
+        # The check that follows says what the brief still lacks.
+        return DONE
     briefed = f"{name} briefed as {report.article(kind)} on {slice_}"
     if owns:
         print(
