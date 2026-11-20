@@ -35,7 +35,7 @@ BUDGETS = {
     "skills/end/SKILL.md": 500,
     "skills/resume/SKILL.md": 500,
     "skills/plan/SKILL.md": 1913,
-    "skills/agent/SKILL.md": 7009,
+    "skills/agent/SKILL.md": 7131,
     "agents/writer.md": 7249,
     "agents/driver.md": 5000,
     "agents/researcher.md": 4500,
@@ -79,7 +79,8 @@ RULES = {
         "so append no `; echo exit=$?`",
         "in a worktree, run each command plain from its root, with no `;`, `$?`, `$VAR`, `$(...)`, loop, heredoc"
         " or `git -C`",
-        "A driver, and a writer that has committed nothing, lose their worktree when they stop",
+        "A worktree holding no commit goes at the stop, so a writer commits what is done before it stops",
+        "since a successor takes the answer",
     ),
     "skills/run/SKILL.md": (
         "a dispatch waits for nothing but its `after:` edges and its files",
