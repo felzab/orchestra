@@ -84,6 +84,9 @@ JUDGED = 8
 DISCLOSURE_ONLY = ("disclosure",)
 # When the previous prompt arrived, for the clock line.
 PROMPT = "prompt.json"
+# The labels of the overview's rows naming judged and pruned agents, left out of the one given back after a
+# compaction or a resume: one long session spent 17% of those overviews' characters on them.
+FINISHED_ROWS = frozenset({"judged", "pruned"})
 # The share of the compaction window from which each prompt tells the coordinator its context nears it, so that it
 # compacts at its next seam before Claude Code compacts wherever the work stands. On one long coordinator day of the
 # maintainer's, the owner's six compactions at seams fell at 0.75 to 0.91 of the 500,000-token window, and the seven
@@ -990,6 +993,8 @@ def _waits(agents: list[model.Agent], entries: list[log.Entry]) -> bool:
 def session_start(where: Where) -> str | None:
     """The state's path, the head of `orchestra status` and NOW.md, given back after a compaction or a resume.
 
+    The overview leaves out its rows naming judged and pruned agents, `FINISHED_ROWS`; `orchestra status` keeps them.
+
     After a `/clear` the new session holds no lease, and no input names the session it replaced, so it
     is told only that a `/clear` stopped this state a moment ago, never that the stopped session was its own.
     """
@@ -1007,6 +1012,8 @@ def session_start(where: Where) -> str | None:
     )
     try:
         shown, summary = overview(clock, state, root, where.session)
+        # The rows naming finished agents, which nothing after a compaction acts on; the `agents` row counts them.
+        shown = [line for line in shown if line.split(" ", 1)[0] not in FINISHED_ROWS]
         lines += [f"`orchestra status` at {clock.isoformat(timespec='seconds')}:", *shown[: cli.LINES - 2], summary]
     except Refused as refused:
         lines.append(f"`orchestra status` cannot be read: {refused}")

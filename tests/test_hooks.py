@@ -1201,6 +1201,27 @@ def test_a_compaction_or_a_resume_reads_the_state_back_from_disk(project: Path, 
     assert not any(line.startswith("now ") for line in context.splitlines())
 
 
+def test_the_overview_after_a_compaction_leaves_out_judged_and_pruned_agents_and_keeps_what_waits(
+    project: Path, state: Path
+) -> None:
+    """Nothing after a compaction acts on a finished agent; `agents` still counts it and `status` still names it."""
+    for name, ident in (("RUN", "r1"), ("TOJUDGE", "t1"), ("ASKS", "q1"), ("DONE", "d1"), ("GONE", "g1")):
+        briefed(project, name, "auditor")
+        dispatched(project, name, "auditor", ident)
+    changed(state, "TOJUDGE", status="reported", outcome="DONE")
+    changed(state, "ASKS", status="reported", outcome="NEEDS-ANSWER")
+    changed(state, "DONE", status="judged", outcome="DONE")
+    changed(state, "GONE", status="pruned", outcome="DONE")
+    lines = context_of(hook("SessionStart", project, source="compact")[1], "SessionStart").splitlines()
+    assert "agents    1 running, 2 reported, 1 judged, 1 pruned" in lines
+    assert "suspect   RUN (auditor, round 1): running, but no transcript found for r1" in lines
+    assert "to judge  TOJUDGE (auditor, round 1, DONE)" in lines
+    assert "NEEDS-ANSWER ASKS (auditor, round 1): its report waits on you" in lines
+    assert not [line for line in lines if line.startswith(("judged ", "pruned "))]
+    shown = run("status", cwd=project).stdout.splitlines()
+    assert [line for line in shown if line.startswith(("judged ", "pruned "))] == ["judged    DONE", "pruned    GONE"]
+
+
 def test_each_prompt_carries_the_clock_and_a_gap_past_half_an_hour_names_usage(project: Path, state: Path) -> None:
     said = hook("UserPromptSubmit", project, prompt="go")[1]
     first = context_of(said, "UserPromptSubmit")
