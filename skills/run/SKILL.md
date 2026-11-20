@@ -22,7 +22,7 @@ The program `orchestra` owns the session's state; you own `PLAN.md` and `NOW.md`
 | a fresh session, before the first agent | [start.md](start.md) |
 | before writing a brief | [brief.md](brief.md) |
 | a wave has landed, or the turn-end hook says it is due | [checkpoint.md](checkpoint.md) |
-| the session's files have stopped moving | [review.md](review.md) |
+| the plan's last writers are out | [review.md](review.md) |
 | one wave and the ending remain | [end.md](end.md), and [handoff.md](handoff.md) at its step 9 |
 | after any stop or gap | [resume.md](resume.md) |
 
