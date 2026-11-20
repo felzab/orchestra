@@ -130,6 +130,15 @@ def test_a_writers_optional_rows_fixed_line_names_its_rows_each_faulted_where_it
         assert any(problem.startswith("line 7 `Rows fixed: A-F2.`: no item line") for problem in found), (kind, found)
 
 
+@pytest.mark.parametrize("fixed", ["none.", "none", "None."])
+def test_a_writers_rows_fixed_line_reading_none_names_no_row(fixed: str) -> None:
+    """A brief's header writes `Rows: none` for a slice with no row, and a report may answer it in kind."""
+    held, said = report.parse(text(fixed=fixed), "writer", "FE", 1)
+    assert said == []
+    assert held is not None
+    assert held.rows == ()
+
+
 def test_a_writers_rows_fixed_line_is_left_out_of_the_summarys_byte_cap() -> None:
     """The line names every row the branch fixes, an earlier round's included, so it grows with the work as the
     item lines do: sixty rows pass beside a sentence that fits the cap only without them."""
