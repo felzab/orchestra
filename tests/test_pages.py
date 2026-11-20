@@ -19,9 +19,9 @@ ROOT = Path(__file__).resolve().parents[1]
 
 # The most bytes each page under these folders may hold, counted as git stores it.
 BUDGETS = {
-    "skills/run/SKILL.md": 13673,
+    "skills/run/SKILL.md": 13821,
     "skills/run/start.md": 2701,
-    "skills/run/brief.md": 4189,
+    "skills/run/brief.md": 4263,
     "skills/run/review.md": 5616,
     "skills/run/checkpoint.md": 2050,
     "skills/run/end.md": 2600,

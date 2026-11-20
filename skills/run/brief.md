@@ -1,6 +1,6 @@
 # Writing a brief
 
-A brief is read once, by an agent that knows nothing else about the work. Its definition holds the bar and every standing rule, so the brief holds only this work. The program writes the header's first three lines and a writer's `Owns:` from its slice's line, to which you add `(new)` where due; you fill the other lists and write the four sections.
+A brief is read once, by an agent that knows nothing else about the work. Its definition holds the bar and every standing rule, so the brief holds only this work. The program writes the header's first three lines and a writer's `Owns:` from its slice's line; your `--body` file holds the other lists and the four sections, and an `Owns:` of its own where `(new)` is due.
 
 ```text
 Agent: API-RETRY    Type: writer    Slice: S3
@@ -48,4 +48,4 @@ Size a brief by what losing its agent's whole output would cost. It carries ever
 
 ## The check
 
-`orchestra brief NAME --check` stamps the brief, and an edit after it clears the stamp, so check again. A checked brief you will not dispatch goes on refusing every brief that overlaps it; edit it to clear the stamp.
+`orchestra brief NAME --check` stamps the brief, and an edit after it clears the stamp, so check again. A checked brief you will not dispatch goes on refusing every brief that overlaps it; `orchestra prune --discard NAME` removes it and returns its slice to `planned`.
