@@ -153,7 +153,9 @@ The fixes from the third project session that ran on the plugin.
 - `orchestra land NAME` on a branch the session branch already holds stamps the agent landed where
   its judged report says its work is done, and not where it stopped on a question or where a round
   after that report stopped before its own; a writer whose `DONE` branch was lost before it landed
-  no longer reads as landed, and its slice stays to do.
+  no longer reads as landed, and its slice stays to do. The judged report's own status decides, also
+  where a usage limit ended its round, which left the record holding the round before's, and the log
+  records such a landing only where the record was stamped.
 - `orchestra land NAME` on a branch with no commit of its own that took in the session branch by a
   fast-forward, as an agent merges the session branch into its own, reads nothing to land, where it
   closed every row the agent's report names fixed with another agent's landing as the evidence. A
