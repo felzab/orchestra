@@ -43,6 +43,8 @@ NO_FLEET = (
     "except SystemExit as done:\n"
     "    print(done.code)\n"
     "heavy = {'orchestra.cli', 'orchestra.config', 'orchestra.store', 'orchestra.events', 'argparse', 'subprocess'}\n"
+    # Before Python 3.13, `pathlib` imports `urllib.parse` itself, so only from 3.13 is its absence the hook's.
+    "heavy |= {'urllib.parse'} if sys.version_info >= (3, 13) else set()\n"
     "print(sorted(heavy & set(sys.modules)))\n"
 )
 # One event answered as the launcher answers it, then which of the fleet's heavier modules it loaded.
@@ -1154,6 +1156,13 @@ def test_an_attended_turns_end_reads_no_transcript(project: Path, state: Path, m
     store.write_json(state / store.AWAY, {"since": model.now(), "until": None, "log": 0, "files": []})
     said = context_of(hook("Stop", project, stop_hook_active=False, background_tasks=[])[1], "Stop")
     assert '- nothing runs, and no `orchestra note --waiting "<what>"` names what the session waits on' in said
+    # A background task running says something runs, so no transcript is read to ask whether an agent works.
+    with monkeypatch.context() as patched:
+        patched.setattr(context, "working", refused)
+        patched.setattr(context, "transcript", refused)
+        code, said = hook("Stop", project, stop_hook_active=False, background_tasks=[{"id": "t1"}])
+    assert code == 0
+    assert "nothing runs" not in str(said)
 
 
 def test_a_turns_end_hands_the_queue_what_it_read(project: Path, state: Path, monkeypatch: pytest.MonkeyPatch) -> None:
