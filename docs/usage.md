@@ -322,7 +322,7 @@ does not know is refused, naming its path in the file.
   "base": "main",
   "models": {
     "default": { "model": "opus", "effort": "high" },
-    "mechanical": { "model": "sonnet", "effort": "medium" }
+    "mechanical": { "model": "sonnet", "effort": "high" }
   },
   "queues": ["review"],
   "preflight": [{ "run": ["docker", "info"], "why": "the integration tests start a database container" }],
@@ -373,8 +373,12 @@ does not know is refused, naming its path in the file.
   line; a name the configuration does not hold is refused. With no `default`, the dispatch sets no
   model and Claude Code chooses.
 - **`contextCeiling`** is the context, in tokens, past which a hook refuses the coordinator's message
-  that would resume an agent, except the answer to an agent stopped on a question and still waiting
-  on it, since a resume sends the agent's whole context again. The default is 200,000.
+  that would resume an agent once the agent's prompt cache has lapsed, since such a resume writes the
+  agent's whole context to the cache again. A resume within five minutes of the agent's transcript
+  last being written, a subagent's cache lifetime by default
+  ([prompt caching](https://code.claude.com/docs/en/prompt-caching), "Which TTL each request gets"),
+  reads that context from the cache and goes ahead, as does the answer to an agent stopped on a
+  question and still waiting on it. The default is 200,000.
 - **`queues`** adds owners a row can be routed to besides an agent, beyond the built-in `owner`,
   `ending` and `handoff`.
 - **`preflight`** lists commands that must exit 0 before a session can work, each with `run`, the

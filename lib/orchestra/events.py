@@ -66,10 +66,16 @@ WRITERS = {"Edit": "file_path", "Write": "file_path", "NotebookEdit": "notebook_
 REF_RE = re.compile(r"\s*\[[^\]]*\]$")
 # Past this many minutes since the previous prompt, a usage figure read before it is stale.
 STALE_MINUTES = 30
+# A subagent's prompt cache lifetime, five minutes unless a setting lengthens it (Claude Code's prompt-caching.md,
+# "Which TTL each request gets"). A resume within it reads the agent's context from the cache, so the ceiling,
+# which spares the cost of writing that context again, waits until it has lapsed.
+CACHE_MINUTES = 5
 # Log entries newer than NOW.md past which it no longer says where the session stands.
 NOW_EVENTS = 5
 # The most an `additionalContext` carries before Claude Code moves it to a file.
 CONTEXT_CHARS = 10_000
+# The room NOW.md leaves the overview's rows at the least: their count line, where every row is cut, and its line end.
+STATUS_CUT_CHARS = 80
 # The coordinator's own files in the state; every other file there is written by commands and hooks.
 OWN = frozenset({store.PLAN, store.NOW})
 # The project's own rules for each agent type, `<type>.md`, in the primary checkout.
@@ -136,6 +142,8 @@ class Where:
     agent: model.Agent | None
     # Whether the main session's id holds the state's lease.
     coordinator: bool
+    # The branch's pointer `hooks` read from git's own files, `<common>/orchestra/<branch>`; None where git found it.
+    pointer: Path | None
 
     @property
     def session(self) -> str | None:
@@ -145,13 +153,36 @@ class Where:
 
     @functools.cached_property
     def root(self) -> Path | None:
-        """The primary checkout, from git, which only the events reading the project run; None without a state."""
+        """The primary checkout, read only by the events that use it; None without a state.
+
+        It is the checkout `session.json` records where that folder's `.git` is the common directory holding the
+        pointer, since git names the folder holding a `.git` common directory the primary worktree
+        (gitrepository-layout(5)). Any other layout, and an older record naming none, asks git, at two runs.
+        """
         if self.state is None:
             return None
+        if (recorded := _recorded(self.state, self.pointer)) is not None:
+            return recorded
         try:
             return config.checkout(self.place).root
         except Refused:
             return None
+
+
+def _recorded(state: Path, pointer: Path | None) -> Path | None:
+    """The checkout `session.json` records, where its `.git` folder is the common directory holding `pointer`."""
+    if pointer is None:
+        return None
+    try:
+        held = model.read_session(state).checkout
+    except (Refused, OSError):
+        # Unreadable or missing, git decides, as it did before the record named a checkout.
+        return None
+    if held is None:
+        return None
+    root = Path(held)
+    dot = root / ".git"
+    return root if dot.is_dir() and config.identical(dot, pointer.parent.parent) else None
 
 
 def answer(event: str, data: Record, *, held: Path | bool, place: Path | None) -> str | None:
@@ -254,7 +285,8 @@ def _where(data: Record, *, held: Path | bool, place: Path) -> Where:
         else:
             owner = store.lease(state).get("owner")
             coordinator = owner is not None and owner == data.get("session_id")
-    return Where(data, cwd, place, state, agent_id, plugin, agent, coordinator)
+    pointer = held if isinstance(held, Path) else None
+    return Where(data, cwd, place, state, agent_id, plugin, agent, coordinator, pointer)
 
 
 def _quietly(act: Callable[[], object]) -> None:
@@ -540,7 +572,8 @@ def _addressee(state: Path, to: object) -> model.Agent | None:
 def _resume(where: Where, given: Record) -> str | None:
     """A resume refused where its worktree is gone, its report unjudged or its context too large; else its next report.
 
-    The context's ceiling spares the answer to a report stopped on a question, which closes that round.
+    The context's ceiling spares the answer to a report stopped on a question, which closes that round, and a
+    resume while the agent's cache is warm, which reads its context rather than writing it again.
 
     A message to an agent mid-turn resumes nothing: it reads it at its next turn. A `running` record whose
     turn ended is resumed, since the send that wrote it may never have landed.
@@ -568,10 +601,12 @@ def _resume(where: Where, given: Record) -> str | None:
         # `running` lets a resend through whose first send failed; a usage stop keeps the old outcome but waits
         # on no answer, so the ceiling applies again.
         size, ceiling = context.size(agent, where.session), config.load(root).context_ceiling
-        if size is not None and size > ceiling:
+        # Read last, so a resume under the ceiling globs no transcript twice.
+        if size is not None and size > ceiling and (cold := _cold(agent, where.session)) is not None:
             why = (
-                f"{name}'s context is {size:,} tokens, over the configuration's contextCeiling of {ceiling:,}:"
-                " a resume sends it all again, so dispatch a successor briefed with what is left"
+                f"{name}'s context is {size:,} tokens, over the configuration's contextCeiling of {ceiling:,}, and"
+                f" {cold}: a resume writes it all to the cache again, so dispatch a successor briefed with what is"
+                " left"
             )
     if why is not None and not _waived(where, f"the resume of {name}"):
         return _deny(why)
@@ -588,6 +623,25 @@ def _resume(where: Where, given: Record) -> str | None:
     else:
         told = f"This is round {following}: write its report to {path}, titled `round {following}`."
     return _allow({**given, "message": f"{message.rstrip()}\n\n{told}"})
+
+
+def _cold(agent: model.Agent, session: str | None) -> str | None:
+    """Why the agent's prompt cache may have lapsed; None while its transcript was written within `CACHE_MINUTES`.
+
+    Read from the file's mtime, as `context.ended` reads it. A transcript that cannot be read counts as cold,
+    so the ceiling holds wherever the cache cannot be shown warm.
+    """
+    path = context.transcript(agent, session)
+    if path is None:
+        return "no transcript shows when it last ran"
+    try:
+        written = path.stat().st_mtime
+    except OSError as error:
+        return f"its transcript cannot be read: {error}"
+    seconds = datetime.datetime.now(datetime.UTC).timestamp() - written
+    if seconds < CACHE_MINUTES * 60:
+        return None
+    return f"its transcript was last written {int(seconds // 60)} min ago, past the {CACHE_MINUTES}-min cache"
 
 
 def _settle(state: Path, agent: model.Agent) -> str:
@@ -703,27 +757,33 @@ def permission_denied(where: Where) -> str | None:
 
 
 def post_tool_use(where: Where) -> str | None:
-    if not where.coordinator or where.state is None or where.root is None:
+    # The root is read only where rows are routed, so a git fault never drops a dispatch's record or a message.
+    if not where.coordinator or where.state is None:
         return None
     given = context.as_object(where.data.get("tool_input"))
     tool = where.data.get("tool_name")
     if tool == "Agent":
         response = context.as_object(where.data.get("tool_response"))
-        said = _dispatched(where.state, where.root, given, response, where.session)
+        said = _dispatched(where, where.state, given, response)
     elif tool == "SendMessage":
-        said = _sent(where.state, where.root, given, where.session)
+        said = _sent(where, where.state, given)
     else:
         said = None
     return _context("PostToolUse", said) if said else None
 
 
-def _route_to(state: Path, root: Path, name: str, rows: list[str], session: str | None) -> str | None:
+def _route_to(where: Where, state: Path, name: str, rows: list[str]) -> str | None:
     """Each row routed to the agent on its own, so a row another agent holds keeps no other from it; what was not."""
     if not rows:
         return None
+    root = where.root
+    if root is None:
+        named = " ".join(rows)
+        why = "git cannot find the primary checkout"
+        return f"Not routed to {name}: {why}; `orchestra route {name} {named}` routes them"
     owner = findings.owners(state, root)(name)
     # Read once for every row: each running agent's transcript is read to judge it, and the hook's caller waits.
-    held = findings.live(state, session)
+    held = findings.live(state, where.session)
     refused: list[str] = []
     for row in rows:
         try:
@@ -733,7 +793,7 @@ def _route_to(state: Path, root: Path, name: str, rows: list[str], session: str 
     return f"Not routed to {name}: {'; '.join(refused)}" if refused else None
 
 
-def _dispatched(state: Path, root: Path, given: Record, response: Record, session: str | None) -> str | None:
+def _dispatched(where: Where, state: Path, given: Record, response: Record) -> str | None:
     """The id the harness gave a dispatched agent and `running` in its record, and its brief's `Rows:` routed to it.
 
     Routed here, so a row a brief names is the agent's as a row a message names is, and its landing closes it.
@@ -757,10 +817,10 @@ def _dispatched(state: Path, root: Path, given: Record, response: Record, sessio
 
     agent = model.update_agent(state, name, start)
     log.record(state, log.DISPATCH, f"{name} as {ident} on {agent.model or 'the inherited model'}")
-    return _route_to(state, root, name, list(brief.header(state, name).rows), session)
+    return _route_to(where, state, name, list(brief.header(state, name).rows))
 
 
-def _sent(state: Path, root: Path, given: Record, session: str | None) -> str | None:
+def _sent(where: Where, state: Path, given: Record) -> str | None:
     """A message kept in its agent's messages file, and its `Rows:` routed; the resume is `_resume`'s."""
     agent = _addressee(state, given.get("to"))
     if agent is None:
@@ -770,7 +830,7 @@ def _sent(state: Path, root: Path, given: Record, session: str | None) -> str | 
     if text.strip():
         _keep_message(state, agent.name, text)
     rows = [row[0] for line in ROWS_RE.finditer(text) for row in model.ROW_RE.finditer(line["rows"])]
-    return _route_to(state, root, agent.name, rows, session)
+    return _route_to(where, state, agent.name, rows)
 
 
 def _keep_message(state: Path, name: str, text: str) -> None:
@@ -903,12 +963,9 @@ def stop(where: Where) -> str | None:
     ]
     undone += [f"queue item {item.number} is due: {item.text}" for item in queue.due(state)]
     entries = log.entries(state)
-    tasks = where.data.get("background_tasks")
-    busy = any(context.working(agent, where.session) for agent in agents) or (
-        isinstance(tasks, list) and len(typing.cast("list[object]", tasks)) > 0
-    )
-    # A session nobody watches must never stall unseen; an attended one ends its turn in front of its owner.
-    if not busy and not _waits(agents, entries) and (state / store.AWAY).exists():
+    # A session nobody watches must never stall unseen; an attended one ends its turn in front of its owner. So
+    # each agent's transcript is read only while away, and last: an attended turn's end reads none.
+    if (state / store.AWAY).exists() and not _waits(agents, entries) and not _busy(where, agents):
         undone.append('nothing runs, and no `orchestra note --waiting "<what>"` names what the session waits on')
     now = state / store.NOW
     if now.is_file():
@@ -928,6 +985,14 @@ def stop(where: Where) -> str | None:
     if not undone:
         return None
     return _context("Stop", "Undone in this orchestra session:\n" + "\n".join(f"- {line}" for line in undone))
+
+
+def _busy(where: Where, agents: list[model.Agent]) -> bool:
+    """Whether a background task runs, or an agent's transcript says it may still be working, read in that order."""
+    tasks = where.data.get("background_tasks")
+    if isinstance(tasks, list) and len(typing.cast("list[object]", tasks)) > 0:
+        return True
+    return any(context.working(agent, where.session) for agent in agents)
 
 
 def _writer(agents: list[model.Agent], dispatched: str) -> bool:
@@ -1012,6 +1077,10 @@ def session_start(where: Where) -> str | None:
 
     The overview leaves out its rows naming judged and pruned agents, `FINISHED_ROWS`; `orchestra status` keeps them.
 
+    The whole stays within `CONTEXT_CHARS`, past which Claude Code keeps a preview and asks nobody to read the rest
+    (hooks.md, "JSON output"). NOW.md, the plan of record the coordinator goes on from, takes the room first; the
+    overview's rows fill what is left, and a line names any cut, so neither is ever cut unseen.
+
     After a `/clear` the new session holds no lease, and no input names the session it replaced, so it
     is told only that a `/clear` stopped this state a moment ago, never that the stopped session was its own.
     """
@@ -1021,22 +1090,65 @@ def session_start(where: Where) -> str | None:
     if not where.coordinator or state is None or root is None:
         return None
     clock = datetime.datetime.now().astimezone()
-    lines = [f"This session coordinates the orchestra session whose state is {state}."]
+    intro = f"This session coordinates the orchestra session whose state is {state}."
     # Imported here, since no other event reads it and every hook would pay for its imports.
     overview = typing.cast(
         "Callable[[datetime.datetime, Path, Path, str | None], tuple[list[str], str]]",
         importlib.import_module("orchestra.status").coordinator,
     )
+    rows: list[str] = []
+    tail: list[str] = []
     try:
         shown, summary = overview(clock, state, root, where.session)
         # The rows naming finished agents, which nothing after a compaction acts on; the `agents` row counts them.
-        shown = [line for line in shown if line.split(" ", 1)[0] not in FINISHED_ROWS]
-        lines += [f"`orchestra status` at {clock.isoformat(timespec='seconds')}:", *shown[: cli.LINES - 2], summary]
+        rows = [line for line in shown if line.split(" ", 1)[0] not in FINISHED_ROWS]
+        head, tail = f"`orchestra status` at {clock.isoformat(timespec='seconds')}:", [summary]
     except Refused as refused:
-        lines.append(f"`orchestra status` cannot be read: {refused}")
+        head = f"`orchestra status` cannot be read: {refused}"
     now = state / store.NOW
-    lines += ["", "NOW.md:", store.read_bytes(now).decode("utf-8", "replace") if now.is_file() else "(none)"]
-    return _context("SessionStart", "\n".join(lines))
+    held = store.read_bytes(now).decode("utf-8", "replace") if now.is_file() else "(none)"
+    # Every line but the rows and NOW.md, each with its line end, NOW.md's own included.
+    fixed = len("\n".join([intro, head, *tail, "", "NOW.md:", ""]))
+    kept = _head_of(held, CONTEXT_CHARS - fixed - STATUS_CUT_CHARS, now)
+    rows = _rows_within(rows, CONTEXT_CHARS - fixed - len(kept))
+    return _context("SessionStart", "\n".join([intro, head, *rows, *tail, "", "NOW.md:", kept]))
+
+
+def _head_of(text: str, room: int, path: Path) -> str:
+    """The text whole where it fits in `room` characters; else its head, cut at a line end, and a line naming it."""
+    if len(text) <= room:
+        return text
+
+    def cut(left: int) -> str:
+        return f"\n... {left:,} more character(s) of NOW.md left out: {path} holds it whole"
+
+    # The longest such line, so the head and the line fit whatever the count turns out to be.
+    keep = max(0, room - len(cut(len(text))))
+    end = text.rfind("\n", 0, keep)
+    head = text[: end if end > 0 else keep]
+    return head + cut(len(text) - len(head))
+
+
+def _rows_within(rows: list[str], room: int) -> list[str]:
+    """The rows whole where they fit in `room` characters and the lines a verb prints; else their head and a count.
+
+    Counted as `cli.emit` counts a verb's lines, so the overview cuts where `orchestra status` would.
+    """
+    limit = cli.LINES - 2
+    if len(rows) <= limit + 1 and sum(len(row) + 1 for row in rows) <= room:
+        return rows
+
+    def count(cut: int) -> str:
+        return f"... {cut} more line(s): `orchestra status` lists them"
+
+    budget = room - len(count(len(rows))) - 1
+    kept: list[str] = []
+    for row in rows[:limit]:
+        if budget < len(row) + 1:
+            break
+        kept.append(row)
+        budget -= len(row) + 1
+    return [*kept, count(len(rows) - len(kept))]
 
 
 def _cleared(state: Path) -> str | None:

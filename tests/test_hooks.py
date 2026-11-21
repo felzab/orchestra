@@ -251,6 +251,25 @@ def test_a_fleets_edit_loads_no_status_and_a_prompt_at_work_loads_no_events(proj
     assert loaded(project, "PermissionRequest", BASH) == ["orchestra.events"]
 
 
+def test_an_agents_message_loads_no_events_and_no_fault_denies_it(project: Path, state: Path) -> None:
+    """Only the coordinator's message resumes an agent or routes its rows, so an agent's decides nothing.
+
+    Loaded, `events` could only fault on it, and a fault denies a plugin agent's call: the agent's word to its
+    coordinator would be refused.
+    """
+    briefed(project, "A", "auditor")
+    dispatched(project, "A", "auditor", "a1")
+    message: dict[str, object] = {"tool_name": "SendMessage", "tool_input": {"to": "main", "message": "F1 blocks"}}
+    fields = inside(project, "a1", "auditor")
+    assert loaded(project, "PreToolUse", fields, message) == []
+    assert loaded(project, "PostToolUse", fields, message, {"tool_response": {}}) == []
+    # A record an older or newer build wrote faults every event that reads the records.
+    (state / "agents" / "Z.json").write_bytes(b'{"name": "Z", "type": "auditor", "laterField": 1}\n')
+    assert hook("PreToolUse", project, fields, message) == (0, None)
+    # The same fault still denies the agent's write, which the records decide.
+    assert decision(hook("PreToolUse", project, fields, edit(project / "lib" / "a.py"), quiet=False)[1])[0] == "deny"
+
+
 @pytest.mark.usefixtures("state")
 def test_another_session_in_the_same_checkout_gets_no_answer(project: Path) -> None:
     assert hook("Stop", project, session_id=OTHER, process=OTHER) == (0, None)
@@ -624,16 +643,29 @@ def test_a_resume_of_a_writer_whose_worktree_is_gone_is_refused(project: Path, s
     )
 
 
-def test_a_resume_past_the_context_ceiling_is_refused_naming_the_figure(project: Path, state: Path) -> None:
+def test_a_resume_past_the_context_ceiling_is_refused_naming_the_figure_once_its_cache_has_lapsed(
+    project: Path, state: Path
+) -> None:
+    """A resume within a subagent's five-minute cache reads its context, which costs about what a successor does."""
     write_config(project, {"stateRoot": (project.parent / "state").as_posix(), "contextCeiling": 100_000})
     briefed(project, "A", "auditor")
     dispatched(project, "A", "auditor", "a1")
     changed(state, "A", status="judged")
-    transcript(project.parent / "claude-config", "a1", line("assistant", "m1", 150_000))
+    config_dir = project.parent / "claude-config"
+    transcript(config_dir, "a1", line("assistant", "m1", 150_000), minutes=events.CACHE_MINUTES + 1)
     said = hook("PreToolUse", project, tool_name="SendMessage", tool_input={"to": "A", "message": "fix F1"})[1]
-    assert str(decision(said)[1]).startswith(
-        "A's context is 150,474 tokens, over the configuration's contextCeiling of 100,000"
+    assert decision(said) == (
+        "deny",
+        "A's context is 150,474 tokens, over the configuration's contextCeiling of 100,000, and its transcript was"
+        " last written 6 min ago, past the 5-min cache: a resume writes it all to the cache again, so dispatch a"
+        " successor briefed with what is left",
     )
+    # Written a moment inside the cache's lifetime, the same resume goes ahead.
+    transcript(config_dir, "a1", line("assistant", "m1", 150_000), minutes=events.CACHE_MINUTES - 0.5)
+    said = hook("PreToolUse", project, tool_name="SendMessage", tool_input={"to": "A", "message": "fix F1"})[1]
+    assert decision(said)[0] == "allow"
+    changed(state, "A", status="judged")
+    transcript(config_dir, "a1", line("assistant", "m1", 150_000), minutes=events.CACHE_MINUTES + 1)
     # Under the ceiling, the same resume goes ahead.
     write_config(project, {"stateRoot": (project.parent / "state").as_posix(), "contextCeiling": 200_000})
     said = hook("PreToolUse", project, tool_name="SendMessage", tool_input={"to": "A", "message": "fix F1"})[1]
@@ -648,7 +680,8 @@ def test_a_writer_stopped_on_a_question_past_the_ceiling_is_answered_and_a_finis
     briefed(project, "W", "writer", owns="lib/a.py")
     dispatched(project, "W", "writer", "w1")
     git(project, "worktree", "add", "-b", "worktree-agent-w1", str(project.parent / "trees" / "agent-w1"))
-    transcript(project.parent / "claude-config", "w1", line("assistant", "m1", 150_000))
+    stale = events.CACHE_MINUTES + 1
+    transcript(project.parent / "claude-config", "w1", line("assistant", "m1", 150_000), minutes=stale)
     sent = {"to": "W", "message": "Keep the old name."}
     changed(state, "W", status="judged", outcome="DONE", branch="worktree-agent-w1")
     said = hook("PreToolUse", project, tool_name="SendMessage", tool_input=sent)[1]
@@ -926,6 +959,58 @@ def test_a_turns_end_lists_the_worktrees_once_for_every_report_stopped_on_a_ques
     assert runs() == one, ran
 
 
+def test_the_root_comes_from_session_json_where_exact_and_a_git_fault_drops_no_dispatch(
+    project: Path, state: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Every prompt and post-call event read the primary checkout, which two git runs found, though the state names it.
+
+    The recorded checkout is the root where its `.git` folder is the common directory holding the branch's
+    pointer; any other, a moved checkout among them, asks git. A dispatch reads the root only to route its rows,
+    so a git fault leaves its record written and names the rows left unrouted.
+    """
+    banked = [model.FindingEvent("X-F1", "bank", "OPEN"), model.FindingEvent("X-F2", "bank", "OPEN")]
+    model.write_findings(state, lambda _: banked)
+    briefed(project, "A", "auditor", rows="X-F1")
+    briefed(project, "B", "auditor", rows="X-F2")
+    main = project.parent / "main.jsonl"
+    main.write_bytes(line("assistant", "m1", 400_000))
+    near = "Your context is 400,474 tokens, at least 75% of the 500,000-token compaction window"
+    ran: list[tuple[str, ...]] = []
+    started = process.run
+    broken: list[bool] = []
+
+    def counted(argv: Sequence[str], **given: Any) -> subprocess.CompletedProcess[bytes]:
+        if argv[0] == "git":
+            ran.append(tuple(argv))
+            if broken:
+                return subprocess.CompletedProcess(argv, 128, b"", b"fatal: not a git repository")
+        return started(argv, **given)
+
+    def prompted() -> str:
+        said = hook("UserPromptSubmit", project, prompt="go", transcript_path=str(main))[1]
+        return context_of(said, "UserPromptSubmit")
+
+    monkeypatch.setattr(process, "run", counted)
+    assert near in prompted()
+    assert dispatched(project, "A", "auditor", "a1") is None
+    assert model.read_findings(state)["X-F1"].owner == "A"
+    assert ran == []
+    # A checkout recorded elsewhere, as after a move, is no proof: git finds the root, and it is the same.
+    facts = model.read_session(state)
+    model.write_session(state, dataclasses.replace(facts, checkout=str(project.parent / "moved")))
+    assert near in prompted()
+    assert [argv[3] for argv in ran] == ["rev-parse", "worktree"]
+    # With git failing, the dispatch is recorded all the same, and its rows wait for `orchestra route`.
+    broken.append(True)
+    said = dispatched(project, "B", "auditor", "b1")
+    assert context_of(said, "PostToolUse") == (
+        "Not routed to B: git cannot find the primary checkout; `orchestra route B X-F2` routes them"
+    )
+    agent = model.read_agent(state, "B")
+    assert (agent.ids, agent.status) == (("b1",), "running")
+    assert model.read_findings(state)["X-F2"].status == "OPEN"
+
+
 def test_a_writer_stopped_on_a_question_whose_worktree_stands_waits_on_its_answer(project: Path, state: Path) -> None:
     """Its answer resumes it in its worktree, so `judge` waits for the report that answer completes."""
     briefed(project, "W", "writer", owns="lib/a.py")
@@ -990,6 +1075,27 @@ def test_an_idle_turn_continues_only_while_nobody_watches(project: Path, state: 
     changed(state, "A", status="stopped", reason="usage limit")
     # Stamped past the note's second, which the log's stamps hold alone.
     changed(state, "A", since={"stopped": later})
+    said = context_of(hook("Stop", project, stop_hook_active=False, background_tasks=[])[1], "Stop")
+    assert '- nothing runs, and no `orchestra note --waiting "<what>"` names what the session waits on' in said
+
+
+def test_an_attended_turns_end_reads_no_transcript(project: Path, state: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Whether an agent works matters only while nobody watches, and each read costs the owner's turn its wait."""
+    briefed(project, "A", "auditor")
+    dispatched(project, "A", "auditor", "a1")
+
+    def refused(*_: object) -> None:
+        raise AssertionError("a transcript was read")
+
+    with monkeypatch.context() as patched:
+        patched.setattr(context, "working", refused)
+        patched.setattr(context, "transcript", refused)
+        # Quiet: a read would fault the hook, which says so on stderr.
+        code, said = hook("Stop", project, stop_hook_active=False, background_tasks=[])
+    assert code == 0
+    assert "nothing runs" not in str(said)
+    # Away, the same turn's end reads A's transcript, finds none, and names the stall as before.
+    store.write_json(state / store.AWAY, {"since": model.now(), "until": None, "log": 0, "files": []})
     said = context_of(hook("Stop", project, stop_hook_active=False, background_tasks=[])[1], "Stop")
     assert '- nothing runs, and no `orchestra note --waiting "<what>"` names what the session waits on' in said
 
@@ -1251,6 +1357,57 @@ def test_a_compaction_or_a_resume_reads_the_state_back_from_disk(project: Path, 
     assert context.endswith("\nNOW.md:\n" + (state / "NOW.md").read_bytes().decode())
     # NOW.md follows whole, so status's `now` lines would give it twice.
     assert not any(line.startswith("now ") for line in context.splitlines())
+
+
+def test_after_a_compaction_now_md_takes_the_room_first_and_every_cut_is_named(
+    project: Path, state: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Past `CONTEXT_CHARS` Claude Code keeps a preview and asks nobody to read the rest, so nothing is cut unseen.
+
+    NOW.md holds the next action and its reason, which the state does not, so the overview's rows give way to it;
+    a NOW.md longer than the room keeps its head and names the file that holds it whole.
+    """
+    rows = [f"row {k:02} " + "x" * 90 for k in range(60)]
+
+    def overview(*_: object) -> tuple[list[str], str]:
+        return rows, "status: 60 rows"
+
+    # `events` imports the status view at the call, so the module's own attribute is the one it reads.
+    monkeypatch.setattr("orchestra.status.coordinator", overview)
+    now = state / store.NOW
+
+    def started() -> str:
+        # The hook's last cut, at `CONTEXT_CHARS`, falls in its tail, which each case below reads whole.
+        return context_of(hook("SessionStart", project, source="compact")[1], "SessionStart")
+
+    whole = "".join(f"- line {k:03} of what comes next and why\n" for k in range(130))
+    now.write_bytes(whole.encode())
+    said = started()
+    assert said.endswith("\nNOW.md:\n" + whole)
+    lines = said.splitlines()
+    (count,) = [line for line in lines if line.startswith("... ")]
+    shown = [line for line in lines if line.startswith("row ")]
+    assert shown == rows[: len(shown)]
+    assert count == f"... {60 - len(shown)} more line(s): `orchestra status` lists them"
+    # The summary stays, below the count.
+    assert lines[lines.index(count) + 1] == "status: 60 rows"
+    # Rows that fit the room but not a verb's forty lines are cut where `orchestra status` cuts them.
+    rows[:] = [f"row {k:02}" for k in range(45)]
+    lines = started().splitlines()
+    assert [line for line in lines if line.startswith(("row ", "... "))] == [
+        *rows[:38],
+        "... 7 more line(s): `orchestra status` lists them",
+    ]
+    # A NOW.md past the room keeps its head, cut at a line end, and names what it left out.
+    rows[:] = [f"row {k:02} " + "x" * 90 for k in range(60)]
+    longer = whole * 3
+    now.write_bytes(longer.encode())
+    said = started()
+    held = said.split("\nNOW.md:\n", 1)[1]
+    head, _, cut = held.rpartition("\n")
+    assert longer.startswith(head + "\n")
+    assert cut == f"... {len(longer) - len(head):,} more character(s) of NOW.md left out: {now} holds it whole"
+    assert "... 60 more line(s): `orchestra status` lists them" in said.splitlines()
 
 
 def test_the_overview_after_a_compaction_leaves_out_judged_and_pruned_agents_and_keeps_what_waits(
