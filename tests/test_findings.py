@@ -273,16 +273,20 @@ def test_a_verifiers_verdict_on_a_row_never_banked_moves_nothing_and_takes_no_di
     assert model.read_agent(state, "VERIFY").status == "judged"
 
 
-def test_judge_names_a_finding_at_the_anchor_of_another_reports_unclosed_row(project: Path, state: Path) -> None:
-    agent(state, "REVIEW", Written("auditor", (STORE, CLI)))
-    given = ("F1=route:owner", "F2=close:MOOT:the module is gone")
+def test_judge_names_a_finding_at_the_anchor_of_another_reports_row_and_how_it_was_closed(
+    project: Path, state: Path
+) -> None:
+    agent(state, "REVIEW", Written("auditor", (STORE, CLI, "README :: install")))
+    given = ("F1=route:owner", "F2=close:MOOT:the module is gone", "F3=route:owner")
     assert inprocess("judge", "REVIEW", *given, "--verdict", "v", cwd=project).returncode == 0
-    agent(state, "LENS", Written("auditor", (f"`{STORE}`", CLI)))
-    done = inprocess("judge", "LENS", "F1=route:owner", "F2=route:owner", "--verdict", "v", cwd=project)
+    agent(state, "LENS", Written("auditor", (f"`{STORE}`", CLI, "docs :: intro")))
+    routed = ("F1=route:owner", "F2=route:owner", "F3=route:owner")
+    done = inprocess("judge", "LENS", *routed, "--verdict", "v", cwd=project)
     assert done.returncode == 0, done.stderr
     assert f"LENS-F1 may repeat REVIEW-F1 (ROUTED to owner): both at `{STORE}`" in done.stdout
-    # The closed row repeats nothing.
-    assert "LENS-F2 may repeat" not in done.stdout
+    # A closed row is named with its close, so the second judgement sees the first.
+    assert f"LENS-F2 may repeat REVIEW-F2 (MOOT: the module is gone): both at `{CLI}`" in done.stdout
+    assert "LENS-F3 may repeat" not in done.stdout
 
 
 def test_show_prints_whole_findings_judged_or_not_and_names_a_row_it_cannot(project: Path, state: Path) -> None:

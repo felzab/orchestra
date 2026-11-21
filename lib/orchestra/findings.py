@@ -292,11 +292,15 @@ def _anchor(text: str) -> str:
 
 
 def repeats(new: dict[str, report.Finding], rows: dict[str, FindingEvent], reports: Reports) -> list[str]:
-    """Each new finding at the anchor of an unclosed row of another report: one defect several agents reported."""
+    """Each new finding at the anchor of another report's row: one defect several agents reported.
+
+    A closed row is named with its close and its evidence, so one defect raised again is not judged the other way
+    without the first judgement in view.
+    """
     stems = {row.rsplit("-F", 1)[0] for row in new}
     said: list[str] = []
     for row, event in rows.items():
-        if event.status in model.CLOSED or row in new or row.rsplit("-F", 1)[0] in stems:
+        if row in new or row.rsplit("-F", 1)[0] in stems:
             continue
         try:
             earlier, _ = reports.finding(row)
@@ -304,8 +308,11 @@ def repeats(new: dict[str, report.Finding], rows: dict[str, FindingEvent], repor
             continue
         for named, finding in new.items():
             if (anchor := _anchor(finding.anchor)) == _anchor(earlier.anchor):
-                owner = f" to {event.owner}" if event.owner else ""
-                said.append(f"{named} may repeat {row} ({event.status}{owner}): both at `{anchor}`")
+                if event.status in model.CLOSED:
+                    held = f"{event.status}: {event.evidence}" if event.evidence else event.status
+                else:
+                    held = event.status + (f" to {event.owner}" if event.owner else "")
+                said.append(f"{named} may repeat {row} ({held}): both at `{anchor}`")
     return said
 
 
