@@ -51,7 +51,8 @@ detail still in flight, while the saving came to about 1.4% of the whole session
 included. One compaction cost about as much as 250,000 input tokens: the summary call, about 59,000
 tokens of instructions, skills and summary written again, and about 35,000 tokens read again in the
 following half hour. Claude Code caps the window at the model's context, so on a model with a
-smaller context the window changes nothing.
+smaller context the window changes nothing. Since the coordinator compacts itself at seams from 60%
+of the window (below), the window decides only the compactions that fall at no seam.
 
 A compaction replaces the conversation with a summary, and the session-start hook gives the state
 back from its files; what it can lose is detail still in flight. So the coordinator compacts itself
@@ -64,8 +65,9 @@ it refuses every call until your next prompt or a compaction that runs, so a com
 fails each time cannot repeat while you are away. Otherwise the conversation compacts once the
 coordinator's turn ends, and a one-line prompt from the plugin then starts its next turn, so a
 coordinator with no agent left to report carries on; a turn that ends interrupted or in an error
-drops the compaction. This has been driven in headless `claude -p` sessions only, not yet in an
-interactive terminal or the desktop app. Where the tool is absent or fails, the coordinator tells
+drops the compaction. Scheduling, compacting and the resume prompt have been driven in headless
+`claude -p` sessions only, not yet in an interactive terminal or the desktop app; the 60% gate and
+the refusal after a failed compaction have run only in the mod's tests. Where the tool is absent or fails, the coordinator tells
 you at each seam that it is one to type `/compact` at, attended or away.
 
 Mods are on by default in the terminal and the desktop app

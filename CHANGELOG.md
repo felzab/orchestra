@@ -20,9 +20,9 @@ The fixes from the third project session that ran on the plugin.
   conversation compacts once the turn ends, and a one-line prompt then resumes the session. The tool
   refuses a call from an agent and from a checkout with no orchestra session, and, after a
   compaction it scheduled was vetoed or failed, every call until the owner's next prompt or a
-  compaction that runs. Where the tool is
-  absent or fails, the coordinator tells the owner at each seam to type `/compact`. The mod has been
-  driven in headless sessions only. `claude plugin test .` runs its tests, in CI too.
+  compaction that runs. Where the tool is absent or fails, the coordinator tells the owner at each
+  seam to type `/compact`. Its schedule, compaction and resume have been driven in headless sessions
+  only. `claude plugin test .` runs its tests, in CI too.
 - The prompt hook tells the coordinator, from 75% of a compaction window that a settings file or the
   environment sets, that the compact tool compacts at the next seam; past the window, it still tells
   the owner as well.
@@ -47,7 +47,7 @@ The fixes from the third project session that ran on the plugin.
   since the last estimate, so a drafted brief holds it off no longer, or after eight judged reports;
   only a writer's dispatch makes the first one due.
 - A verb's notice that it cut its output goes to standard error, and the overview after a compaction
-  leaves out judged and pruned agents.
+  leaves out pruned agents and judged agents with nothing left to land.
 - The writer and driver definitions name the tools they use.
 - The pages:
   - the estimate's second look asks every kind of saving (timing, waits, scoping, batching, repeats,
@@ -68,7 +68,7 @@ The fixes from the third project session that ran on the plugin.
 
 - `judge` takes a stopped agent's `BLOCKED` or `NEEDS-ANSWER` report as it stands when its worktree is
   gone, since no answer can reach it.
-- The `/usage` reading gives up after 90 s rather than 120 s, short of the Bash tool's default limit.
+- The `/usage` reading gives up after 90 seconds rather than 120, short of the Bash tool's default limit.
 - The report check reads a finding's whole first paragraph for `Harm:` and `Likelihood:`, and accepts
   `Rows fixed: none.`.
 
