@@ -464,8 +464,12 @@ def test_the_literal_start_prefilter_answers_as_the_walk_alone_does(
 ) -> None:
     """`owned` skips the automaton walk for a path outside a pattern's literal start, which must change no answer."""
     filtered = brief.owned([pattern], path)
-    # An empty start lets every path through to the walk, which is `owned` with no prefilter.
-    monkeypatch.setattr(brief, "_start", lambda _pattern: "")
+
+    def unfiltered(_pattern: str) -> str:
+        """An empty start, which lets every path through to the walk: `owned` with no prefilter."""
+        return ""
+
+    monkeypatch.setattr(brief, "_start", unfiltered)
     assert (filtered, brief.owned([pattern], path)) == (owned, owned)
 
 
