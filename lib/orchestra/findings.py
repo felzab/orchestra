@@ -25,6 +25,8 @@ from orchestra.model import FindingEvent, FindingStatus
 LIVE: frozenset[str] = frozenset({"briefed", "running"})
 JUDGED: frozenset[str] = frozenset({"judged", "landed", "pruned"})
 CLOSING: tuple[FindingStatus, ...] = tuple(status for status in model.FINDING_STATUSES if status in model.CLOSED)
+# The closes that hold the finding real, which a verifier's CONFIRMED verdict agrees with.
+REAL: frozenset[FindingStatus] = frozenset({"FIXED", "RULED", "HANDOFF"})
 KEY_RE = re.compile(r"F[1-9][0-9]*")
 FORM = "`route:<owner>` or `close:<STATUS>:<evidence>`, STATUS one of " + ", ".join(CLOSING)
 # How a finding says its change is the owner's to decide: the run page's "the owner's call", and the reports' word.
@@ -434,6 +436,11 @@ def judge(args: argparse.Namespace, state: Path, owner: Callable[[str], str]) ->
     rows = model.read_findings(state)
     # No write removes a row, so a verdict's row missing now was missing when the verdicts were applied.
     lines += [f"{v.row} is no banked row, so its verdict moves nothing" for v in held.verdicts if v.row not in rows]
+    lines += [
+        f"{v.row} is {rows[v.row].status} already, which its CONFIRMED verdict agrees with: it moves nothing"
+        for v in held.verdicts
+        if v.row in rows and _agrees(v, rows, given)
+    ]
     if new and not events:
         lines.append(f"its {len(new)} row(s) were banked by an earlier judge, and stand as it left them")
     lines += repeats(new, rows, reports)
@@ -505,6 +512,12 @@ def _proof(verdict: report.Verdict, banked: str | None) -> str:
     return "; ".join(part for part in (corrected, proof) if part) or cli.one_line(verdict.first)
 
 
+def _agrees(verdict: report.Verdict, now: dict[str, FindingEvent], given: dict[str, Disposition]) -> bool:
+    """Whether a CONFIRMED verdict given no disposition confirms a row closed on its finding being real."""
+    held = now.get(verdict.row)
+    return verdict.verdict == "CONFIRMED" and verdict.row not in given and held is not None and held.status in REAL
+
+
 def _verdicts(
     name: str,
     proved: list[tuple[report.Verdict, str]],
@@ -515,7 +528,9 @@ def _verdicts(
     """A verifier's rows moved: a REFUTED one closed by itself, a CORRECTED one routed with its correction.
 
     `proved` holds each verdict with the evidence `_proof` reads from it. A verdict on a row never banked
-    moves nothing and takes no disposition.
+    moves nothing and takes no disposition, and neither needs a CONFIRMED one on a row closed FIXED, RULED
+    or HANDOFF, which agrees with that close; one on a row closed NOT A DEFECT or MOOT contradicts it, so
+    it takes a disposition, a route reopening the row.
     """
     proofs = {verdict.row: proof for verdict, proof in proved}
     rows = list(proofs)
@@ -525,7 +540,8 @@ def _verdicts(
         ]
     if moot := [row for row in given if row not in now]:
         return [f"{', '.join(moot)} is no banked row, so its verdict moves nothing: give it no disposition"]
-    banked = [verdict for verdict, _ in proved if verdict.row in now]
+    # A confirmation of a row closed as real agrees with its close, so with no disposition it moves nothing.
+    banked = [verdict for verdict, _ in proved if verdict.row in now and not _agrees(verdict, now, given)]
     if missing := [verdict.row for verdict in banked if verdict.verdict != "REFUTED" and verdict.row not in given]:
         return [f"every verdict but REFUTED takes a disposition, and {', '.join(missing)} has none: <ROW>={FORM}"]
     made: list[FindingEvent | str | None] = []

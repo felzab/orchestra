@@ -271,6 +271,33 @@ def test_a_verifiers_confirmed_row_takes_a_disposition(project: Path, state: Pat
     assert lines(state) == before
 
 
+def test_a_confirmed_verdict_on_a_fixed_row_needs_no_disposition_and_one_on_a_refuted_row_does(
+    project: Path, state: Path
+) -> None:
+    """Verifying fixed rows confirms what closed them; a confirmation of a row closed as no defect contradicts it."""
+    agent(state, "FIXER", "writer", "briefed")
+    agent(state, "REVIEW", Written("auditor", (STORE, CLI)))
+    closes = ("F1=close:FIXED:abc1234", "F2=close:NOT A DEFECT:the guard holds")
+    assert inprocess("judge", "REVIEW", *closes, "--verdict", "v", cwd=project).returncode == 0
+    verdicts = (
+        ("REVIEW-F1", "CONFIRMED", "`uv run pytest` exit 1 with abc1234 reverted."),
+        ("REVIEW-F2", "CONFIRMED", "`uv run pytest` exit 1 with the guard removed."),
+    )
+    agent(state, "VERIFY", Written("verifier", verdicts=verdicts))
+    before = lines(state)
+    refused = inprocess("judge", "VERIFY", "--verdict", "v", cwd=project)
+    assert refused.returncode == 2
+    assert "every verdict but REFUTED takes a disposition, and REVIEW-F2 has none" in refused.stderr
+    done = inprocess("judge", "VERIFY", "REVIEW-F2=route:FIXER", "--verdict", "v", cwd=project)
+    assert done.returncode == 0, done.stderr
+    assert "REVIEW-F1 is FIXED already, which its CONFIRMED verdict agrees with: it moves nothing" in done.stdout
+    held = rows(state)
+    assert (held["REVIEW-F1"].status, held["REVIEW-F1"].evidence) == ("FIXED", "abc1234")
+    assert (held["REVIEW-F2"].kind, held["REVIEW-F2"].owner) == ("reopen", "FIXER")
+    # The one line written is REVIEW-F2's reopening.
+    assert len(lines(state).splitlines()) == len(before.splitlines()) + 1
+
+
 def test_a_verifiers_verdict_on_a_row_never_banked_moves_nothing_and_takes_no_disposition(
     project: Path, state: Path
 ) -> None:
