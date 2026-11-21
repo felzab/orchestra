@@ -20,9 +20,9 @@ ROOT = Path(__file__).resolve().parents[1]
 # The most bytes each page under these folders may hold, counted as git stores it.
 BUDGETS = {
     "skills/run/SKILL.md": 13876,
-    "skills/run/start.md": 2667,
+    "skills/run/start.md": 2597,
     "skills/run/brief.md": 4370,
-    "skills/run/review.md": 5616,
+    "skills/run/review.md": 5524,
     "skills/run/checkpoint.md": 2306,
     "skills/run/end.md": 2600,
     "skills/run/handoff.md": 2770,
@@ -35,11 +35,11 @@ BUDGETS = {
     "skills/end/SKILL.md": 500,
     "skills/resume/SKILL.md": 500,
     "skills/plan/SKILL.md": 1913,
-    "skills/agent/SKILL.md": 7195,
-    "agents/writer.md": 7224,
-    "agents/driver.md": 5000,
-    "agents/researcher.md": 4500,
-    "agents/auditor.md": 3000,
+    "skills/agent/SKILL.md": 7039,
+    "agents/writer.md": 6763,
+    "agents/driver.md": 4311,
+    "agents/researcher.md": 3844,
+    "agents/auditor.md": 2734,
     "agents/verifier.md": 3500,
     **{
         f"lenses/{name}.md": 1500
@@ -53,14 +53,13 @@ BUDGETS = {
             "conformance",
             "necessity",
             "cost",
+            "essential",
             "practice",
             "use",
             "operations",
             "accessibility",
         )
     },
-    # Its twelfth checklist item, the built-the-right-way questions, outgrew the shared budget.
-    "lenses/essential.md": 1650,
     # Its sixth item names the plugin's own merge subjects as no hit, which outgrew the shared budget.
     "lenses/disclosure.md": 1672,
     # Its checklist asks after every kind of saving the owner named: timing, scoping, batching and the rest.

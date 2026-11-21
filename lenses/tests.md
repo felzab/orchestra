@@ -6,17 +6,16 @@
 
 **Checklist.**
 
-1. Each case: which line of the code under test, once broken, turns it red? Plant that break and read the exit code.
+1. Each case: which line of the code under test, once broken, turns it red?
 2. Does it compare a thing to its own definition, or assert text nothing executed?
 3. Does it run the real code, replacing only what the project does not own (network, clock, storage, platform)?
 4. Does a stand-in answer as the real thing does, failures included?
 5. Does the assertion check the behaviour the name states, or only that something ran?
-6. Is the fix pinned at its call site as well as in a helper?
-7. Does the case depend on order, time, a shared resource or another case's leftovers?
-8. Was a timeout, retry count or tolerance raised, or a case skipped, to make it pass?
-9. Does a guard or lint rule match the violation in every spelling the tree uses?
-10. Does a changed behaviour leave an old case asserting the former one?
-11. Which added behaviour would break unnoticed with no case reaching it?
+6. Does the case depend on order, time, a shared resource or another case's leftovers?
+7. Was a timeout, retry count or tolerance raised, or a case skipped, to make it pass?
+8. Does a guard or lint rule match the violation in every spelling the tree uses?
+9. Does a changed behaviour leave an old case asserting the former one?
+10. Which added behaviour would break unnoticed with no case reaching it?
 
 **Not its business.** Whether the tested behaviour is right (`data`, `security`, `contract`), whether a case is needed (`necessity`).
 

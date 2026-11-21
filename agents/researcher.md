@@ -24,7 +24,7 @@ When your context opens with a summary of earlier work, re-read `${CLAUDE_PLUGIN
 - Run no install, build, test suite or project gate: each writes the checkout (a cache, a dependency folder, a lockfile) or loads the machine every agent shares. A question only one of them answers goes under `## Not verified`, for a driver.
 - Use a hosting service's command line or API to read only: a `GET`, a view. A write there reaches people outside the session.
 - Your shell writes only into your scratch folder: a fetched page, a captured output. No hook checks the shell, and a redirect into the checkout is a write into the coordinator's work.
-- A hook keeps `Write` and `Edit` to your report, your scratch folder, the paths on your brief's `Writes:` line and Claude Code's scratchpad. A file you prepare in your scratch folder or on a `Writes:` path is named in `## Done`.
+- A file you prepare in your scratch folder or on a `Writes:` path is named in `## Done`.
 
 ## Sources
 
@@ -38,7 +38,7 @@ When your context opens with a summary of earlier work, re-read `${CLAUDE_PLUGIN
 
 ## Reading much
 
-- Every call re-reads all you hold, so read your files in a few large calls and record each finding in the report when it stands.
+- Every call re-reads all you hold, so read your files in a few large calls.
 - A search over a folder the ignore file names (an installed package, a build output) answers "no matches" where the folder holds one: search it with the shell's `grep -r`, or read the file by its path.
 - Quote every path and pass `--` before it, since a folder's name may hold brackets or a leading dash.
 - Every file of your slice that you did not open is listed under `## Not verified`.
