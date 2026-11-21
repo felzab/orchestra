@@ -439,6 +439,41 @@ def test_a_star_matches_within_a_folder_and_two_across_folders(path: str, patter
 
 
 @pytest.mark.parametrize(
+    ("path", "pattern", "owned"),
+    [
+        ("lib/x/a.py", "**/a.py", True),
+        ("a.py", "**/a.py", True),
+        ("src/a.py", "lib/**", False),
+        ("lib/a.pyc", "lib/*.py", False),
+        ("./lib/a.py", "lib/a.py", True),
+        ("lib/a.py", "./lib/**", True),
+        ("lib\\x\\a.py", "lib/x/*.py", True),
+        ("lib/a.py", "lib\\*.py", True),
+        ("lib/a", "lib/a/", True),
+        ("lib/a/b.py", "lib/a/", True),
+        ("lib/ab.py", "lib/a/", False),
+        # `Writes:` patterns reach `owned` absolute and case-folded, the path spelled the same way.
+        ("c:/users/me/state/reports/a.md", "c:/users/me/state/**", True),
+        ("c:/users/me/state", "c:/users/me/state", True),
+        ("c:/users/me/stated/a.md", "c:/users/me/state", False),
+        ("c:/users/me/other/a.md", "c:/users/me/state/**", False),
+    ],
+)
+def test_the_literal_start_prefilter_answers_as_the_walk_alone_does(
+    monkeypatch: pytest.MonkeyPatch, path: str, pattern: str, *, owned: bool
+) -> None:
+    """`owned` skips the automaton walk for a path outside a pattern's literal start, which must change no answer."""
+    filtered = brief.owned([pattern], path)
+
+    def unfiltered(_pattern: str) -> str:
+        """An empty start, which lets every path through to the walk: `owned` with no prefilter."""
+        return ""
+
+    monkeypatch.setattr(brief, "_start", unfiltered)
+    assert (filtered, brief.owned([pattern], path)) == (owned, owned)
+
+
+@pytest.mark.parametrize(
     ("one", "other", "overlap"),
     [
         ("tests/fixtures/ci/**", "tests/**", True),

@@ -20,6 +20,7 @@ from pathlib import Path
 
 from orchestra import Refused, brief, cli, config, context, findings, log, model, process, prune, report, status, store
 from orchestra.config import Checkout, Step
+from orchestra.queue import DELIVERED
 
 # A rebase of commits another branch already merged lands each twice under two hashes, which the
 # preflight's twin check then refuses.
@@ -379,6 +380,11 @@ def land(here: Checkout, state: Path, name: str, args: argparse.Namespace) -> in
             None if agent.status in model.SETTLED or here.branch is None else _brought_in(root, here.branch, branch)
         )
         if merged is None:
+            # Work its report calls delivered is on the session branch already, so it is stamped landed, which
+            # is what `queue.landed_nothing` reads; a report stopped on a question delivered nothing.
+            if agent.status not in model.SETTLED and agent.outcome in DELIVERED:
+                model.update_agent(state, name, lambda held: replace(held, status="landed"))
+                log.record(state, "land", f"{name} landed: the session branch already holds {branch}")
             said = prune.prune(here, state, {name})
             cli.emit(args, said.failed + said.lines, f"nothing to land: the session branch already holds {branch}")
             return 0

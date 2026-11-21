@@ -540,18 +540,25 @@ def test_a_writer_pruned_before_its_first_commit_leaves_its_slice_to_do(
     assert "NOT held  no planned slice untaken: S1, S2" in " ".join(ended)
 
 
-def test_a_writer_whose_branch_the_session_already_holds_lands_its_slice(project: Path, chained: Path) -> None:
-    """`land` finds nothing to land and prunes the writer with no `landed` stamp: its DONE report lands the slice."""
+@pytest.mark.parametrize(
+    ("outcome", "delivered"),
+    [("DONE", True), ("NEEDS-ANSWER: keep the old endpoint?", False)],
+    ids=["a DONE report", "a question no answer reached"],
+)
+def test_a_writer_whose_branch_the_session_already_holds_lands_its_slice_only_where_it_delivered(
+    project: Path, chained: Path, outcome: str, *, delivered: bool
+) -> None:
+    """`land` finds nothing to land, the branch holding no commit of its own, and stamps the landing only where
+    the report calls its work done; a question judged as it stands delivered nothing, so its slice is still to do."""
     git(project, "branch", "worktree-agent-w1")
-    report.path(chained, "W").write_bytes(text("writer", "W", status="DONE").encode())
-    changed(chained, "W", status="judged", outcome="DONE", branch="worktree-agent-w1")
+    report.path(chained, "W").write_bytes(text("writer", "W", status=outcome).encode())
+    changed(chained, "W", status="judged", outcome=outcome.partition(":")[0], branch="worktree-agent-w1")
     landed = run("land", "W", cwd=project)
     assert "nothing to land" in landed.stdout, landed.stderr
     agent = model.read_agent(chained, "W")
-    assert (agent.status, "landed" in agent.since) == ("pruned", False)
+    assert (agent.status, "landed" in agent.since) == ("pruned", delivered)
     measured = _lines(run("status", "--measure", cwd=project))
-    assert S1_DONE in measured
-    assert S2_FREE in measured
+    assert (S1_DONE in measured, S2_FREE in measured, S2_HELD in measured) == (delivered, delivered, not delivered)
 
 
 def test_a_discarded_agents_slice_reads_planned_and_its_owns_excuses_no_drift(project: Path, built: Path) -> None:

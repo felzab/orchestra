@@ -30,13 +30,11 @@ def landed_nothing(agent: model.Agent) -> bool:
     """Whether the agent is settled with none of its work landed, so that its slice is not done by it.
 
     `prune --discard` threw its work away. Otherwise a `pruned` record landed where `land` stamped it
-    `landed`, a stamp later statuses keep, or where its report says its work is done: `land` prunes such
-    a writer with no stamp when the session branch already holds its branch. A writer pruned before its
-    first commit, or after a report stopped on a question, has neither.
+    `landed`, a stamp later statuses keep, as `land` does too where the session branch already holds a
+    branch whose report says its work is done. A writer pruned before its first commit, after a report
+    stopped on a question, or with its branch lost before it landed, has no stamp.
     """
-    return agent.status == "pruned" and (
-        agent.reason == model.DISCARDED or ("landed" not in agent.since and agent.outcome not in DELIVERED)
-    )
+    return agent.status == "pruned" and (agent.reason == model.DISCARDED or "landed" not in agent.since)
 
 
 def _when(value: str) -> tuple[model.Trigger, str | None]:
@@ -68,21 +66,29 @@ def _seconds(stamp: str) -> datetime.datetime:
     return datetime.datetime.fromisoformat(stamp)
 
 
-def due(state: Path) -> list[model.QueueItem]:
-    """Every item not done whose event has happened, by number."""
+def due(
+    state: Path, agents: list[model.Agent] | None = None, entries: list[log.Entry] | None = None
+) -> list[model.QueueItem]:
+    """Every item not done whose event has happened, by number.
+
+    `agents` and `entries` are the records and the log where the caller already holds them, as the turn-end hook
+    does, so they are not read twice; each is read here where not given.
+    """
     waiting = [item for _, item in sorted(model.read_queue(state).items()) if not item.done]
     if not waiting:
         return []
-    held = model.agents(state)
-    agents = {agent.name: agent for agent in held}
-    reads = [_seconds(entry.time) for entry in log.entries(state) if entry.kind == CI_READ]
+    held = model.agents(state) if agents is None else agents
+    by_name = {agent.name: agent for agent in held}
+    reads = [
+        _seconds(entry.time) for entry in (log.entries(state) if entries is None else entries) if entry.kind == CI_READ
+    ]
     # Read once a call, and only for an item naming a slice, so a hook reading `due` never imports the status view.
     landed = functools.cache(lambda: _landed(state, held))
 
     def happened(item: model.QueueItem) -> bool:
         if item.trigger == "ci":
             return any(read > _seconds(item.time) for read in reads)
-        agent = agents.get(item.agent or "")
+        agent = by_name.get(item.agent or "")
         if item.trigger == "landed":
             if agent is None:
                 # A slice `run` accepted, whose agents may carry any name: due once the status view reads it landed.

@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from conftest import inprocess, orchestra, write_agent
-from orchestra import FAULT, model, store
+from orchestra import FAULT, log, model, store
 from orchestra import queue as items
 from orchestra.status import paced
 
@@ -65,25 +65,47 @@ def test_a_landed_item_never_falls_due_when_its_agent_is_discarded(project: Path
 
 
 @pytest.mark.parametrize(
-    ("outcome", "due"),
+    ("outcome", "since", "due"),
     [
         # Stopped by a limit before its first commit, then settled by a plain prune: nothing of it landed.
-        (None, []),
+        (None, {}, []),
         # A report stopped on a question, judged and pruned: nothing of it landed either.
-        ("NEEDS-ANSWER", []),
-        # `land` found the session branch holding its branch already, and stamped no landing.
-        ("DONE", [1]),
+        ("NEEDS-ANSWER", {}, []),
+        # A DONE report whose branch was lost before it landed: its report alone lands nothing.
+        ("DONE", {}, []),
+        # `land` stamps the landing, the session branch holding its branch already or not.
+        ("DONE", {"landed": EARLY}, [1]),
     ],
 )
 def test_a_landed_item_falls_due_for_a_pruned_agent_only_where_its_work_landed(
-    state: Path, outcome: str | None, due: list[int]
+    state: Path, outcome: str | None, since: dict[str, str], due: list[int]
 ) -> None:
-    write_agent(state, model.Agent("B", "writer", "pruned", outcome=outcome, reason="You've hit your limit"))
+    held = model.Agent("B", "writer", "pruned", outcome=outcome, reason="You've hit your limit", since=since)
+    write_agent(state, held)
     queued(state, model.QueueItem(1, "landed", "tell X the contract landed", "B", time=EARLY))
     assert numbers(state) == due
     if not due:
         said = "which settled with nothing landed and never lands: `orchestra queue done 1` ends it"
         assert any(said in line for line in paced(state))
+
+
+def test_due_given_the_records_and_the_log_reads_neither_again(monkeypatch: pytest.MonkeyPatch, state: Path) -> None:
+    """The turn-end hook holds both already, and each read costs it a pass over the state."""
+    store.append_jsonl(state / store.LOG, {"time": LATER, "kind": items.CI_READ, "text": "run 1 concluded"})
+    queued(
+        state,
+        model.QueueItem(1, "ci", "push the fix", time=EARLY),
+        model.QueueItem(2, "landed", "dispatch B", "A", time=EARLY),
+    )
+    status(state, "A", "landed")
+    agents, entries = model.agents(state), log.entries(state)
+
+    def unread(_state: Path) -> list[object]:
+        raise AssertionError("read again")
+
+    monkeypatch.setattr(model, "agents", unread)
+    monkeypatch.setattr(log, "entries", unread)
+    assert [item.number for item in items.due(state, agents, entries)] == [1, 2]
 
 
 def reported(state: Path, at: str) -> None:

@@ -130,9 +130,14 @@ def _share(one: tuple[Edges, set[int]], other: tuple[Edges, set[int]]) -> bool:
 
 
 def owned(patterns: Iterable[str], path: str) -> bool:
-    """Whether a repository path, `/`-separated as git prints it, is one the patterns name."""
+    """Whether a repository path, `/`-separated as git prints it, is one the patterns name.
+
+    A pattern names only paths that begin with its literal start, so a path that does not is settled
+    without the walk, as `overlap` settles a pair; the path is spelled as `_automaton` spells it.
+    """
+    spelled = path.replace("\\", "/").removeprefix("./")
     held = _automaton(path, exact=True)
-    return any(_share(held, _automaton(pattern)) for pattern in patterns)
+    return any(spelled.startswith(_start(pattern)) and _share(held, _automaton(pattern)) for pattern in patterns)
 
 
 @functools.cache

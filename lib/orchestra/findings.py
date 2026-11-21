@@ -25,8 +25,12 @@ from orchestra.model import FindingEvent, FindingStatus
 LIVE: frozenset[str] = frozenset({"briefed", "running"})
 JUDGED: frozenset[str] = frozenset({"judged", "landed", "pruned"})
 CLOSING: tuple[FindingStatus, ...] = tuple(status for status in model.FINDING_STATUSES if status in model.CLOSED)
+# The closes that hold the finding real, which a verifier's CONFIRMED verdict agrees with.
+REAL: frozenset[FindingStatus] = frozenset({"FIXED", "RULED", "HANDOFF"})
 KEY_RE = re.compile(r"F[1-9][0-9]*")
 FORM = "`route:<owner>` or `close:<STATUS>:<evidence>`, STATUS one of " + ", ".join(CLOSING)
+# How a finding says its change is the owner's to decide: the run page's "the owner's call", and the reports' word.
+OWNERS_RE = re.compile("\\bowner['\N{RIGHT SINGLE QUOTATION MARK}]s (?:word|call)\\b", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -292,11 +296,15 @@ def _anchor(text: str) -> str:
 
 
 def repeats(new: dict[str, report.Finding], rows: dict[str, FindingEvent], reports: Reports) -> list[str]:
-    """Each new finding at the anchor of an unclosed row of another report: one defect several agents reported."""
+    """Each new finding at the anchor of another report's row: one defect several agents reported.
+
+    A closed row is named with its close and its evidence, so one defect raised again is not judged the other way
+    without the first judgement in view.
+    """
     stems = {row.rsplit("-F", 1)[0] for row in new}
     said: list[str] = []
     for row, event in rows.items():
-        if event.status in model.CLOSED or row in new or row.rsplit("-F", 1)[0] in stems:
+        if row in new or row.rsplit("-F", 1)[0] in stems:
             continue
         try:
             earlier, _ = reports.finding(row)
@@ -304,8 +312,39 @@ def repeats(new: dict[str, report.Finding], rows: dict[str, FindingEvent], repor
             continue
         for named, finding in new.items():
             if (anchor := _anchor(finding.anchor)) == _anchor(earlier.anchor):
-                owner = f" to {event.owner}" if event.owner else ""
-                said.append(f"{named} may repeat {row} ({event.status}{owner}): both at `{anchor}`")
+                if event.status in model.CLOSED:
+                    held = f"{event.status}: {event.evidence}" if event.evidence else event.status
+                else:
+                    held = event.status + (f" to {event.owner}" if event.owner else "")
+                said.append(f"{named} may repeat {row} ({held}): both at `{anchor}`")
+    return said
+
+
+def _judged_on(verdict: report.Verdict, reports: Reports) -> str:
+    """A verdict's body and the body of the finding it judges, where that report still reads."""
+    try:
+        banked = reports.finding(verdict.row)[0].body
+    except Refused:
+        banked = ""
+    return f"{verdict.body}\n{banked}"
+
+
+def _owners_word(state: Path, given: dict[str, Disposition], texts: dict[str, tuple[str, str]]) -> list[str]:
+    """A warning for each row routed to an agent whose text says its change is the owner's word or call.
+
+    `texts` holds each disposition's key with its row and the text judged. A row on a queue waits to be
+    taken, so its question can still be asked in time, and a queue's route is never warned of.
+    """
+    said: list[str] = []
+    for key, chosen in given.items():
+        if not isinstance(chosen, Route) or chosen.owner in model.QUEUES or not model.has_agent(state, chosen.owner):
+            continue
+        row, text = texts.get(key, (key, ""))
+        if OWNERS_RE.search(text):
+            said.append(
+                f"{row} says its change is the owner's word or call, and goes to the agent {chosen.owner}:"
+                " ask the owner before it is built, unless a ruling covers it"
+            )
     return said
 
 
@@ -385,7 +424,8 @@ def judge(args: argparse.Namespace, state: Path, owner: Callable[[str], str]) ->
     reports = Reports(state)
     new = {report.row(agent.name, round_, finding.number): finding for finding in held.findings}
     if verifier:
-        events = _apply(state, lambda now: _verdicts(agent.name, held.verdicts, given, now, alive))
+        proved = [(verdict, _proof(verdict, _heading(reports, verdict.row))) for verdict in held.verdicts]
+        events = _apply(state, lambda now: _verdicts(agent.name, proved, given, now, alive))
     else:
         events = _apply(state, lambda now: _bank(agent.name, held.findings, round_, given, now))
     model.update_agent(state, agent.name, lambda before: dataclasses.replace(before, status="judged", verdict=verdict))
@@ -396,9 +436,19 @@ def judge(args: argparse.Namespace, state: Path, owner: Callable[[str], str]) ->
     rows = model.read_findings(state)
     # No write removes a row, so a verdict's row missing now was missing when the verdicts were applied.
     lines += [f"{v.row} is no banked row, so its verdict moves nothing" for v in held.verdicts if v.row not in rows]
+    lines += [
+        f"{v.row} is {rows[v.row].status} already, which its CONFIRMED verdict agrees with: it moves nothing"
+        for v in held.verdicts
+        if v.row in rows and _agrees(v, rows, given)
+    ]
     if new and not events:
         lines.append(f"its {len(new)} row(s) were banked by an earlier judge, and stand as it left them")
     lines += repeats(new, rows, reports)
+    if verifier:
+        texts = {verdict.row: (verdict.row, _judged_on(verdict, reports)) for verdict in held.verdicts}
+    else:
+        texts = {f"F{finding.number}": (row, finding.body) for row, finding in new.items()}
+    lines += _owners_word(state, given, texts)
     # Imported here, since the hooks import this module and none of them reads the status view.
     paced = typing.cast("Callable[[Path], list[str]]", importlib.import_module("orchestra.status").paced)
     lines += paced(state)
@@ -440,38 +490,71 @@ def _bank(
     return made
 
 
+def _heading(reports: Reports, row: str) -> str | None:
+    """The heading the row's finding was banked under; None where its report no longer reads."""
+    try:
+        return reports.finding(row)[0].heading
+    except Refused:
+        return None
+
+
+def _proof(verdict: report.Verdict, banked: str | None) -> str:
+    """What a verdict's row records as its evidence: the body's first line that is no finding heading.
+
+    A CORRECTED body opens with the corrected heading, which is often the banked one unchanged; it leads
+    the evidence only where it differs from `banked`, the heading the row was banked under.
+    """
+    lines = [cli.one_line(line) for line in verdict.body.split("\n") if line.strip()]
+    proof = next((line for line in lines if not report.FINDING_RE.fullmatch(line)), None)
+    corrected = lines[0] if verdict.verdict == "CORRECTED" and lines else None
+    if corrected is not None and banked is not None and _anchor(corrected) == _anchor(banked):
+        corrected = None
+    return "; ".join(part for part in (corrected, proof) if part) or cli.one_line(verdict.first)
+
+
+def _agrees(verdict: report.Verdict, now: dict[str, FindingEvent], given: dict[str, Disposition]) -> bool:
+    """Whether a CONFIRMED verdict given no disposition confirms a row closed on its finding being real."""
+    held = now.get(verdict.row)
+    return verdict.verdict == "CONFIRMED" and verdict.row not in given and held is not None and held.status in REAL
+
+
 def _verdicts(
     name: str,
-    verdicts: tuple[report.Verdict, ...],
+    proved: list[tuple[report.Verdict, str]],
     given: dict[str, Disposition],
     now: dict[str, FindingEvent],
     live: dict[str, str],
 ) -> list[FindingEvent | str | None]:
     """A verifier's rows moved: a REFUTED one closed by itself, a CORRECTED one routed with its correction.
 
-    A verdict on a row never banked moves nothing and takes no disposition.
+    `proved` holds each verdict with the evidence `_proof` reads from it. A verdict on a row never banked
+    moves nothing and takes no disposition, and neither needs a CONFIRMED one on a row closed FIXED, RULED
+    or HANDOFF, which agrees with that close; one on a row closed NOT A DEFECT or MOOT contradicts it, so
+    it takes a disposition, a route reopening the row.
     """
-    rows = [verdict.row for verdict in verdicts]
+    proofs = {verdict.row: proof for verdict, proof in proved}
+    rows = list(proofs)
     if unknown := [row for row in given if row not in rows]:
         return [
             f"{', '.join(unknown)} has no verdict in {name}'s report, whose verdicts are {', '.join(rows) or 'none'}"
         ]
     if moot := [row for row in given if row not in now]:
         return [f"{', '.join(moot)} is no banked row, so its verdict moves nothing: give it no disposition"]
-    banked = [verdict for verdict in verdicts if verdict.row in now]
+    # A confirmation of a row closed as real agrees with its close, so with no disposition it moves nothing.
+    banked = [verdict for verdict, _ in proved if verdict.row in now and not _agrees(verdict, now, given)]
     if missing := [verdict.row for verdict in banked if verdict.verdict != "REFUTED" and verdict.row not in given]:
         return [f"every verdict but REFUTED takes a disposition, and {', '.join(missing)} has none: <ROW>={FORM}"]
     made: list[FindingEvent | str | None] = []
     for verdict in banked:
         held = now.get(verdict.row)
         # A refutation names its proof, so the row closes on the verifier's evidence unless the judge says otherwise.
-        refuted = Close("NOT A DEFECT", f"refuted by {name}: {cli.one_line(verdict.first)}")
+        refuted = Close("NOT A DEFECT", f"refuted by {name}: {proofs[verdict.row]}")
         match given.get(verdict.row, refuted):
             case Route(owner):
                 # A row's state is its last line, so a route of a routed row carries its evidence, an earlier
                 # verifier's correction included, unless this verifier corrects it again.
                 kept = held.evidence if held is not None and held.status == "ROUTED" else None
-                corrected = f"corrected by {name}: {verdict.first}" if verdict.verdict == "CORRECTED" else kept
+                corrected = f"corrected by {name}: {proofs[verdict.row]}" if verdict.verdict == "CORRECTED" else kept
                 made.append(_route(verdict.row, held, owner, live, corrected))
             case Close(status, evidence):
                 # A row closed so already was closed by a judge of this report that stopped before it marked
