@@ -185,11 +185,11 @@ def changed_paths(root: Path, span: str) -> list[str]:
     return [name for name in config.git(root, "diff", "--name-only", "--no-renames", "-z", span).split("\0") if name]
 
 
-def declined(state: Path) -> dict[str, str]:
-    """Each lens a note declined, by name, with the reason the note gives."""
+def declined(entries: list[log.Entry]) -> dict[str, str]:
+    """Each lens a note of the log's entries declined, by name, with the reason the note gives."""
     return {
         match["name"]: match["reason"]
-        for entry in log.entries(state)
+        for entry in entries
         if entry.kind == log.NOTE and (match := DECLINED_RE.fullmatch(entry.text))
     }
 

@@ -1051,7 +1051,7 @@ def _lenses(snap: Snapshot) -> str | None:
         if agent.verdict is not None and agent.name in heads:
             for name in heads[agent.name].lens:
                 read.setdefault(name, set()).add(agent.type)
-    declined = diff.declined(snap.state)
+    declined = diff.declined(snap.reads.entries)
     missing: list[str] = []
     excused: list[str] = []
     for held in diff.due(snap.root, config.load(snap.root), changed):
