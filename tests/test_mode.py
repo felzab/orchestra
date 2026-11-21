@@ -128,6 +128,15 @@ def test_the_lease_refuses_another_session_and_hands_over_only_after_a_stop(proj
     assert model.read_agent(session, "OWN").status == "running"
 
 
+def test_a_stop_from_a_process_with_no_session_id_stops_the_holder(project: Path, session: Path) -> None:
+    """An owner may stop a session from a plain shell, which carries no Claude Code session id."""
+    stopped = _run("mode", "stop", cwd=project, env={})
+    assert stopped.returncode == 0, stopped.stderr
+    assert stopped.stdout.startswith("stopped: no session writes this state")
+    assert store.lease(session)["stopped"] is True
+    assert log.entries(session)[-1].text == "stopped by session with no id"
+
+
 def test_a_stop_whose_lease_another_session_took_meanwhile_is_refused_naming_the_holder(
     project: Path, session: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
