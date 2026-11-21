@@ -31,7 +31,6 @@ import contextlib
 import dataclasses
 import datetime
 import functools
-import importlib
 import json
 import logging
 import os
@@ -1094,14 +1093,12 @@ def session_start(where: Where) -> str | None:
     clock = datetime.datetime.now().astimezone()
     intro = f"This session coordinates the orchestra session whose state is {state}."
     # Imported here, since no other event reads it and every hook would pay for its imports.
-    overview = typing.cast(
-        "Callable[[datetime.datetime, Path, Path, str | None], tuple[list[str], str]]",
-        importlib.import_module("orchestra.status").coordinator,
-    )
+    from orchestra import status  # noqa: PLC0415
+
     rows: list[str] = []
     tail: list[str] = []
     try:
-        shown, summary = overview(clock, state, root, where.session)
+        shown, summary = status.coordinator(clock, state, root, where.session)
         # The rows naming finished agents, which nothing after a compaction acts on; the `agents` row counts them.
         rows = [line for line in shown if line.split(" ", 1)[0] not in FINISHED_ROWS]
         head, tail = f"`orchestra status` at {clock.isoformat(timespec='seconds')}:", [summary]
