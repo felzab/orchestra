@@ -21,12 +21,14 @@ The fixes from the third project session that ran on the plugin.
   refuses a call from an agent and from a checkout with no orchestra session, and, after a
   compaction it scheduled was vetoed, failed or not seen to run, every call until the owner's next
   prompt or a compaction it sees run; where Claude Code's built-in guard loads it sees none, so
-  only the owner's prompt clears it. Where the tool is absent or fails, the coordinator tells the owner at each
-  seam to type `/compact`. Its schedule, compaction and resume have been driven in headless sessions
-  only. `claude plugin test .` runs its tests, in CI too.
+  only the owner's prompt clears it. Where the tool is absent or fails, the coordinator tells the
+  owner to type `/compact` at a seam once the prompt hook has said its context nears the compaction
+  window. Its schedule, compaction and resume have been driven in headless sessions only.
+  `claude plugin test .` runs its tests, in CI too.
 - The prompt hook tells the coordinator, from 75% of a compaction window that a settings file or the
-  environment sets, that the compact tool compacts at the next seam; past the window, it still tells
-  the owner as well.
+  environment sets, that the compact tool compacts at the next seam. Past the window, which has then
+  not applied, it tells the owner as well, and both read that the tool compacts only from 60% of the
+  window Claude Code applied, which may be larger, so the owner's `/compact` compacts at the next seam.
 - `orchestra brief NAME --type writer --slice S --body FILE` writes the brief's header above a file
   holding its lists and sections and checks it in the same call.
 - `orchestra status --measure` prints the longest chain of slices still to do by their `after:` edges,
@@ -34,7 +36,7 @@ The fixes from the third project session that ran on the plugin.
   minutes from a landing to the next dispatch.
 - `orchestra status` names a path on a slice still to do that the session deleted or moved.
 - `orchestra status --end` names a slice whose agents landed while its line is unticked.
-- `orchestra queue add --when landed:NAME <what>` accepts a planned slice no agent has taken yet, and
+- `orchestra queue add --when landed:NAME <what>` accepts a slice `PLAN.md` lists, taken or not, and
   the item falls due once the slice lands, whatever its agent's name.
 
 ### Changed
@@ -67,28 +69,35 @@ The fixes from the third project session that ran on the plugin.
     pages drop the rules their reader already holds in the same load or in a hook's refusal, and an
     agent that stops on a question writes `NEEDS-ANSWER` alone, though the program still reads
     `BLOCKED`;
-  - a defect an agent describes under `## Outside the scope` is also a finding, so judging banks it;
+  - a defect an agent finds beyond its brief is recorded as a finding rather than under
+    `## Outside the scope`, except in a verifier's report, so judging banks it and the owner is not
+    also asked about it;
   - the review sends a verifier every row a fixer would take and every `defect` row it would close
     as no defect or moot, holding the latter open until the verdict;
   - the coordinator writes a ruling that changes the work into `PLAN.md` in the turn it is given,
-    asks the owner only what no ruling, page or command settles, and gives an agent a run of calls
-    that needs none of its context;
+    asks the owner only what no ruling, page or command settles, after researching what the owner
+    would have it find out, such as a cost or a documented practice, and gives an agent a run of
+    calls that needs none of its context;
   - a brief names a cheaper model profile only for work it spells out, never for a lens, a verifier
     or work of finding, judging or designing;
-  - the next session's work list is the plan's part the starter names, one line an item, and the
-    estimate's second reader also runs at each estimate the owner starts and names each row it
-    corrected the last time.
-- The guide carries the measured compaction figures and why 500,000 is kept, names `/status`'s
-  setting sources, and says which switches turn the mod off.
+  - the handoff writes the next session's work list, one line an item, into the programme's plan
+    where one exists and otherwise into itself, and the estimate's second reader also runs at each
+    estimate the owner starts and names each row it corrected the last time;
+  - the shared agent page says the Bash tool moves a call into the background after about 180
+    seconds, whatever its timeout, so an agent splits a longer check.
+- The guide carries the measured compaction figures, why 500,000 is kept and why a seam compacts
+  from 60% of it, names `/status`'s setting sources, says which switches turn the mod off and what
+  the built-in guard changes for it, and says when a question's timeout counts down; the README
+  says what the mod's hook on every prompt and its calls do.
 - `contextCeiling` refuses a resume only once the agent's prompt cache has lapsed, five minutes after
   its transcript was last written; a resume within them reads the context from the cache and goes
   ahead, and the refusal names the transcript's age.
 - The hooks wait on less: an attended turn's end reads no agent's transcript, the prompt and
   post-call hooks take the primary checkout from `session.json` where its `.git` folder holds the
   session's pointer, rather than from two git runs, and an agent's `SendMessage` loads nothing.
-- A coordinator's prompt reads the compaction window without loading `init`'s modules, about 40 ms
-  less a prompt, and a command finds the checkout once rather than two or three times, about 85 ms
-  less a command that changes the record.
+- A coordinator's prompt reads the compaction window without loading `init`'s modules, a few
+  milliseconds less on each prompt, and a command finds the checkout once rather than two or three
+  times, about 85 milliseconds less on each command that changes the record.
 - The guide's sample `mechanical` profile runs Sonnet at `high` effort rather than `medium`.
 - `judge` names a new finding at the anchor of a closed row too, with the row's close and its
   evidence, so a defect raised again is judged with the first judgement in view.
@@ -99,16 +108,21 @@ The fixes from the third project session that ran on the plugin.
 - A verifier's `CONFIRMED` verdict on a row closed `FIXED`, `RULED` or `HANDOFF` takes no
   disposition and moves nothing; one on a row closed `NOT A DEFECT` or `MOOT` still takes one.
 - A question asked again with `--supersedes` may replace a ruled one too, which marks its ruling
-  replaced, and `rule`'s refusal of a second ruling names `--supersedes`.
+  replaced, and `rule`'s refusal of a second ruling names `--supersedes`. Where the question was
+  asked under another session, the summary and the log line name that session.
 - `orchestra status` and the session-start hook test a changed path against a brief's `Owns:`
   pattern only where the path begins with the pattern's literal start, which makes the drift check
   of a long session faster with the same lines, and the turn-end hook hands the queue the records
   and the log it has already read.
 - `orchestra land NAME`, `orchestra prune` and `judge` wait on less: a landing reads the other
   agents' branches only where a conflict names who else changed a path, and passes over agents
-  already landed or pruned; no researcher's, auditor's or verifier's transcript is searched for a
+  already landed or pruned, though it still reads their records before its merge, so one that does
+  not read refuses it; no researcher's, auditor's or verifier's transcript is searched for a
   branch; prune looks up each branch once; and `judge` reads which agents are live only for a
-  verifier's report.
+  verifier's report, and finds a new finding's repeat from the anchor a row's bank line in
+  `findings.jsonl` now records, rather than by reading every report holding a banked row. A row
+  banked by an earlier version records none, so its report is still read, and a verifier's report,
+  which banks no finding, reads none.
 - `orchestra status`, its `--measure` and `--end` views, the overview a compaction or a resume
   gives the coordinator and the `waits` lines `judge` and `land` close on read each brief, the plan
   and the log once a view, where they read each brief up to five times and the plan up to seven,
@@ -118,7 +132,8 @@ The fixes from the third project session that ran on the plugin.
 ### Fixed
 
 - `judge` takes a stopped agent's `BLOCKED` or `NEEDS-ANSWER` report as it stands when its worktree is
-  gone, since no answer can reach it.
+  gone, since no answer can reach it; `orchestra prune` then settles its record once neither its tree
+  nor its branch is left.
 - The `/usage` reading gives up after 90 seconds rather than 120, short of the Bash tool's default limit.
 - The report check reads a finding's whole first paragraph for `Harm:` and `Likelihood:`, and accepts
   `Rows fixed: none.`.
@@ -130,8 +145,9 @@ The fixes from the third project session that ran on the plugin.
   left unrouted and the `orchestra route <owner> <row>` that routes them.
 - A hook fault no longer refuses an agent's message to its coordinator.
 - `orchestra land NAME` on a branch the session branch already holds stamps the agent landed where
-  its report says its work is done, and not where it stopped on a question; a writer whose `DONE`
-  branch was lost before it landed no longer reads as landed, and its slice stays to do.
+  its judged report says its work is done, and not where it stopped on a question or where a round
+  after that report stopped before its own; a writer whose `DONE` branch was lost before it landed
+  no longer reads as landed, and its slice stays to do.
 - `orchestra land NAME` on a branch with no commit of its own that took in the session branch by a
   fast-forward, as an agent merges the session branch into its own, reads nothing to land, where it
   closed every row the agent's report names fixed with another agent's landing as the evidence. A
@@ -143,6 +159,10 @@ The fixes from the third project session that ran on the plugin.
 - An agent whose report's summary quotes a usage-limit notice or an API error, as one citing Claude
   Code's errors page does, is read as reported, where it was marked stopped with its report
   unchecked; only a last message that opens with the notice or the error stops it.
+- A resume refused because the agent's worktree is gone names `orchestra prune --discard NAME` where
+  `orchestra prune` would pass over the record: one still `running` whose branch is gone, and one
+  that names no branch. It names `judge`, which banks the report, where the report reads, and
+  elsewhere `orchestra prune`, which settles the record or says what keeps it.
 
 ## [0.3.0] - 2026-11-19
 
