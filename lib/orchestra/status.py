@@ -566,7 +566,7 @@ def measure(snap: Snapshot) -> tuple[list[str], str]:
     ci, _ = _guarded("CI", lambda: _ci_minutes(snap.state))
     plan, unticked = _guarded("unticked", lambda: _unticked_lines(snap.reads))
     chain, _ = _guarded("chain", lambda: _chain(snap.reads))
-    hop, _ = _guarded("hop", lambda: _hops(snap.reads.entries))
+    hop, _ = _guarded("hop", lambda: _hops(snap.reads.entries, snap.agents))
     due, due_count = _guarded("due", lambda: [_row("due", _item(item)) for item in snap.reads.due])
     asked, asked_count = _guarded(
         "asked",
@@ -676,8 +676,14 @@ def _chain(reads: Reads) -> list[str]:
     return [_row("chain", f"{longest} slice(s) deep{tied} first to last: {shown}{more}")]
 
 
-def _hops(entries: list[log.Entry]) -> list[str]:
-    """The minutes from each `land` line of the log to the next `dispatch` line: what a landing leaves idle."""
+def _hops(entries: list[log.Entry], agents: list[model.Agent]) -> list[str]:
+    """The minutes from each `land` line of the log to the next writer's `dispatch` line: what a landing leaves
+    idle on the path the plan's slices take.
+
+    Only a writer's dispatch ends a hop, since a reader or a driver sent meanwhile moves no slice on, and
+    ending the hop there would leave the idle link unmeasured.
+    """
+    writers = {agent.name for agent in agents if agent.type == "writer"}
     hops: list[float] = []
     landed: list[datetime.datetime] = []
     for entry in entries:
@@ -685,13 +691,14 @@ def _hops(entries: list[log.Entry]) -> list[str]:
             continue
         if entry.kind == "land":
             landed.append(at)
-        elif entry.kind == log.DISPATCH:
+        # The line reads `<NAME> as <id> on <model>`, and a name holds no space.
+        elif entry.kind == log.DISPATCH and entry.text.partition(" ")[0] in writers:
             hops += [(at - since).total_seconds() / 60 for since in landed]
             landed = []
     if not hops:
-        return [_row("hop", "no landing has been followed by a dispatch yet")]
+        return [_row("hop", "no landing has been followed by a writer's dispatch yet")]
     said = f"median {statistics.median(hops):.0f} min, longest {max(hops):.0f} min"
-    return [_row("hop", f"{len(hops)} hop(s) from a landing to the next dispatch, {said}")]
+    return [_row("hop", f"{len(hops)} hop(s) from a landing to the next writer's dispatch, {said}")]
 
 
 def usage(state: Path, root: Path, clock: datetime.datetime) -> list[str]:
