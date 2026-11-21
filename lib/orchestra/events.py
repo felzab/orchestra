@@ -38,7 +38,6 @@ from orchestra import Refused, brief, cli, config, context, findings, log, model
 from orchestra.hooks import ASKING, PLUGIN, concerns_plugin
 from orchestra.store import Record
 
-TYPES: tuple[str, ...] = typing.get_args(model.AgentType)
 # The most a hook waits on locks and retries in all, inside the 30-s `timeout` each registration in
 # hooks/hooks.json sets, so the hook decides before Claude Code cancels it; a test holds the order.
 BUDGET_SECONDS = 20.0
@@ -134,8 +133,6 @@ class Where:
     plugin: str | None
     # The record holding `agent_id`.
     agent: model.Agent | None
-    # Whether the main session's id holds the state's lease.
-    coordinator: bool
     # The branch's pointer `hooks` read from git's own files, `<common>/orchestra/<branch>`; None where git found it.
     pointer: Path | None
 
@@ -144,6 +141,22 @@ class Where:
         """The main session's id, whose folder holds the transcripts of the agents it dispatched."""
         held = self.data.get("session_id")
         return held if isinstance(held, str) else None
+
+    @functools.cached_property
+    def leased(self) -> bool:
+        """Whether the input's session id, a subagent's included, holds the state's lease; read once an event asks.
+
+        A lease that cannot be read is refused at each read, since a raising property caches nothing.
+        """
+        if self.state is None:
+            return False
+        owner = store.lease(self.state).get("owner")
+        return owner is not None and owner == self.session
+
+    @property
+    def coordinator(self) -> bool:
+        """Whether the event is the main session's, and its id holds the state's lease."""
+        return self.agent_id is None and self.leased
 
     @functools.cached_property
     def root(self) -> Path | None:
@@ -213,15 +226,14 @@ def _faulted(event: str, data: Record, fault: str, *, held: Path | bool, place: 
     answer it: `away.json` alone decides, the event's owner being among what may have failed to read.
     """
     state = None
-    logged: list[bool] = []
+    logged = False
     try:
         state = _state(held=held, place=place)
         if state is not None and _owned(data, state):
-            known = state
             tool = data.get("tool_name")
             said = f"{event}{f' ({tool})' if isinstance(tool, str) else ''} failed: {fault}"
-            with store.unleased():
-                _quietly(lambda: logged.append(bool(log.record(known, "hook", said))))
+            with store.unleased(), contextlib.suppress(Refused):
+                logged = bool(log.record(state, "hook", said))
     except Exception:
         LOGGER.exception("orchestra hook %s could not log its fault", event)
     if event == "PreToolUse" and concerns_plugin(event, data):
@@ -272,15 +284,10 @@ def _where(data: Record, *, held: Path | bool, place: Path) -> Where:
     kind = data.get("agent_type")
     plugin = kind.removeprefix(PLUGIN) if isinstance(kind, str) and kind.startswith(PLUGIN) else None
     agent = None
-    coordinator = False
-    if state is not None:
-        if agent_id is not None:
-            agent = next((held for held in model.agents(state) if agent_id in {_id(i) for i in held.ids}), None)
-        else:
-            owner = store.lease(state).get("owner")
-            coordinator = owner is not None and owner == data.get("session_id")
+    if state is not None and agent_id is not None:
+        agent = next((held for held in model.agents(state) if agent_id in {_id(i) for i in held.ids}), None)
     pointer = held if isinstance(held, Path) else None
-    return Where(data, cwd, place, state, agent_id, plugin, agent, coordinator, pointer)
+    return Where(data, cwd, place, state, agent_id, plugin, agent, pointer)
 
 
 def _quietly(act: Callable[[], object]) -> None:
@@ -383,7 +390,7 @@ def pre_tool_use(where: Where) -> str | None:
 def _dispatch(where: Where, given: Record) -> str | None:
     """A checked brief's agent started with its profile, its name, its worktree and its three paths."""
     sub = given.get("subagent_type")
-    if not isinstance(sub, str) or not sub.startswith(PLUGIN) or sub.removeprefix(PLUGIN) not in TYPES:
+    if not isinstance(sub, str) or not sub.startswith(PLUGIN) or sub.removeprefix(PLUGIN) not in report.TYPES:
         return None
     kind = sub.removeprefix(PLUGIN)
     state, root = where.state, where.root
@@ -393,7 +400,7 @@ def _dispatch(where: Where, given: Record) -> str | None:
         why = "no orchestra session holds this branch: `orchestra init <session>` makes one"
     elif not where.coordinator:
         # The verbs' own refusal, so the dispatch names the takeover as every verb does.
-        held, me = store.lease(state), str(where.data.get("session_id"))
+        held, me = store.lease(state), str(where.session)
         why = store.refusal(held, me, store.takeover_at(state)) or "this session holds no lease"
     elif not model.NAME_RE.fullmatch(name):
         why = "an orchestra dispatch's prompt is the agent's name alone, as `orchestra brief NAME` wrote its brief"
@@ -404,13 +411,12 @@ def _dispatch(where: Where, given: Record) -> str | None:
             " brief from a file holding its lists and its four sections, and checks it"
         )
     else:
-        return _start(where, given, model.read_agent(state, name), root)
+        return _start(where, given, model.read_agent(state, name), root, kind)
     return None if _waived(where, call) else _deny(why)
 
 
-def _start(where: Where, given: Record, agent: model.Agent, root: Path) -> str | None:
+def _start(where: Where, given: Record, agent: model.Agent, root: Path, kind: str) -> str | None:
     state = typing.cast("Path", where.state)
-    kind = str(given["subagent_type"]).removeprefix(PLUGIN)
     name = agent.name
     head = brief.header(state, name)
     try:
@@ -482,8 +488,7 @@ def _agent_fence(where: Where, target: str) -> str | None:
         return None if _waived(where, f"a write to {target} ({why})") else _deny(why)
     own = report.path(state, agent.name, _round(agent))
     scratch = state / store.SCRATCH / agent.name
-    if agent.type in report.COMMITTING:
-        _record_branch(where, agent)
+    _record_branch(where, agent)
     if config.identical(Path(target), own) or config.within(Path(target), scratch):
         return None
     if agent.type in report.COMMITTING:
@@ -694,10 +699,7 @@ def _away(where: Where) -> bool:
     state = where.state
     if state is None or not (state / store.AWAY).exists():
         return False
-    if where.agent is not None:
-        return True
-    owner = store.lease(state).get("owner")
-    return owner is not None and owner == where.data.get("session_id")
+    return where.agent is not None or where.leased
 
 
 def _refused_away(where: Where, reason: object = None) -> bool:
@@ -1169,8 +1171,8 @@ def session_end(where: Where) -> str | None:
     session takes it with `orchestra mode takeover` at once rather than after ten quiet minutes.
     Another reason, such as a closed window, keeps the lease: that session may be resumed by its id.
     """
-    state, session = where.state, where.data.get("session_id")
-    if not where.coordinator or state is None or where.data.get("reason") != CLEARED or not isinstance(session, str):
+    state, session = where.state, where.session
+    if not where.coordinator or state is None or where.data.get("reason") != CLEARED or session is None:
         return None
     # Unleased: the hook's process may carry the new id already, which holds no lease.
     with store.unleased():
