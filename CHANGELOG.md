@@ -85,6 +85,9 @@ The fixes from the third project session that ran on the plugin.
 - The hooks wait on less: an attended turn's end reads no agent's transcript, the prompt and
   post-call hooks take the primary checkout from `session.json` where its `.git` folder holds the
   session's pointer, rather than from two git runs, and an agent's `SendMessage` loads nothing.
+- A coordinator's prompt reads the compaction window without loading `init`'s modules, about 40 ms
+  less a prompt, and a command finds the checkout once rather than two or three times, about 85 ms
+  less a command that changes the record.
 - The guide's sample `mechanical` profile runs Sonnet at `high` effort rather than `medium`.
 - `judge` names a new finding at the anchor of a closed row too, with the row's close and its
   evidence, so a defect raised again is judged with the first judgement in view.
@@ -136,6 +139,9 @@ The fixes from the third project session that ran on the plugin.
   `orchestra status --end`.
 - On Windows, the process that deletes a pruned worktree in the background opens no console window
   where the Python that starts it is a launcher, such as a virtual environment's `python.exe`.
+- An agent whose report's summary quotes a usage-limit notice or an API error, as one citing Claude
+  Code's errors page does, is read as reported, where it was marked stopped with its report
+  unchecked; only a last message that opens with the notice or the error stops it.
 
 ## [0.3.0] - 2026-11-19
 
