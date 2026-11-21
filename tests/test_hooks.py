@@ -20,7 +20,7 @@ from typing import Any, cast
 
 import pytest
 
-from conftest import LIB, MakeRepo, git, inprocess, write_agent, write_config
+from conftest import LIB, MakeRepo, MakeSession, git, inprocess, write_agent, write_config
 from orchestra import context, events, findings, hooks, log, model, process, queue, report, store
 from test_context import line, transcript
 from test_pages import parses
@@ -114,14 +114,17 @@ def changed(state: Path, name: str, **values: object) -> None:
     model.update_agent(state, name, lambda held: dataclasses.replace(held, **values))
 
 
-@pytest.fixture
-def state(project: Path) -> Path:
+def _session(project: Path) -> None:
     (project / "lib").mkdir()
     (project / "lib" / "a.py").write_bytes(b"x\n")
     git(project, "add", ".")
     git(project, "commit", "-m", "lib")
     assert run("init", "s1", cwd=project).returncode == 0
-    return store.state_dir(project)
+
+
+@pytest.fixture
+def state(make_session: MakeSession) -> Path:
+    return make_session("hooks", _session)
 
 
 def briefed(project: Path, name: str, kind: str, *, checked: bool = True, **lists: str) -> Path:

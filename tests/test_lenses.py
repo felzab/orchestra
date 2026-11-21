@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from conftest import git, inprocess, write_agent, write_config
+from conftest import MakeSession, git, inprocess, write_agent, write_config
 from orchestra import Refused, diff, model
 
 # A lens file of the project's own for each form, each replacing the plugin's of its name.
@@ -43,10 +43,14 @@ def _lens_lines(stdout: str) -> dict[str, str]:
     return {line.split()[1].rstrip(","): line for line in stdout.splitlines() if line.startswith("lens ")}
 
 
-@pytest.fixture
-def changed(project: Path) -> Path:
-    """A session whose change touches a test file, a skill page and a stored-state path."""
+def _session(project: Path) -> None:
     assert inprocess("init", "s1", cwd=project).returncode == 0
+
+
+@pytest.fixture
+def changed(project: Path, make_session: MakeSession) -> Path:
+    """A session whose change touches a test file, a skill page and a stored-state path."""
+    make_session("lenses", _session)
     for path in CHANGED:
         (project / path).parent.mkdir(parents=True, exist_ok=True)
         (project / path).write_bytes(b"x\n")

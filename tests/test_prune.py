@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from conftest import LIB, MakeRepo, git, inprocess, line, transcript, write_agent, write_config
+from conftest import LIB, MakeRepo, MakeSession, git, inprocess, line, transcript, write_agent, write_config
 from orchestra import model, prune, queue, store
 from test_report import text as report_text
 
@@ -43,14 +43,19 @@ class Fleet:
 
 def make_fleet(root: Path, settings: dict[str, object] | None = None) -> Fleet:
     """The repository at `root` with its configuration committed, and a session made on it."""
-    write_config(root, {"stateRoot": (root.parent / "state").as_posix(), **(settings or {})})
+    configured(root, settings)
+    return Fleet(root, store.state_dir(root))
+
+
+def configured(root: Path, settings: dict[str, object] | None = None) -> None:
+    """`make_fleet`'s steps; the state root relative, so a copy commits the same bytes."""
+    write_config(root, {"stateRoot": "../state", **(settings or {})})
     (root / ".gitignore").write_bytes(IGNORED)
     git(root, "add", "-A")
     git(root, "commit", "-q", "-m", "Repo: The configuration")
     # The configuration is committed on whichever branch is checked out, so the base is named rather than read.
     done = inprocess("init", "s", "--base", "main", cwd=root)
     assert done.returncode in (0, 1), done.stderr
-    return Fleet(root, store.state_dir(root))
 
 
 def write(root: Path, rel: str, text: str) -> Path:
@@ -126,8 +131,8 @@ def branches(fleet: Fleet) -> list[str]:
 
 
 @pytest.fixture
-def fleet(tmp_path: Path, make_repo: MakeRepo) -> Iterator[Fleet]:
-    made = make_fleet(make_repo(tmp_path / "project"))
+def fleet(project: Path, make_session: MakeSession) -> Iterator[Fleet]:
+    made = Fleet(project, make_session("prune", configured))
     yield made
     # A case that failed midway can leave a deleter running; its trash is waited out, never left to the next case.
     for trash in (made.root / ".claude" / "worktrees" / TRASH, made.state / "trees" / TRASH):

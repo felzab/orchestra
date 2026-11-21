@@ -6,15 +6,18 @@ from pathlib import Path
 
 import pytest
 
-from conftest import inprocess
+from conftest import MakeSession, inprocess
 from orchestra import log, model, store
 
 
-@pytest.fixture
-def state(project: Path) -> Path:
-    """A session whose programme's rulings start at 101."""
+def _session(project: Path) -> None:
     assert inprocess("init", "s1", "--rulings-from", "101", cwd=project).returncode == 0
-    return project.parent / "state" / "project" / "s1"
+
+
+@pytest.fixture
+def state(make_session: MakeSession) -> Path:
+    """A session whose programme's rulings start at 101."""
+    return make_session("rulings", _session)
 
 
 def test_a_question_waits_with_its_options_until_the_owner_rules_on_it(project: Path, state: Path) -> None:

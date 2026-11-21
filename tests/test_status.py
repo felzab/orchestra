@@ -11,8 +11,9 @@ from pathlib import Path
 
 import pytest
 
-from conftest import claude_stub, git, inprocess, line, transcript, usage_answer, write_agent, write_config
+from conftest import MakeSession, claude_stub, git, inprocess, line, transcript, usage_answer, write_agent, write_config
 from orchestra import brief, ci, log, model, override, report, status, store
+from test_hooks import _session as hooks_session  # pyright: ignore[reportPrivateUsage]
 from test_hooks import briefed, changed, dispatched, run
 from test_report import text
 
@@ -70,11 +71,14 @@ def _ran(project: Path, ident: str, *, minutes: float, ended: bool = False, read
     transcript(folder, ident, line("assistant", "m1", read, calls=not ended), session="session-1", minutes=minutes)
 
 
-@pytest.fixture
-def built(project: Path) -> Path:
-    """A session with an agent in every state status reads, its findings, queue, plan and a drifted file."""
+def _session(project: Path) -> None:
     assert inprocess("init", "s1", cwd=project).returncode == 0
-    state = _state(project)
+
+
+@pytest.fixture
+def built(project: Path, make_session: MakeSession) -> Path:
+    """A session with an agent in every state status reads, its findings, queue, plan and a drifted file."""
+    state = make_session("status", _session)
     store.write_text(state / store.PLAN, PLAN)
     # Queued before the agents' records, so DONE's report, stamped as its record is written, comes after it.
     model.write_queue(
@@ -501,14 +505,10 @@ S2_HELD = "waits     slice S2, which no agent took: it is after S1, which is unt
 
 
 @pytest.fixture
-def chained(project: Path) -> Path:
+def chained(project: Path, make_session: MakeSession) -> Path:
     """A session whose writer W, dispatched as `w1`, is on S1, the slice S2 is after."""
-    (project / "lib").mkdir()
-    (project / "lib" / "a.py").write_bytes(b"x\n")
-    git(project, "add", ".")
-    git(project, "commit", "-m", "lib")
-    assert run("init", "s1", cwd=project).returncode == 0
-    state = store.state_dir(project)
+    # The session test_hooks.py's `state` makes.
+    state = make_session("hooks", hooks_session)
     store.write_text(state / store.PLAN, CHAINED)
     briefed(project, "W", "writer")
     dispatched(project, "W", "writer", "w1")

@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from conftest import MakeRepo, git
+from conftest import MakeSession, git
 from orchestra import land, log, model, prune
 from orchestra.config import Step
 from test_prune import TRASH, Fleet, add_agent, commit, make_fleet, ran, route, wait_gone, write
@@ -51,9 +51,13 @@ STEPS = [
 
 
 @pytest.fixture
-def fleet(tmp_path: Path, make_repo: MakeRepo) -> Fleet:
-    made = make_fleet(make_repo(tmp_path / "project"), {"land": {"steps": STEPS}})
-    hooks = tmp_path / "hooks"
+def fleet(project: Path, make_session: MakeSession) -> Fleet:
+    return Fleet(project, make_session("land", _landing))
+
+
+def _landing(root: Path) -> None:
+    made = make_fleet(root, {"land": {"steps": STEPS}})
+    hooks = root.parent / "hooks"
     # Git runs a hook only where its executable bit is set, which a Windows checkout does not need.
     write(hooks, "commit-msg", COMMIT_MSG_HOOK).chmod(0o755)
     write(hooks, "prepare-commit-msg", PREPARE_HOOK).chmod(0o755)
@@ -75,7 +79,6 @@ def fleet(tmp_path: Path, make_repo: MakeRepo) -> Fleet:
     # The install's output is ignored, as an install folder is.
     with (made.root / ".git" / "info" / "exclude").open("ab") as excluded:
         excluded.write(b"installed.txt\n")
-    return made
 
 
 def agent(fleet: Fleet, name: str = "WORKER", ident: str = "a1") -> Path:

@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from conftest import git, inprocess, orchestra, write_agent
+from conftest import MakeSession, git, inprocess, orchestra, write_agent
 from orchestra import config, log, model, store
 
 OWNER = {store.SESSION_ID: "session-owner"}
@@ -22,11 +22,14 @@ def _run(*args: str, cwd: Path, env: dict[str, str] = OWNER) -> subprocess.Compl
     return inprocess(*args, cwd=cwd, env=env)
 
 
-@pytest.fixture
-def session(project: Path) -> Path:
-    """A session made by the owner; its state."""
+def _session(project: Path) -> None:
     assert _run("init", "s1", cwd=project).returncode == 0
-    return project.parent / "state" / "project" / "s1"
+
+
+@pytest.fixture
+def session(make_session: MakeSession) -> Path:
+    """A session made by the owner; its state."""
+    return make_session("mode", _session)
 
 
 def _user(project: Path) -> Path:

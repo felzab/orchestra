@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from conftest import git, inprocess, line, transcript, write_config
+from conftest import MakeSession, git, inprocess, line, transcript, write_config
 from orchestra import brief, config, context, model, store
 
 BODY = (
@@ -20,16 +20,19 @@ BODY = (
 )
 
 
-@pytest.fixture
-def state(project: Path) -> Path:
-    """A session on `main`, whose branch holds `lib/a.py` and `docs/[id]/page.md`."""
+def _session(project: Path) -> None:
     for path in ("lib/a.py", "docs/[id]/page.md"):
         (project / path).parent.mkdir(parents=True, exist_ok=True)
         (project / path).write_bytes(b"x\n")
     git(project, "add", ".")
     git(project, "commit", "-m", "files")
     assert inprocess("init", "s1", cwd=project).returncode == 0
-    return store.state_dir(project)
+
+
+@pytest.fixture
+def state(make_session: MakeSession) -> Path:
+    """A session on `main`, whose branch holds `lib/a.py` and `docs/[id]/page.md`."""
+    return make_session("brief", _session)
 
 
 def briefed(project: Path, name: str, *, kind: str = "writer", **values: str) -> Path:

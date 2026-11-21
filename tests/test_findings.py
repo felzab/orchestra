@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from conftest import inprocess, line, transcript, write_agent
+from conftest import MakeSession, inprocess, line, transcript, write_agent
 from orchestra import context, log, model, report, store
 
 STORE = "lib/store.py :: save"
@@ -46,11 +46,14 @@ class Written:
         return "\n".join([*head, *items, *closing, *section, *tail])
 
 
-@pytest.fixture
-def state(project: Path) -> Path:
+def _session(project: Path) -> None:
     done = inprocess("init", "s", cwd=project)
     assert done.returncode in {0, 1}, done.stderr
-    return store.state_dir(project)
+
+
+@pytest.fixture
+def state(make_session: MakeSession) -> Path:
+    return make_session("findings", _session)
 
 
 def agent(state: Path, name: str, kind: model.AgentType | Written, status: model.AgentStatus = "reported") -> None:

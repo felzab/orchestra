@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from conftest import inprocess, orchestra, write_agent
+from conftest import MakeSession, inprocess, orchestra, write_agent
 from orchestra import FAULT, log, model, store
 from orchestra import queue as items
 from orchestra.status import paced
@@ -16,10 +16,13 @@ EARLY = "2026-11-17T10:00:00+01:00"
 LATER = "2026-11-17T11:00:00+01:00"
 
 
-@pytest.fixture
-def state(project: Path) -> Path:
+def _session(project: Path) -> None:
     assert inprocess("init", "s1", cwd=project).returncode == 0
-    held = store.state_dir(project)
+
+
+@pytest.fixture
+def state(make_session: MakeSession) -> Path:
+    held = make_session("queue", _session)
     write_agent(held, model.Agent("A", "writer", "running"))
     return held
 
