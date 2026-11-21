@@ -35,7 +35,7 @@ BUDGETS = {
     "skills/end/SKILL.md": 500,
     "skills/resume/SKILL.md": 500,
     "skills/plan/SKILL.md": 1913,
-    "skills/agent/SKILL.md": 7133,
+    "skills/agent/SKILL.md": 7175,
     "agents/writer.md": 7224,
     "agents/driver.md": 5000,
     "agents/researcher.md": 4500,
@@ -80,6 +80,8 @@ RULES = {
         "in a worktree, run each command plain from its root, with no `;`, `$?`, `$VAR`, `$(...)`, loop, heredoc"
         " or `git -C`",
         "A worktree holding no commit goes at the stop, so a writer commits what is done before it stops",
+        # An earlier rewording gave the handover to the driver alone, and a writer with nothing done lost its own.
+        "and a writer with nothing yet to commit cannot be resumed",
         "since a successor takes the answer",
     ),
     "skills/run/SKILL.md": (
