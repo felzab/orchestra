@@ -1013,6 +1013,27 @@ def test_an_idle_turn_continues_only_while_nobody_watches(project: Path, state: 
     assert '- nothing runs, and no `orchestra note --waiting "<what>"` names what the session waits on' in said
 
 
+def test_an_attended_turns_end_reads_no_transcript(project: Path, state: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Whether an agent works matters only while nobody watches, and each read costs the owner's turn its wait."""
+    briefed(project, "A", "auditor")
+    dispatched(project, "A", "auditor", "a1")
+
+    def refused(*_: object) -> None:
+        raise AssertionError("a transcript was read")
+
+    with monkeypatch.context() as patched:
+        patched.setattr(context, "working", refused)
+        patched.setattr(context, "transcript", refused)
+        # Quiet: a read would fault the hook, which says so on stderr.
+        code, said = hook("Stop", project, stop_hook_active=False, background_tasks=[])
+    assert code == 0
+    assert "nothing runs" not in str(said)
+    # Away, the same turn's end reads A's transcript, finds none, and names the stall as before.
+    store.write_json(state / store.AWAY, {"since": model.now(), "until": None, "log": 0, "files": []})
+    said = context_of(hook("Stop", project, stop_hook_active=False, background_tasks=[])[1], "Stop")
+    assert '- nothing runs, and no `orchestra note --waiting "<what>"` names what the session waits on' in said
+
+
 # --- the away mode --------------------------------------------------------------------------------
 
 BASH: dict[str, object] = {

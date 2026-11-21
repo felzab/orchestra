@@ -903,12 +903,9 @@ def stop(where: Where) -> str | None:
     ]
     undone += [f"queue item {item.number} is due: {item.text}" for item in queue.due(state)]
     entries = log.entries(state)
-    tasks = where.data.get("background_tasks")
-    busy = any(context.working(agent, where.session) for agent in agents) or (
-        isinstance(tasks, list) and len(typing.cast("list[object]", tasks)) > 0
-    )
-    # A session nobody watches must never stall unseen; an attended one ends its turn in front of its owner.
-    if not busy and not _waits(agents, entries) and (state / store.AWAY).exists():
+    # A session nobody watches must never stall unseen; an attended one ends its turn in front of its owner. So
+    # each agent's transcript is read only while away, and last: an attended turn's end reads none.
+    if (state / store.AWAY).exists() and not _waits(agents, entries) and not _busy(where, agents):
         undone.append('nothing runs, and no `orchestra note --waiting "<what>"` names what the session waits on')
     now = state / store.NOW
     if now.is_file():
@@ -928,6 +925,14 @@ def stop(where: Where) -> str | None:
     if not undone:
         return None
     return _context("Stop", "Undone in this orchestra session:\n" + "\n".join(f"- {line}" for line in undone))
+
+
+def _busy(where: Where, agents: list[model.Agent]) -> bool:
+    """Whether a background task runs, or an agent's transcript says it may still be working, read in that order."""
+    tasks = where.data.get("background_tasks")
+    if isinstance(tasks, list) and len(typing.cast("list[object]", tasks)) > 0:
+        return True
+    return any(context.working(agent, where.session) for agent in agents)
 
 
 def _writer(agents: list[model.Agent], dispatched: str) -> bool:
