@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 
 from conftest import claude_stub, git, inprocess, line, transcript, usage_answer, write_agent, write_config
-from orchestra import brief, ci, model, override, report, status, store
+from orchestra import brief, ci, log, model, override, report, status, store
 from test_hooks import briefed, changed, dispatched, run
 from test_report import text
 
@@ -597,6 +597,30 @@ def test_the_waits_lines_read_each_brief_once_while_an_item_waits_on_a_slice(
     monkeypatch.setattr(brief, "header", counted)
     assert "waits     #3 (when landed:S2) push: waits on slice S2, which has not landed" in status.paced(built)
     assert sorted(read) == sorted(agent.name for agent in model.agents(built))
+
+
+def test_the_end_reads_the_log_once_and_each_brief_once(
+    project: Path, built: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Every section of the view reads what the view read first, since no view writes the log or a brief."""
+    entries: list[Path] = []
+    headers: list[str] = []
+    logged, header = log.entries, brief.header
+
+    def counted_log(state: Path) -> list[log.Entry]:
+        entries.append(state)
+        return logged(state)
+
+    def counted_header(state: Path, name: str) -> brief.Header:
+        headers.append(name)
+        return header(state, name)
+
+    monkeypatch.setattr(log, "entries", counted_log)
+    monkeypatch.setattr(brief, "header", counted_header)
+    done = inprocess("status", "--end", cwd=project)
+    assert done.returncode in {0, 1}, done.stderr
+    assert len(entries) == 1
+    assert sorted(headers) == sorted(agent.name for agent in model.agents(built))
 
 
 def test_a_verb_closes_on_five_waits_lines_and_a_count_of_the_rest(built: Path) -> None:
