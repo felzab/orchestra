@@ -100,6 +100,16 @@ The fixes from the third project session that ran on the plugin.
   pattern only where the path begins with the pattern's literal start, which makes the drift check
   of a long session faster with the same lines, and the turn-end hook hands the queue the records
   and the log it has already read.
+- `orchestra land NAME`, `orchestra prune` and `judge` wait on less: a landing reads the other
+  agents' branches only where a conflict names who else changed a path, and passes over agents
+  already landed or pruned; no researcher's, auditor's or verifier's transcript is searched for a
+  branch; prune looks up each branch once; and `judge` reads which agents are live only for a
+  verifier's report.
+- `orchestra status`, its `--measure` and `--end` views, the overview a compaction or a resume
+  gives the coordinator and the `waits` lines `judge` and `land` close on read each brief, the plan
+  and the log once a view, where they read each brief up to five times and the plan up to seven,
+  and a read of the findings, the queue or the rulings builds only each row's last line; the lines
+  printed are the same.
 
 ### Fixed
 
@@ -118,6 +128,14 @@ The fixes from the third project session that ran on the plugin.
 - `orchestra land NAME` on a branch the session branch already holds stamps the agent landed where
   its report says its work is done, and not where it stopped on a question; a writer whose `DONE`
   branch was lost before it landed no longer reads as landed, and its slice stays to do.
+- `orchestra land NAME` on a branch with no commit of its own that took in the session branch by a
+  fast-forward, as an agent merges the session branch into its own, reads nothing to land, where it
+  closed every row the agent's report names fixed with another agent's landing as the evidence. A
+  branch moved onto the session branch by a fast-forward made by hand is no longer credited either:
+  only a merge commit credits a landing, and the rows it leaves routed are named by
+  `orchestra status --end`.
+- On Windows, the process that deletes a pruned worktree in the background opens no console window
+  where the Python that starts it is a launcher, such as a virtual environment's `python.exe`.
 
 ## [0.3.0] - 2026-11-19
 
