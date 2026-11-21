@@ -52,7 +52,9 @@ included. One compaction cost about as much as 250,000 input tokens: the summary
 tokens of instructions, skills and summary written again, and about 35,000 tokens read again in the
 following half hour. Claude Code caps the window at the model's context, so on a model with a
 smaller context the window changes nothing. Since the coordinator compacts itself at seams from 60%
-of the window (below), the window decides only the compactions that fall at no seam.
+of the window (below), the window decides only the compactions that fall at no seam. At a seam the
+minute's pause is accepted, since a compaction there loses nothing in flight, and on the same replay
+compacting near 300,000 and 400,000 tokens cost 0.85 and 0.91 of compacting near 500,000.
 
 A compaction replaces the conversation with a summary, and the session-start hook gives the state
 back from its files; what it can lose is detail still in flight. So the coordinator compacts itself
