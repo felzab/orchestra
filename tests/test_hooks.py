@@ -1147,14 +1147,17 @@ def _judged(project: Path, name: str, kind: str, lens: str = "none") -> subproce
     return judged
 
 
-def test_a_falsely_sequenced_slice_waits_free_and_eight_judged_reports_not_disclosure_only_make_the_checkpoint_due(
-    project: Path, state: Path
+def test_a_falsely_sequenced_slice_waits_free_and_judged_reports_not_disclosure_only_make_the_checkpoint_due(
+    project: Path, state: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """S2 needs nothing of S1, so the program names it free; the estimate is looked at again every eight reports.
+    """S2 needs nothing of S1, so the program names it free; the estimate is looked at again every `JUDGED` reports.
 
     A researcher whose `Lens:` names disclosure alone frees no planned work, before a push or in the review, in
-    any round; a report whose brief cannot be read, or whose `Lens:` names another lens beside, counts.
+    any round; a report whose brief cannot be read, or whose `Lens:` names another lens beside, counts. The count
+    is lowered for the case, since each report it counts costs a brief, a dispatch, a stop and a judge.
     """
+    monkeypatch.setattr(events, "JUDGED", 3)
+    count = events.JUDGED
     store.write_text(state / store.PLAN, PACED_PLAN)
     briefed(project, "W", "writer", owns="lib/a.py")
     free = "waits     slice S2, which no agent took: its files are free"
@@ -1182,16 +1185,16 @@ def test_a_falsely_sequenced_slice_waits_free_and_eight_judged_reports_not_discl
     second = run("judge", "DISCLOSE", "F1=close:MOOT:x", "F2=close:MOOT:x", "--verdict", "v", cwd=project)
     assert second.returncode == 0, second.stderr
     at = datetime.datetime.fromtimestamp(saved.stat().st_mtime).astimezone()
-    eighth = f"- 8 reports were judged since the last saved estimate ({at:%H:%M}), and 3 plan lines are unticked"
+    last = f"- {count} reports were judged since the last saved estimate ({at:%H:%M}), and 3 plan lines are unticked"
     # W and MAP stay at work throughout, so no wave ends: the count alone makes the checkpoint due.
-    for k in range(1, 9):
+    for k in range(1, count + 1):
         # A lens beside disclosure makes the read more than a disclosure-only one, so its report counts.
-        judged = _judged(project, f"A{k}", "auditor", lens="disclosure, contract" if k == 8 else "none")
+        judged = _judged(project, f"A{k}", "auditor", lens="disclosure, contract" if k == count else "none")
         assert free in judged.stdout.splitlines()
         if k == 1:
             # A brief that cannot be read is counted, as the report of any other agent is.
             (state / "briefs" / "A1.md").unlink()
-        assert _due(project) == ([] if k < 8 else [f"{eighth}: the checkpoint in checkpoint.md is due"])
+        assert _due(project) == ([] if k < count else [f"{last}: the checkpoint in checkpoint.md is due"])
     # A landing closes on what still waits.
     tree = project.parent / "trees" / "agent-w1"
     git(project, "worktree", "add", "-b", "worktree-agent-w1", str(tree))
