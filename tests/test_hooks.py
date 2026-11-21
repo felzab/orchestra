@@ -1100,6 +1100,26 @@ def test_an_attended_turns_end_reads_no_transcript(project: Path, state: Path, m
     assert '- nothing runs, and no `orchestra note --waiting "<what>"` names what the session waits on' in said
 
 
+def test_a_turns_end_hands_the_queue_what_it_read(project: Path, state: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The turn-end hook holds the records and the log, so the queue reading them again only adds to the wait."""
+    briefed(project, "A", "auditor")
+    model.write_queue(state, lambda _: [model.QueueItem(1, "reported", "judge the next report", "A")])
+    given: list[tuple[object, object]] = []
+    due = queue.due
+
+    def seen(where: Path, agents: object = None, entries: object = None) -> list[model.QueueItem]:
+        given.append((agents, entries))
+        return due(where, agents, entries)  # type: ignore[arg-type]
+
+    with monkeypatch.context() as patched:
+        patched.setattr(queue, "due", seen)
+        code, _ = hook("Stop", project, stop_hook_active=False, background_tasks=[])
+    assert code == 0
+    assert given
+    assert all(agents is not None for agents, _ in given)
+    assert all(entries is not None for _, entries in given)
+
+
 # --- the away mode --------------------------------------------------------------------------------
 
 BASH: dict[str, object] = {

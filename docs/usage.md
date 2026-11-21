@@ -307,7 +307,7 @@ orchestra rule 1 "Keep it for one release."
 
 `orchestra ask` alone lists the open questions. Each carries the number the state gives it, which
 the coordinator shows you, so answer by that number; a question asked again with `--supersedes`
-closes the one it replaces.
+closes the one it replaces, or, where that one has a ruling already, marks the ruling replaced.
 
 ## The configuration file
 

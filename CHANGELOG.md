@@ -85,6 +85,20 @@ The fixes from the third project session that ran on the plugin.
   post-call hooks take the primary checkout from `session.json` where its `.git` folder holds the
   session's pointer, rather than from two git runs, and an agent's `SendMessage` loads nothing.
 - The guide's sample `mechanical` profile runs Sonnet at `high` effort rather than `medium`.
+- `judge` names a new finding at the anchor of a closed row too, with the row's close and its
+  evidence, so a defect raised again is judged with the first judgement in view.
+- A verifier's row records as its evidence the verdict's first line that is no finding heading; a
+  corrected heading leads it only where it differs from the banked one.
+- `judge` warns, refusing nothing, where a row whose finding or verdict says its change is the
+  owner's word or call is routed to an agent; a route to a queue is not warned of.
+- A verifier's `CONFIRMED` verdict on a row closed `FIXED`, `RULED` or `HANDOFF` takes no
+  disposition and moves nothing; one on a row closed `NOT A DEFECT` or `MOOT` still takes one.
+- `orchestra ask "<question>" --supersedes N` takes a ruled question too and marks its ruling replaced, and
+  `rule`'s refusal of a second ruling names `--supersedes`.
+- `orchestra status` and the session-start hook test a changed path against a brief's `Owns:`
+  pattern only where the path begins with the pattern's literal start, which makes the drift check
+  of a long session faster with the same lines, and the turn-end hook hands the queue the records
+  and the log it has already read.
 
 ### Fixed
 
@@ -100,6 +114,9 @@ The fixes from the third project session that ran on the plugin.
 - A dispatch is recorded where git cannot find the primary checkout, and the hook names the rows it
   left unrouted and the `orchestra route <owner> <row>` that routes them.
 - A hook fault no longer refuses an agent's message to its coordinator.
+- `orchestra land NAME` on a branch the session branch already holds stamps the agent landed where
+  its report says its work is done, and not where it stopped on a question; a writer whose `DONE`
+  branch was lost before it landed no longer reads as landed, and its slice stays to do.
 
 ## [0.3.0] - 2026-11-19
 

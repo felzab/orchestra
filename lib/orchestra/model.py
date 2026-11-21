@@ -149,7 +149,8 @@ class Ruling:
     number: int | None = None
     words: str | None = None
     date: str | None = None
-    # The question asked in its place, where it was asked again: it is then neither open nor ruled on.
+    # The question asked in its place, where it was asked again: an open one is then closed unruled, and a
+    # ruled one's ruling is replaced by that question's.
     superseded_by: int | None = None
 
     @property

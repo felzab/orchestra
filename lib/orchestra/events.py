@@ -961,8 +961,9 @@ def stop(where: Where) -> str | None:
         for agent in agents
         if agent.status == "stopped"
     ]
-    undone += [f"queue item {item.number} is due: {item.text}" for item in queue.due(state)]
     entries = log.entries(state)
+    # The records and the log are read once here, so the queue takes them rather than reading them again.
+    undone += [f"queue item {item.number} is due: {item.text}" for item in queue.due(state, agents, entries)]
     # A session nobody watches must never stall unseen; an attended one ends its turn in front of its owner. So
     # each agent's transcript is read only while away, and last: an attended turn's end reads none.
     if (state / store.AWAY).exists() and not _waits(agents, entries) and not _busy(where, agents):
