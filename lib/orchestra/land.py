@@ -369,9 +369,13 @@ def land(here: Checkout, state: Path, name: str, args: argparse.Namespace) -> in
         merged = None if agent.status in model.SETTLED else _brought_in(root, branch)
         if merged is None:
             # Work its report calls delivered is on the session branch already, so it is stamped landed, which
-            # is what `queue.landed_nothing` reads; a report stopped on a question delivered nothing.
-            if agent.status not in model.SETTLED and agent.outcome in DELIVERED:
-                model.update_agent(state, name, lambda held: replace(held, status="landed"))
+            # is what `queue.landed_nothing` reads; a report stopped on a question delivered nothing. A resume
+            # and a limit's stop keep the outcome the round before reported, so only a judged record's is its
+            # latest round's word, and one a hook changed since it was read here keeps what the hook wrote.
+            if agent.status == "judged" and agent.outcome in DELIVERED:
+                model.update_agent(
+                    state, name, lambda held: replace(held, status="landed") if held.status == "judged" else held
+                )
                 log.record(state, "land", f"{name} landed: the session branch already holds {branch}")
             said = prune.prune(here, state, {name})
             cli.emit(args, said.failed + said.lines, f"nothing to land: the session branch already holds {branch}")
