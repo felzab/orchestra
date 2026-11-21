@@ -25,7 +25,6 @@ from orchestra import DONE
 
 if TYPE_CHECKING:
     # Named in annotations alone, so a hook's start never imports them.
-    import argparse
     from collections.abc import Callable
 
 # The events `hooks/hooks.json` registers, each by Claude Code's own name for it.
@@ -71,16 +70,6 @@ class Events(Protocol):
     """
 
     def answer(self, event: str, data: dict[str, object], *, held: Path | bool, place: Path | None) -> str | None: ...
-
-
-def add(verb: str, parser: argparse.ArgumentParser) -> None:
-    del verb  # `hook` is the module's one verb
-    # Not a choice: argparse refuses a choice with exit 2, which would block a prompt.
-    parser.add_argument("event", help="the hook event's name: " + ", ".join(EVENTS))
-
-
-def run(args: argparse.Namespace) -> int:
-    return main(args.event)
 
 
 def main(event: str) -> int:
