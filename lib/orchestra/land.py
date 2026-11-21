@@ -14,7 +14,7 @@ import argparse
 import re
 import subprocess
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Collection
 from dataclasses import replace
 from pathlib import Path
 
@@ -136,8 +136,9 @@ def _due(step: Step, touched: list[str]) -> bool:
     return any(path == when or (when.endswith("/") and path.startswith(when)) for path in touched for when in step.when)
 
 
-def _writes(step: Step, path: str) -> bool:
-    return any(path == out.rstrip("/") or path.startswith(out.rstrip("/") + "/") for out in step.writes)
+def _under(path: str, outs: Collection[str]) -> bool:
+    """Whether the path is one of the outputs or lies in one, a folder written with or without its `/`."""
+    return any(path == out.rstrip("/") or path.startswith(out.rstrip("/") + "/") for out in outs)
 
 
 def run_step(root: Path, step: Step) -> subprocess.CompletedProcess[bytes]:
@@ -167,12 +168,12 @@ def _merge(root: Path, message: str, branch: str, steps: tuple[Step, ...], writt
     if not merged and not conflicted:
         raise Stop(7, f"git merge --no-ff --no-commit {branch} failed with no file in conflict")
     regenerations = [step for step in steps if step.kind == "regenerate"]
-    if unanswered := [path for path in conflicted if not any(_writes(step, path) for step in regenerations)]:
+    if unanswered := [path for path in conflicted if not any(_under(path, step.writes) for step in regenerations)]:
         raise Stop(3, *(f"CONFLICT in {path}" for path in unanswered))
     touched = sorted({*_names(root, "diff", "--cached", "--name-only", "HEAD", code=7), *conflicted})
     said: list[str] = []
     for step in sorted(steps, key=lambda step: ORDER[step.kind]):
-        answers = step.kind == "regenerate" and any(_writes(step, path) for path in conflicted)
+        answers = step.kind == "regenerate" and any(_under(path, step.writes) for path in conflicted)
         if not (_due(step, touched) or answers):
             continue
         shown = " ".join(step.run)
@@ -218,9 +219,7 @@ def _abort(state: Path, name: str, root: Path, branch: str, stop: Stop, written:
     # under a path a step writes is this run's own.
     status = config.run_git(root, "status", "--porcelain", "-z")
     dirty = {entry[3:] for entry in status.stdout.decode("utf-8", "replace").split("\0") if entry}
-    if mine := sorted(
-        path for path in dirty if any(path == out or path.startswith(out.rstrip("/") + "/") for out in written)
-    ):
+    if mine := sorted(path for path in dirty if _under(path, written)):
         config.run_git(root, "restore", "--source=HEAD", "--staged", "--worktree", "--", *mine)
     status = config.run_git(root, "status", "--porcelain")
     clean = status.returncode == 0 and not status.stdout.strip()
