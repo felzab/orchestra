@@ -7,10 +7,18 @@
 // The registered name, which the model calls as `mcp__<plugin>__<name>` (plugins/mods/api.md, "Add a tool").
 const NAME = 'compact'
 const TOOL = 'mcp__orchestra__compact'
+// The share of the compaction window from which the tool compacts. A seam loses least, since the state then holds
+// everything in flight, and compacting lower costs less: replayed over one long coordinator day, compacting near
+// 300,000 and 400,000 tokens cost 0.85 and 0.91 of compacting near 500,000. Below it, the summary's own cost
+// outweighs what it saves; from it, a wave's growth still fits before Claude Code compacts on its own, about 33,000
+// tokens short of the window.
+const THRESHOLD = 0.6
 const DESCRIPTION =
   'Compacts this conversation as /compact does, once your current turn ends, then sends a one-line prompt so the' +
-  ' session carries on. For the orchestra coordinator at a seam, such as a wave’s end once the state holds' +
-  ' everything in flight. Refused in an agent and in a session with no orchestra state. End your turn after the call.'
+  ' session carries on. For the orchestra coordinator: call it at each natural seam, such as a wave’s end once the' +
+  ` state holds everything in flight; it compacts only from ${THRESHOLD * 100}% of the compaction window and` +
+  ' otherwise answers that no compaction is needed yet. Refused in an agent and in a session with no orchestra' +
+  ' state. End your turn after a call that schedules one.'
 // What the tool answers once the compaction is scheduled.
 const SCHEDULED = 'scheduled: end your turn, and the conversation compacts once it has ended'
 // `store.POINTERS`: the folder in git's common directory holding each branch's pointer to its state.
@@ -54,6 +62,16 @@ export async function stateOf($) {
   if (!(await $.fs.exists(pointer))) return null
   const state = (await $.fs.read(pointer)).trim()
   return state !== '' && (await $.fs.exists(state)) ? state : null
+}
+
+// The context in tokens and the compaction window it fills; null where either goes unread.
+async function fill($) {
+  // `percent` is of `window`, the model's whole context; the breakdown "measures against the compaction window
+  // (`rawMaxTokens`), which may be smaller than `window`" (SessionContextUsage), and `summary` "estimates locally
+  // and sends none" (SessionUsageArgs). `tokens` is the last response's input, as `context.size` reads it.
+  const { context } = await $.session.usage({ breakdown: 'summary' })
+  const window = context.breakdown?.rawMaxTokens
+  return context.tokens === undefined || window === undefined ? null : { tokens: context.tokens, window }
 }
 
 // Runs the queued `/compact`, then wakes the session whatever came of it: the coordinator ended its turn to let
@@ -121,12 +139,23 @@ export function register(on) {
         deny: `${TOOL} compacts an orchestra coordinator, and this session's checkout holds no orchestra session on its branch.`,
       }
     }
+    const read = await fill($)
+    // A size that goes unread schedules, as the tool did before it read one: the seam is where to compact.
+    if (read !== null && read.tokens < THRESHOLD * read.window) {
+      const share = Math.floor((100 * read.tokens) / read.window)
+      return {
+        result:
+          `not needed yet: the context is ${share}% of the ${read.window.toLocaleString('en-US')}-token compaction` +
+          ` window, below the ${THRESHOLD * 100}% from which this tool compacts. Nothing was scheduled; call it` +
+          ' again at a later seam.',
+      }
+    }
     pending = true
     return { result: SCHEDULED }
   }).catch(($, e, next) => ({
     // Without it a failed check, such as no `git` on the path, would leave the call to no hook, and it would fail
     // without saying why (`next.error`: "`kind` is `throw` or `timeout`, and `message` is the error's text").
-    deny: `${TOOL} could not check for an orchestra session, so nothing was scheduled: ${next.error.message}`,
+    deny: `${TOOL} could not check this session, so nothing was scheduled: ${next.error.message}`,
   }))
 
   on('turn.complete', ($, e, next) => {

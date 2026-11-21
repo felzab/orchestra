@@ -191,7 +191,7 @@ test("a pointer whose state folder is gone is refused as no state", async ($, on
 test('a check that cannot run git is refused with its reason, and schedules nothing', async ($, on) => {
   const { clock, seen, complete } = stub($, on, { git: false })
   const answer: any = await $.tool.call({ tool: TOOL })
-  expect(answer.deny).toMatch(/^mcp__orchestra__compact could not check for an orchestra session, so nothing was scheduled: .*git: not found/)
+  expect(answer.deny).toMatch(/^mcp__orchestra__compact could not check this session, so nothing was scheduled: .*git: not found/)
   await complete()
   await clock.settle()
   expect(seen.commands).toEqual([])
@@ -271,6 +271,43 @@ test('a resume prompt Claude Code refuses leaves a line saying why', async ($, o
   await clock.settle()
   expect(seen.prompts).toEqual(['The compaction scheduled with the compact tool has run.'])
   expect(seen.logs).toEqual(["the compaction's resume prompt was refused: the run reached its --max-turns limit"])
+})
+
+test('below 60% of the compaction window, the tool schedules nothing and says when to call again', async ($, on) => {
+  const { clock, seen, complete } = stub($, on, { tokens: 299_999 })
+  expect(await $.tool.call({ tool: TOOL })).toEqual({
+    result:
+      'not needed yet: the context is 59% of the 500,000-token compaction window, below the 60% from which this' +
+      ' tool compacts. Nothing was scheduled; call it again at a later seam.',
+  })
+  await complete()
+  await clock.settle()
+  expect(seen.commands).toEqual([])
+})
+
+test('at 60% of the compaction window the tool schedules', async ($, on) => {
+  const { clock, seen, complete } = stub($, on, { tokens: 300_000 })
+  expect(await $.tool.call({ tool: TOOL })).toEqual(SCHEDULED)
+  await complete()
+  await clock.settle()
+  expect(seen.commands).toEqual(['compact'])
+})
+
+test("above 60% of the compaction window the tool schedules, though under 60% of the model's", async ($, on) => {
+  // 400,000 tokens are 80% of the compaction window and 40% of the model's whole context, which `percent` is of.
+  const { clock, seen, complete } = stub($, on, { tokens: 400_000 })
+  expect(await $.tool.call({ tool: TOOL })).toEqual(SCHEDULED)
+  await complete()
+  await clock.settle()
+  expect(seen.commands).toEqual(['compact'])
+})
+
+test('a context with no reading schedules, as at a seam before the tool read one', async ($, on) => {
+  const { clock, seen, complete } = stub($, on, { tokens: null })
+  expect(await $.tool.call({ tool: TOOL })).toEqual(SCHEDULED)
+  await complete()
+  await clock.settle()
+  expect(seen.commands).toEqual(['compact'])
 })
 
 test('a /compact that rejects wakes the session saying so, and stops the tool', async ($, on) => {
