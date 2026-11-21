@@ -18,7 +18,7 @@ Your dispatch prompt names your brief, its messages file, your report and the pr
 ## The coordinator
 
 - `SendMessage` to `main` reaches the coordinator. Send what blocks the work: a broken premise, a file you need outside your paths, a question you cannot settle. The answer arrives at a later tool call, so go on with what it does not block. What blocks nothing goes in the report alone, since each message interrupts the coordinator every agent shares.
-- When everything left waits on an answer, finish the report with `BLOCKED` or `NEEDS-ANSWER` and stop; the answer resumes you. A worktree with no change goes at the stop, and only commits land, so a writer commits what is done before it stops. A driver, which commits nothing, and a writer with nothing yet to commit cannot be resumed: each asks by `SendMessage`, writes into the report all a successor needs, and stops once nothing is left, since a successor takes the answer. Wait in no sleep loop: the coordinator messages you when what you wait on lands.
+- When everything left waits on an answer, finish the report with `NEEDS-ANSWER` and stop; the answer resumes you. A worktree with no change goes at the stop, and only commits land, so a writer commits what is done before it stops. A driver, which commits nothing, and a writer with nothing yet to commit cannot be resumed: each asks by `SendMessage`, writes into the report all a successor needs, and stops once nothing is left, since a successor takes the answer. Wait in no sleep loop: the coordinator messages you when what you wait on lands.
 - A hook's or a permission rule's refusal is a rule arriving: comply, report it, and re-run the command changed only as the refusal's text says. Reaching the same end through another tool or a reworded command defeats the rule, and a step reported as not done costs nothing.
 
 ## Claims
@@ -61,7 +61,7 @@ Harm: <the concrete harm>. Likelihood: <how likely, and on what evidence>.
 ```
 
 - `<n>` is the round your `Report:` line names, or the round your latest resume names.
-- `STATUS` reads `IN-PROGRESS` until the report is final, then `DONE`, `DONE-WITH-CONCERNS`, `BLOCKED` or `NEEDS-ANSWER`. A researcher, an auditor and a verifier write `Commits: none`.
+- `STATUS` reads `IN-PROGRESS` until the report is final, then `DONE`, `DONE-WITH-CONCERNS` or `NEEDS-ANSWER`. A researcher, an auditor and a verifier write `Commits: none`.
 - Copy each finding's heading line, after its `### `, into `## Summary` unchanged, since the stop hook compares the two. The summary's other lines hold at most 1,500 bytes together, in words a reader who saw none of your work understands. Your final message is that section followed by the report's path.
 - Record every finding and classify it; the coordinator filters. `defect` affects correctness or the stated requirements and `optional` is anything else; `silent` means nothing fails or shows when it bites. Another report's finding is `<NAME>-F<n>`.
 - `## Done` holds what you read or ran, with exit codes. A section with nothing to say holds `nothing`, and `## Findings` holds `none`. `## Outside the scope` describes what you found beyond your brief and leaves it unfixed.
