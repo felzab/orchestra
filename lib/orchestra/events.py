@@ -56,8 +56,9 @@ SESSION_END_SECONDS = 1.0
 REPORTED: frozenset[str] = frozenset({"reported", "judged", "landed", "pruned"})
 # A stop refused this often lets the agent stop anyway, `stopped`: the next refusal would teach it nothing.
 REFUSALS = 2
-# What an agent's last message says when a usage limit or an API error ended it, so its report cannot be repaired.
-LIMIT_RE = re.compile(r"You(?:\u2019|')ve hit your [^\n]*\blimit|^API Error\b", re.MULTILINE)
+# What an agent's last message opens with when a usage limit or an API error ended it, so its report cannot be
+# repaired. Matched at the start alone: a report's summary citing Claude Code's errors page quotes the notice.
+LIMIT_RE = re.compile(r"You(?:\u2019|')ve hit your [^\n]*\blimit|API Error\b")
 # A `Rows:` line in a message routes its rows to the agent it goes to.
 ROWS_RE = re.compile(r"^[ \t]*Rows:[ \t]*(?P<rows>.+)$", re.MULTILINE)
 # The tools that write a file, and the input key naming it (permissions.md, "Tool-specific permission rules").
@@ -851,7 +852,7 @@ def subagent_stop(where: Where) -> str | None:
         return None
     name, round_ = agent.name, _round(agent)
     last = str(where.data.get("last_assistant_message") or "")
-    if LIMIT_RE.search(last):
+    if LIMIT_RE.match(last.lstrip()):
         _stopped(state, agent, last)
         return None
     _record_branch(where, agent)
