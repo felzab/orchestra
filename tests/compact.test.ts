@@ -4,43 +4,57 @@ import { expect, mock, test } from 'claude-code/testing'
 import { quote } from '../hooks/compact.js'
 
 const TOOL = 'mcp__orchestra__compact'
+const SCHEDULED = { result: 'scheduled: end your turn, and the conversation compacts once it has ended' }
 const COMMON = '/work/.git'
 const STATE = '/state/fleet'
-const POINTER = `${COMMON}/orchestra/main`
+// The primary checkout's branch needs quoting, so a pointer read without `quote` names no file.
+const POINTER = `${COMMON}/orchestra/fix%2Fa%20b`
 // A conversation of one message: a compaction runs over at least one and leaves at least one.
 const MESSAGES = [{ role: 'user', text: 'the work so far', toolUses: [] }]
 
 type Seen = { commands: string[]; prompts: string[]; logs: string[] }
+type Options = { pointed?: boolean; stale?: boolean; skip?: string; git?: boolean; others?: boolean }
 
-// Claude Code's answers for a checkout whose primary branch is `main`: `pointed` is whether that branch has a state,
-// `skip` a compaction's veto, and `git` false where no git starts.
-function stub(
-  t: any,
-  on: any,
-  { pointed = true, skip, git = true }: { pointed?: boolean; skip?: string; git?: boolean } = {},
-) {
+// Claude Code's answers for a checkout whose primary branch is `fix/a b`: `pointed` is whether that branch has a
+// state, `stale` a pointer whose state folder is gone, `skip` the veto of the compaction `/compact` runs, `git`
+// false where no git starts, and `others` an agent's and a precompute compaction settling after the main one while
+// `/compact` runs.
+function stub(t: any, on: any, { pointed = true, stale = false, skip, git = true, others = false }: Options = {}) {
   const clock = mock.clock(on)
   const seen: Seen = { commands: [], prompts: [], logs: [] }
+  // Whether the test's turn end is in flight, during which Claude Code's `$.command.run` rejects.
+  let ending = false
   on('tool.register', () => ({ value: { tool: TOOL } }))
   on('session.start', () => ({ cwd: '/work' }))
   on('session.root', () => ({ value: '/work' }))
   on('process.run', ($: any, e: any) => {
     if (!git) return { deny: 'git: not found' }
     const listed = e.argv.includes('worktree')
-    const stdout = listed ? 'worktree /work\nHEAD abc\nbranch refs/heads/main\n\nworktree /w2\nbranch refs/heads/b\n' : `${COMMON}\n`
+    const stdout = listed
+      ? 'worktree /work\nHEAD abc\nbranch refs/heads/fix/a b\n\nworktree /w2\nbranch refs/heads/b\n'
+      : `${COMMON}\n`
     return { value: { exitCode: 0, stdout, stderr: '' } }
   })
   // A path reaches the stub made absolute, on Windows with a drive and backslashes, so its end is compared.
   const at = (path: string, wanted: string) => path.replaceAll('\\', '/').endsWith(wanted)
-  on('fs.exists', ($: any, e: any) => ({ value: pointed && (at(e.path, POINTER) || at(e.path, STATE)) }))
+  on('fs.exists', ($: any, e: any) => ({ value: pointed && (at(e.path, POINTER) || (!stale && at(e.path, STATE))) }))
   on('fs.read', () => ({ value: `${STATE}\n` }))
   // The queued `/compact`, its compaction fired through the mod's `session.compact` hook as Claude Code's own is.
   on('command.run', async ($: any, e: any) => {
+    // `$.command.run` "Rejects ... inside a hook the turn or the session's start waits on" (claude-code.d.ts).
+    if (ending) return { deny: 'a command cannot run inside a hook the turn waits on' }
     seen.commands.push(e.command)
     await t.session.compact({ trigger: 'manual', messages: MESSAGES })
+    if (others) {
+      await t.session.compact({ trigger: 'auto', agentId: 'a1', messages: MESSAGES })
+      await t.session.compact({ trigger: 'precompute', messages: MESSAGES })
+    }
     return { text: '' }
   })
-  on('session.compact', () => (skip === undefined ? { messages: MESSAGES } : { skip }))
+  // Only the main conversation's `/compact` is vetoed, so the others compact.
+  on('session.compact', ($: any, e: any) =>
+    skip !== undefined && e.trigger === 'manual' && e.agentId === undefined ? { skip } : { messages: MESSAGES },
+  )
   on('prompt.submit', ($: any, e: any) => {
     seen.prompts.push(e.text)
     return { text: e.text }
@@ -50,10 +64,19 @@ function stub(
     return { value: undefined }
   })
   on('turn.complete', () => ({ text: '' }))
-  return { clock, seen }
+  // Ends a turn as Claude Code does, waiting on the mod's `turn.complete` hook.
+  const complete = async (reason = 'answer', agentId?: string) => {
+    ending = true
+    try {
+      await t.turn.complete(end(reason, agentId))
+    } finally {
+      ending = false
+    }
+  }
+  return { clock, seen, complete }
 }
 
-const end = (reason = 'answer', agentId?: string) => ({
+const end = (reason: string, agentId?: string) => ({
   turnId: 't1',
   answer: 'done',
   durationMs: 1,
@@ -63,50 +86,63 @@ const end = (reason = 'answer', agentId?: string) => ({
 })
 
 test("the main loop's call compacts once its turn ends, then wakes the session", async ($, on) => {
-  const { clock, seen } = stub($, on)
+  const { clock, seen, complete } = stub($, on)
   await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
-  const answer = await $.tool.call({ tool: TOOL })
-  expect(answer).toEqual({ result: 'scheduled: end your turn, and the conversation compacts once it has ended' })
+  expect(await $.tool.call({ tool: TOOL })).toEqual(SCHEDULED)
   expect(seen.commands).toEqual([])
-  await $.turn.complete(end())
+  await complete()
   await clock.settle()
   expect(seen.commands).toEqual(['compact'])
   expect(seen.prompts).toEqual(['The compaction scheduled with the compact tool has run.'])
+  // The next turn's end compacts nothing more: the request was the turn's that made it.
+  await complete()
+  await clock.settle()
+  expect(seen.commands).toEqual(['compact'])
+  expect(seen.prompts).toHaveLength(1)
 })
 
 test('an agent is refused, and its turn end compacts nothing', async ($, on) => {
-  const { clock, seen } = stub($, on)
+  const { clock, seen, complete } = stub($, on)
   const answer = await $.tool.call({ tool: TOOL, agentId: 'a1' })
   expect(answer).toEqual({ deny: `${TOOL} compacts the main conversation alone; agent a1 called it.` })
-  await $.turn.complete(end())
+  await complete()
   await clock.settle()
   expect(seen.commands).toEqual([])
 })
 
+const NO_STATE = {
+  deny: `${TOOL} compacts an orchestra coordinator, and this session's checkout holds no orchestra session on its branch.`,
+}
+
 test('a session whose branch holds no orchestra state is refused', async ($, on) => {
-  const { clock, seen } = stub($, on, { pointed: false })
-  const answer = await $.tool.call({ tool: TOOL })
-  expect(answer).toEqual({
-    deny: `${TOOL} compacts an orchestra coordinator, and this session's checkout holds no orchestra session on its branch.`,
-  })
-  await $.turn.complete(end())
+  const { clock, seen, complete } = stub($, on, { pointed: false })
+  expect(await $.tool.call({ tool: TOOL })).toEqual(NO_STATE)
+  await complete()
+  await clock.settle()
+  expect(seen.commands).toEqual([])
+})
+
+test("a pointer whose state folder is gone is refused as no state", async ($, on) => {
+  const { clock, seen, complete } = stub($, on, { stale: true })
+  expect(await $.tool.call({ tool: TOOL })).toEqual(NO_STATE)
+  await complete()
   await clock.settle()
   expect(seen.commands).toEqual([])
 })
 
 test('a check that cannot run git is refused with its reason, and schedules nothing', async ($, on) => {
-  const { clock, seen } = stub($, on, { git: false })
+  const { clock, seen, complete } = stub($, on, { git: false })
   const answer: any = await $.tool.call({ tool: TOOL })
   expect(answer.deny).toMatch(/^mcp__orchestra__compact could not check for an orchestra session, so nothing was scheduled: .*git: not found/)
-  await $.turn.complete(end())
+  await complete()
   await clock.settle()
   expect(seen.commands).toEqual([])
 })
 
 test('a turn the owner interrupts drops the compaction and sends no prompt', async ($, on) => {
-  const { clock, seen } = stub($, on)
+  const { clock, seen, complete } = stub($, on)
   await $.tool.call({ tool: TOOL })
-  await $.turn.complete(end('aborted'))
+  await complete('aborted')
   await clock.settle()
   expect(seen.commands).toEqual([])
   expect(seen.prompts).toEqual([])
@@ -114,20 +150,30 @@ test('a turn the owner interrupts drops the compaction and sends no prompt', asy
 })
 
 test("an agent's turn end leaves the main loop's request for the main loop's", async ($, on) => {
-  const { clock, seen } = stub($, on)
+  const { clock, seen, complete } = stub($, on)
   await $.tool.call({ tool: TOOL })
-  await $.turn.complete(end('answer', 'a1'))
+  await complete('answer', 'a1')
   await clock.settle()
   expect(seen.commands).toEqual([])
-  await $.turn.complete(end())
+  await complete()
   await clock.settle()
   expect(seen.commands).toEqual(['compact'])
 })
 
 test('a compaction a hook vetoes still wakes the session, saying why', async ($, on) => {
-  const { clock, seen } = stub($, on, { skip: 'blocked by a PreCompact hook' })
+  const { clock, seen, complete } = stub($, on, { skip: 'blocked by a PreCompact hook' })
   await $.tool.call({ tool: TOOL })
-  await $.turn.complete(end())
+  await complete()
+  await clock.settle()
+  expect(seen.prompts).toEqual([
+    'The compaction scheduled with the compact tool did not run: blocked by a PreCompact hook.',
+  ])
+})
+
+test("an agent's or a precompute compaction during the queued /compact leaves the main one's outcome", async ($, on) => {
+  const { clock, seen, complete } = stub($, on, { skip: 'blocked by a PreCompact hook', others: true })
+  await $.tool.call({ tool: TOOL })
+  await complete()
   await clock.settle()
   expect(seen.prompts).toEqual([
     'The compaction scheduled with the compact tool did not run: blocked by a PreCompact hook.',
