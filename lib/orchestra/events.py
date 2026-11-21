@@ -74,6 +74,8 @@ CACHE_MINUTES = 5
 NOW_EVENTS = 5
 # The most an `additionalContext` carries before Claude Code moves it to a file.
 CONTEXT_CHARS = 10_000
+# The room NOW.md leaves the overview's rows at the least: their count line, where every row is cut, and its line end.
+STATUS_CUT_CHARS = 80
 # The coordinator's own files in the state; every other file there is written by commands and hooks.
 OWN = frozenset({store.PLAN, store.NOW})
 # The project's own rules for each agent type, `<type>.md`, in the primary checkout.
@@ -1074,6 +1076,10 @@ def session_start(where: Where) -> str | None:
 
     The overview leaves out its rows naming judged and pruned agents, `FINISHED_ROWS`; `orchestra status` keeps them.
 
+    The whole stays within `CONTEXT_CHARS`, past which Claude Code keeps a preview and asks nobody to read the rest
+    (hooks.md, "JSON output"). NOW.md, the plan of record the coordinator goes on from, takes the room first; the
+    overview's rows fill what is left, and a line names any cut, so neither is ever cut unseen.
+
     After a `/clear` the new session holds no lease, and no input names the session it replaced, so it
     is told only that a `/clear` stopped this state a moment ago, never that the stopped session was its own.
     """
@@ -1083,22 +1089,65 @@ def session_start(where: Where) -> str | None:
     if not where.coordinator or state is None or root is None:
         return None
     clock = datetime.datetime.now().astimezone()
-    lines = [f"This session coordinates the orchestra session whose state is {state}."]
+    intro = f"This session coordinates the orchestra session whose state is {state}."
     # Imported here, since no other event reads it and every hook would pay for its imports.
     overview = typing.cast(
         "Callable[[datetime.datetime, Path, Path, str | None], tuple[list[str], str]]",
         importlib.import_module("orchestra.status").coordinator,
     )
+    rows: list[str] = []
+    tail: list[str] = []
     try:
         shown, summary = overview(clock, state, root, where.session)
         # The rows naming finished agents, which nothing after a compaction acts on; the `agents` row counts them.
-        shown = [line for line in shown if line.split(" ", 1)[0] not in FINISHED_ROWS]
-        lines += [f"`orchestra status` at {clock.isoformat(timespec='seconds')}:", *shown[: cli.LINES - 2], summary]
+        rows = [line for line in shown if line.split(" ", 1)[0] not in FINISHED_ROWS]
+        head, tail = f"`orchestra status` at {clock.isoformat(timespec='seconds')}:", [summary]
     except Refused as refused:
-        lines.append(f"`orchestra status` cannot be read: {refused}")
+        head = f"`orchestra status` cannot be read: {refused}"
     now = state / store.NOW
-    lines += ["", "NOW.md:", store.read_bytes(now).decode("utf-8", "replace") if now.is_file() else "(none)"]
-    return _context("SessionStart", "\n".join(lines))
+    held = store.read_bytes(now).decode("utf-8", "replace") if now.is_file() else "(none)"
+    # Every line but the rows and NOW.md, each with its line end, NOW.md's own included.
+    fixed = len("\n".join([intro, head, *tail, "", "NOW.md:", ""]))
+    kept = _head_of(held, CONTEXT_CHARS - fixed - STATUS_CUT_CHARS, now)
+    rows = _rows_within(rows, CONTEXT_CHARS - fixed - len(kept))
+    return _context("SessionStart", "\n".join([intro, head, *rows, *tail, "", "NOW.md:", kept]))
+
+
+def _head_of(text: str, room: int, path: Path) -> str:
+    """The text whole where it fits in `room` characters; else its head, cut at a line end, and a line naming the cut."""
+    if len(text) <= room:
+        return text
+
+    def cut(left: int) -> str:
+        return f"\n... {left:,} more character(s) of NOW.md left out: {path} holds it whole"
+
+    # The longest such line, so the head and the line fit whatever the count turns out to be.
+    keep = max(0, room - len(cut(len(text))))
+    end = text.rfind("\n", 0, keep)
+    head = text[: end if end > 0 else keep]
+    return head + cut(len(text) - len(head))
+
+
+def _rows_within(rows: list[str], room: int) -> list[str]:
+    """The rows whole where they fit in `room` characters and the lines a verb prints; else their head and a count.
+
+    Counted as `cli.emit` counts a verb's lines, so the overview cuts where `orchestra status` would.
+    """
+    limit = cli.LINES - 2
+    if len(rows) <= limit + 1 and sum(len(row) + 1 for row in rows) <= room:
+        return rows
+
+    def count(cut: int) -> str:
+        return f"... {cut} more line(s): `orchestra status` lists them"
+
+    budget = room - len(count(len(rows))) - 1
+    kept: list[str] = []
+    for row in rows[:limit]:
+        if budget < len(row) + 1:
+            break
+        kept.append(row)
+        budget -= len(row) + 1
+    return [*kept, count(len(rows) - len(kept))]
 
 
 def _cleared(state: Path) -> str | None:

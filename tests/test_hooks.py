@@ -21,7 +21,7 @@ from typing import Any, cast
 import pytest
 
 from conftest import LIB, MakeRepo, git, inprocess, write_agent, write_config
-from orchestra import context, events, findings, hooks, log, model, process, queue, report, store
+from orchestra import context, events, findings, hooks, log, model, process, queue, report, status, store
 from test_context import line, transcript
 from test_report import text
 
@@ -1356,6 +1356,52 @@ def test_a_compaction_or_a_resume_reads_the_state_back_from_disk(project: Path, 
     assert context.endswith("\nNOW.md:\n" + (state / "NOW.md").read_bytes().decode())
     # NOW.md follows whole, so status's `now` lines would give it twice.
     assert not any(line.startswith("now ") for line in context.splitlines())
+
+
+def test_after_a_compaction_now_md_takes_the_room_first_and_every_cut_is_named(
+    project: Path, state: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Past `CONTEXT_CHARS` Claude Code keeps a preview and asks nobody to read the rest, so nothing is cut unseen.
+
+    NOW.md holds the next action and its reason, which the state does not, so the overview's rows give way to it;
+    a NOW.md longer than the room keeps its head and names the file that holds it whole.
+    """
+    rows = [f"row {k:02} " + "x" * 90 for k in range(60)]
+    monkeypatch.setattr(status, "coordinator", lambda *_: (rows, "status: 60 rows"))
+    now = state / store.NOW
+
+    def started() -> str:
+        # The hook's last cut, at `CONTEXT_CHARS`, falls in its tail, which each case below reads whole.
+        return context_of(hook("SessionStart", project, source="compact")[1], "SessionStart")
+
+    whole = "".join(f"- line {k:03} of what comes next and why\n" for k in range(130))
+    now.write_bytes(whole.encode())
+    said = started()
+    assert said.endswith("\nNOW.md:\n" + whole)
+    lines = said.splitlines()
+    (count,) = [line for line in lines if line.startswith("... ")]
+    shown = [line for line in lines if line.startswith("row ")]
+    assert shown == rows[: len(shown)]
+    assert count == f"... {60 - len(shown)} more line(s): `orchestra status` lists them"
+    # The summary stays, below the count.
+    assert lines[lines.index(count) + 1] == "status: 60 rows"
+    # Rows that fit the room but not a verb's forty lines are cut where `orchestra status` cuts them.
+    rows[:] = [f"row {k:02}" for k in range(45)]
+    lines = started().splitlines()
+    assert [line for line in lines if line.startswith(("row ", "... "))] == [
+        *rows[:38],
+        "... 7 more line(s): `orchestra status` lists them",
+    ]
+    # A NOW.md past the room keeps its head, cut at a line end, and names what it left out.
+    rows[:] = [f"row {k:02} " + "x" * 90 for k in range(60)]
+    longer = whole * 3
+    now.write_bytes(longer.encode())
+    said = started()
+    held = said.split("\nNOW.md:\n", 1)[1]
+    head, _, cut = held.rpartition("\n")
+    assert longer.startswith(head + "\n")
+    assert cut == f"... {len(longer) - len(head):,} more character(s) of NOW.md left out: {now} holds it whole"
+    assert "... 60 more line(s): `orchestra status` lists them" in said.splitlines()
 
 
 def test_the_overview_after_a_compaction_leaves_out_judged_and_pruned_agents_and_keeps_what_waits(
