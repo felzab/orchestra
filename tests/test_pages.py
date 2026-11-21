@@ -61,8 +61,8 @@ BUDGETS = {
     },
     # Its twelfth checklist item, the built-the-right-way questions, outgrew the shared budget.
     "lenses/essential.md": 1650,
-    # Its sixth item names the plugin's own merge subject as no hit, which outgrew the shared budget.
-    "lenses/disclosure.md": 1594,
+    # Its sixth item names the plugin's own merge subjects as no hit, which outgrew the shared budget.
+    "lenses/disclosure.md": 1672,
     # Its checklist asks after every kind of saving the owner named: timing, scoping, batching and the rest.
     "lenses/estimate.md": 2114,
 }
