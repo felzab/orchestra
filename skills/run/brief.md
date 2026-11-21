@@ -48,4 +48,4 @@ Size a brief by what losing its agent's whole output would cost. It carries ever
 
 ## The check
 
-`orchestra brief NAME --check` stamps the brief, and an edit after it clears the stamp, so check again. A checked brief you will not dispatch goes on refusing every brief that overlaps it; `orchestra prune --discard NAME` removes it and returns its slice to `planned`.
+`orchestra brief NAME --check` stamps the brief, and an edit after it clears the stamp, so check again. A checked brief you will not dispatch goes on refusing every brief that overlaps it; `orchestra prune --discard NAME` settles it, which returns its slice to `planned` for a brief of another name.

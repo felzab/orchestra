@@ -21,7 +21,7 @@ ROOT = Path(__file__).resolve().parents[1]
 BUDGETS = {
     "skills/run/SKILL.md": 13876,
     "skills/run/start.md": 2667,
-    "skills/run/brief.md": 4263,
+    "skills/run/brief.md": 4294,
     "skills/run/review.md": 5616,
     "skills/run/checkpoint.md": 2138,
     "skills/run/end.md": 2600,
