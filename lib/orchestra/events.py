@@ -638,7 +638,7 @@ def _cold(agent: model.Agent, session: str | None) -> str | None:
         written = path.stat().st_mtime
     except OSError as error:
         return f"its transcript cannot be read: {error}"
-    seconds = datetime.datetime.now().timestamp() - written
+    seconds = datetime.datetime.now(datetime.UTC).timestamp() - written
     if seconds < CACHE_MINUTES * 60:
         return None
     return f"its transcript was last written {int(seconds // 60)} min ago, past the {CACHE_MINUTES}-min cache"
@@ -779,7 +779,8 @@ def _route_to(where: Where, state: Path, name: str, rows: list[str]) -> str | No
     root = where.root
     if root is None:
         named = " ".join(rows)
-        return f"Not routed to {name}: git cannot find the primary checkout; `orchestra route {name} {named}` routes them"
+        why = "git cannot find the primary checkout"
+        return f"Not routed to {name}: {why}; `orchestra route {name} {named}` routes them"
     owner = findings.owners(state, root)(name)
     # Read once for every row: each running agent's transcript is read to judge it, and the hook's caller waits.
     held = findings.live(state, where.session)
@@ -1114,7 +1115,7 @@ def session_start(where: Where) -> str | None:
 
 
 def _head_of(text: str, room: int, path: Path) -> str:
-    """The text whole where it fits in `room` characters; else its head, cut at a line end, and a line naming the cut."""
+    """The text whole where it fits in `room` characters; else its head, cut at a line end, and a line naming it."""
     if len(text) <= room:
         return text
 

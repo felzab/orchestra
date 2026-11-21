@@ -21,7 +21,7 @@ from typing import Any, cast
 import pytest
 
 from conftest import LIB, MakeRepo, git, inprocess, write_agent, write_config
-from orchestra import context, events, findings, hooks, log, model, process, queue, report, status, store
+from orchestra import context, events, findings, hooks, log, model, process, queue, report, store
 from test_context import line, transcript
 from test_report import text
 
@@ -987,7 +987,8 @@ def test_the_root_comes_from_session_json_where_exact_and_a_git_fault_drops_no_d
         return started(argv, **given)
 
     def prompted() -> str:
-        return context_of(hook("UserPromptSubmit", project, prompt="go", transcript_path=str(main))[1], "UserPromptSubmit")
+        said = hook("UserPromptSubmit", project, prompt="go", transcript_path=str(main))[1]
+        return context_of(said, "UserPromptSubmit")
 
     monkeypatch.setattr(process, "run", counted)
     assert near in prompted()
@@ -1367,7 +1368,12 @@ def test_after_a_compaction_now_md_takes_the_room_first_and_every_cut_is_named(
     a NOW.md longer than the room keeps its head and names the file that holds it whole.
     """
     rows = [f"row {k:02} " + "x" * 90 for k in range(60)]
-    monkeypatch.setattr(status, "coordinator", lambda *_: (rows, "status: 60 rows"))
+
+    def overview(*_: object) -> tuple[list[str], str]:
+        return rows, "status: 60 rows"
+
+    # `events` imports the status view at the call, so the module's own attribute is the one it reads.
+    monkeypatch.setattr("orchestra.status.coordinator", overview)
     now = state / store.NOW
 
     def started() -> str:
