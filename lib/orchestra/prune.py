@@ -113,7 +113,10 @@ def branch_of(agent: model.Agent, session: str | None = None) -> str | None:
     """The agent's branch: its record's, else the one the harness's file beside its transcript names.
 
     `session` is the one a hook's input names, whose folder is searched first, as `context.transcript` takes it.
+    Only a writer or a driver runs in a worktree, so no other's transcript is searched.
     """
+    if agent.type not in report.COMMITTING:
+        return None
     if agent.branch:
         return agent.branch
     named = _meta(agent, session).get("worktreeBranch")
