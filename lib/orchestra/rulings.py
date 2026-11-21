@@ -105,8 +105,13 @@ def _ask(args: argparse.Namespace, state: Path) -> int:
         return [dataclasses.replace(held[old], superseded_by=number), made]
 
     *replaced, asked = model.write_rulings(state, append)
+    # The programme's questions interleave across its sessions, so one another session asked is named as that
+    # session's, though not refused: a successor session may ask its predecessor's ruling again.
     again = "".join(
-        f", superseding question {old.ask}" + (f" and its ruling {old.number}" if old.number is not None else "")
+        ", superseding "
+        + (f"session {old.session}'s " if old.session != session.session else "")
+        + f"question {old.ask}"
+        + (f" and its ruling {old.number}" if old.number is not None else "")
         for old in replaced
     )
     log.record(state, "ask", f"question {asked.ask}{again}: {question}")

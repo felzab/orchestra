@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from conftest import inprocess
-from orchestra import model, store
+from orchestra import log, model, store
 
 
 @pytest.fixture
@@ -80,6 +80,26 @@ def test_a_ruled_question_asked_again_is_marked_replaced_and_takes_no_second_rul
     missing = inprocess("ask", "A fourth", "--supersedes", "9", cwd=project)
     assert missing.returncode == 2
     assert "--supersedes 9 names no question in this programme" in missing.stderr
+
+
+def test_a_ruling_of_another_session_asked_again_names_that_session(project: Path, state: Path) -> None:
+    """The programme's questions interleave across its sessions, so a mistyped id can reach another session's ruling.
+
+    A successor session may rightly ask its predecessor's ruling again, so it is not refused, but the summary and
+    the log line name whose ruling it marks replaced.
+    """
+    earlier = model.Ruling(1, "Keep the cap at 20?", "s0", number=101, words="Keep it.")
+    model.write_rulings(state, lambda _: [earlier])
+    again = inprocess("ask", "Keep the cap at 20 this week too?", "--supersedes", "1", cwd=project)
+    assert again.returncode == 0, again.stderr
+    said = "superseding session s0's question 1 and its ruling 101: Keep the cap at 20 this week too?"
+    assert again.stdout.splitlines()[-1] == f"queued question 2, {said}"
+    assert [entry.text for entry in log.entries(state) if entry.kind == "ask"] == [f"question 2, {said}"]
+    assert model.read_rulings(state)[1].superseded_by == 2
+    # The asking session's own ruling names no session.
+    assert inprocess("rule", "2", "Keep it this week too.", cwd=project).returncode == 0
+    own = inprocess("ask", "Keep the cap at 20 next week?", "--supersedes", "2", cwd=project)
+    assert own.stdout.splitlines()[-1].startswith("queued question 3, superseding question 2 and its ruling 102:")
 
 
 @pytest.mark.parametrize(
