@@ -7,7 +7,8 @@ is that call's input, cache-creation and cache-read tokens together.
 
 Only the transcript's place and name are documented (sub-agents.md). The fields read here are not:
 `message.usage`, `message.id`, shared by the lines one call's blocks reach the file as, the model name
-`<synthetic>` on a line the harness wrote itself, and `isApiErrorMessage`. A release changing them
+`<synthetic>` on a line the harness wrote itself, `isApiErrorMessage`, and the `compact_boundary` subtype of
+the row a compaction writes. A release changing them
 makes the context sizes and the reading of whether an agent still works wrong with no error.
 """
 
@@ -77,14 +78,34 @@ def last_call(path: Path) -> dict[str, object] | None:
     Read from the transcript's last `TAIL_BYTES` alone, so a main session's transcript of hundreds of megabytes
     costs a hook one read of a megabyte. A tail holding no call, as after a pasted image wider than it, reads
     as none: the whole file would cost a prompt more than twice its size in memory, and the next prompt reads again.
+    A tail whose last compaction follows its last call reads as none too: the compacted context is smaller than
+    that call read, and no call has measured it yet.
     """
     offset = max(0, path.stat().st_size - TAIL_BYTES)
     with path.open("rb") as held:
         held.seek(offset)
         data = held.read()
     # A read from the middle starts inside a line.
-    made = _made(data.splitlines()[1:] if offset else data.splitlines())
+    lines = data.splitlines()[1:] if offset else data.splitlines()
+    # Only the calls after the tail's last compaction measure the context it left.
+    for index in range(len(lines) - 1, -1, -1):
+        if _boundary(lines[index]):
+            lines = lines[index + 1 :]
+            break
+    made = _made(lines)
     return made[-1] if made else None
+
+
+def _boundary(raw: bytes) -> bool:
+    """Whether a transcript line is the row a compaction writes where the conversation it summarised ends."""
+    # Only a line naming the subtype is parsed, since a tail holds thousands.
+    if b"compact_boundary" not in raw:
+        return False
+    try:
+        entry = as_object(json.loads(raw))
+    except ValueError:
+        return False
+    return entry.get("type") == "system" and entry.get("subtype") == "compact_boundary"
 
 
 def _made(lines: list[bytes]) -> list[dict[str, object]]:

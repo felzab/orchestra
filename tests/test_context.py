@@ -138,6 +138,19 @@ def test_the_last_call_is_read_from_the_tail_alone(tmp_path: Path) -> None:
     assert context.last_call(path) is None
 
 
+def test_the_last_call_before_a_compaction_reads_as_none_until_the_next_call(tmp_path: Path) -> None:
+    """A compaction between turns shrinks the context, so the call before it no longer measures it."""
+    # The row the harness writes where a compaction ends the conversation it summarised.
+    boundary = b'{"type": "system", "subtype": "compact_boundary", "compactMetadata": {"postTokens": 8160}}\n'
+    path = tmp_path / "main.jsonl"
+    path.write_bytes(line("assistant", "m1", 400_000) + boundary + line("user"))
+    assert context.last_call(path) is None
+    path.write_bytes(line("assistant", "m1", 400_000) + boundary + line("user") + line("assistant", "m2", 46_000))
+    last = context.last_call(path)
+    assert last is not None
+    assert last.get("id") == "m2"
+
+
 def test_a_clock_time_is_rounded_up_to_the_minute() -> None:
     """A time named as the earliest something succeeds must never be early."""
     moment = datetime.datetime.now().astimezone().replace(hour=21, minute=17, second=0, microsecond=0)
