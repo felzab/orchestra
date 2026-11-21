@@ -515,20 +515,15 @@ def chained(project: Path) -> Path:
     return state
 
 
-@pytest.mark.parametrize("tree", ["gone", "standing"])
-def test_a_writer_pruned_before_its_first_commit_leaves_its_slice_to_do(
-    project: Path, chained: Path, tree: str
-) -> None:
+def test_a_writer_pruned_before_its_first_commit_leaves_its_slice_to_do(project: Path, chained: Path) -> None:
     """A usage limit stops it with nothing committed, and the checkpoint's plain `prune` settles it.
 
-    Its tree goes with its branch, by Claude Code or by the prune; neither makes the slice landed.
+    Its tree goes with its branch, here by the prune, which makes the slice no more landed than Claude Code's own
+    cleanup would; test_prune.py holds the prune of a record whose tree and branch are gone already.
     """
     worktree = project.parent / "trees" / "agent-w1"
     git(project, "worktree", "add", "-b", "worktree-agent-w1", str(worktree))
     changed(chained, "W", status="stopped", reason="You've hit your limit", branch="worktree-agent-w1")
-    if tree == "gone":
-        git(project, "worktree", "remove", "--force", str(worktree))
-        git(project, "branch", "-D", "worktree-agent-w1")
     assert run("prune", cwd=project).returncode == 0
     assert model.read_agent(chained, "W").status == "pruned"
     measured = _lines(run("status", "--measure", cwd=project))
