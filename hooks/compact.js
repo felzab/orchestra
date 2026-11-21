@@ -11,7 +11,7 @@ const TOOL = 'mcp__orchestra__compact'
 // everything in flight, and compacting lower costs less: replayed over one long coordinator day, compacting near
 // 300,000 and 400,000 tokens cost 0.85 and 0.91 of compacting near 500,000. Below it, the summary's own cost
 // outweighs what it saves; from it, a wave's growth still fits before Claude Code compacts on its own, about 33,000
-// tokens short of the window.
+// tokens short of the window. lib/orchestra/events.py's `COMPACTS_FROM` restates it, so change both together.
 const THRESHOLD = 0.6
 const DESCRIPTION =
   'Compacts this conversation as /compact does, once your current turn ends, then sends a one-line prompt so the' +
