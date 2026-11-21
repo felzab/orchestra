@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -362,6 +363,35 @@ def test_judge_names_a_finding_at_the_anchor_of_another_reports_row_and_how_it_w
     # A closed row is named with its close, so the second judgement sees the first.
     assert f"LENS-F2 may repeat REVIEW-F2 (MOOT: the module is gone): both at `{CLI}`" in done.stdout
     assert "LENS-F3 may repeat" not in done.stdout
+
+
+def test_a_repeat_is_named_from_the_bank_line_without_the_banked_rows_report(project: Path, state: Path) -> None:
+    """The bank line carries the anchor, so a session's earlier reports are not read again at every judge."""
+    agent(state, "REVIEW", Written("auditor", (STORE,)))
+    assert inprocess("judge", "REVIEW", "F1=close:FIXED:abc1234", "--verdict", "v", cwd=project).returncode == 0
+    report.path(state, "REVIEW").unlink()
+    agent(state, "LENS", Written("auditor", (STORE,)))
+    done = inprocess("judge", "LENS", "F1=route:owner", "--verdict", "v", cwd=project)
+    assert done.returncode == 0, done.stderr
+    assert f"LENS-F1 may repeat REVIEW-F1 (FIXED: abc1234): both at `{STORE}`" in done.stdout
+
+
+def test_a_bank_line_written_before_it_carried_an_anchor_reads_and_its_report_gives_the_anchor(
+    project: Path, state: Path
+) -> None:
+    """findings.jsonl outlives an upgrade, so a line with no `anchor` key still reads and still meets a repeat."""
+    agent(state, "REVIEW", Written("auditor", (STORE,)))
+    written = [
+        {"row": "REVIEW-F1", "kind": "bank", "status": "OPEN", "owner": None, "evidence": None, "time": "t"},
+        {"row": "REVIEW-F1", "kind": "close", "status": "MOOT", "owner": None, "evidence": "gone", "time": "t"},
+    ]
+    (state / store.FINDINGS).write_bytes(b"".join(json.dumps(record).encode("utf-8") + b"\n" for record in written))
+    model.update_agent(state, "REVIEW", lambda held: model.Agent(held.name, held.type, "judged"))
+    assert rows(state)["REVIEW-F1"] == model.FindingEvent("REVIEW-F1", "close", "MOOT", evidence="gone", time="t")
+    agent(state, "LENS", Written("auditor", (STORE,)))
+    done = inprocess("judge", "LENS", "F1=route:owner", "--verdict", "v", cwd=project)
+    assert done.returncode == 0, done.stderr
+    assert f"LENS-F1 may repeat REVIEW-F1 (MOOT: gone): both at `{STORE}`" in done.stdout
 
 
 def test_a_row_naming_the_owners_word_warns_where_it_goes_to_an_agent_and_not_to_a_queue(

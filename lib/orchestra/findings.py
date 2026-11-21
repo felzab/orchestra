@@ -300,11 +300,23 @@ def _anchor(text: str) -> str:
     return " ".join(text.replace("`", "").replace("\\", "/").split())
 
 
-def repeats(new: dict[str, report.Finding], rows: dict[str, FindingEvent], reports: Reports) -> list[str]:
+def anchors(records: list[store.Record]) -> dict[str, str]:
+    """Each banked row's finding anchor, as its bank line holds it; a row banked before the field has none."""
+    return {
+        record["row"]: record["anchor"]
+        for record in records
+        if record.get("kind") == "bank" and isinstance(record.get("anchor"), str)
+    }
+
+
+def repeats(
+    new: dict[str, report.Finding], rows: dict[str, FindingEvent], reports: Reports, banked: dict[str, str]
+) -> list[str]:
     """Each new finding at the anchor of another report's row: one defect several agents reported.
 
     A closed row is named with its close and its evidence, so one defect raised again is not judged the other way
-    without the first judgement in view.
+    without the first judgement in view. `banked` holds the anchors the rows' bank lines carry, and a report is read
+    only for a row whose bank line carries none.
     """
     # A verifier's report banks no finding, so it repeats nothing, and no banked row's report is read for it.
     if not new:
@@ -314,12 +326,13 @@ def repeats(new: dict[str, report.Finding], rows: dict[str, FindingEvent], repor
     for row, event in rows.items():
         if row in new or row.rsplit("-F", 1)[0] in stems:
             continue
-        try:
-            earlier, _ = reports.finding(row)
-        except Refused:
-            continue
+        if (earlier := banked.get(row)) is None:
+            try:
+                earlier = reports.finding(row)[0].anchor
+            except Refused:
+                continue
         for named, finding in new.items():
-            if (anchor := _anchor(finding.anchor)) == _anchor(earlier.anchor):
+            if (anchor := _anchor(finding.anchor)) == _anchor(earlier):
                 if event.status in model.CLOSED:
                     held = f"{event.status}: {event.evidence}" if event.evidence else event.status
                 else:
@@ -440,7 +453,9 @@ def judge(args: argparse.Namespace, state: Path, owner: Callable[[str], str], ro
     closed = sum(event.status in model.CLOSED for event in events)
     log.record(state, log.JUDGE, f"{report.stem(agent.name, round_)}: {routed} routed, {closed} closed; {verdict}")
     lines = [said(event) for event in events if event.kind != "bank"]
-    rows = model.read_findings(state)
+    # The raw lines too, since a row's anchor is on its bank line, which a later route or close replaces in the fold.
+    records = store.read_jsonl(state / store.FINDINGS)
+    rows = model.read_findings(state, records)
     # No write removes a row, so a verdict's row missing now was missing when the verdicts were applied.
     lines += [f"{v.row} is no banked row, so its verdict moves nothing" for v in held.verdicts if v.row not in rows]
     lines += [
@@ -450,7 +465,7 @@ def judge(args: argparse.Namespace, state: Path, owner: Callable[[str], str], ro
     ]
     if new and not events:
         lines.append(f"its {len(new)} row(s) were banked by an earlier judge, and stand as it left them")
-    lines += repeats(new, rows, reports)
+    lines += repeats(new, rows, reports, anchors(records))
     lines += _owners_word(state, given, texts)
     # Imported here, since the hooks import this module and none of them reads the status view.
     paced = typing.cast("Callable[[Path], list[str]]", importlib.import_module("orchestra.status").paced)
@@ -483,8 +498,8 @@ def _bank(
     if banked:
         return [f"{', '.join(banked)} is banked already: a report is judged once"]
     made: list[FindingEvent | str | None] = []
-    for key, row in zip(keys, rows, strict=True):
-        made.append(FindingEvent(row, "bank", "OPEN"))
+    for finding, key, row in zip(found, keys, rows, strict=True):
+        made.append(FindingEvent(row, "bank", "OPEN", anchor=finding.anchor))
         match given[key]:
             case Route(owner):
                 made.append(FindingEvent(row, "route", "ROUTED", owner))
