@@ -30,13 +30,11 @@ def landed_nothing(agent: model.Agent) -> bool:
     """Whether the agent is settled with none of its work landed, so that its slice is not done by it.
 
     `prune --discard` threw its work away. Otherwise a `pruned` record landed where `land` stamped it
-    `landed`, a stamp later statuses keep, or where its report says its work is done: `land` prunes such
-    a writer with no stamp when the session branch already holds its branch. A writer pruned before its
-    first commit, or after a report stopped on a question, has neither.
+    `landed`, a stamp later statuses keep, as `land` does too where the session branch already holds a
+    branch whose report says its work is done. A writer pruned before its first commit, after a report
+    stopped on a question, or with its branch lost before it landed, has no stamp.
     """
-    return agent.status == "pruned" and (
-        agent.reason == model.DISCARDED or ("landed" not in agent.since and agent.outcome not in DELIVERED)
-    )
+    return agent.status == "pruned" and (agent.reason == model.DISCARDED or "landed" not in agent.since)
 
 
 def _when(value: str) -> tuple[model.Trigger, str | None]:
