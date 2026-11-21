@@ -1173,7 +1173,10 @@ def test_a_falsely_sequenced_slice_waits_free_and_eight_judged_reports_not_discl
 def test_the_checkpoint_is_due_at_a_waves_end_once_no_agent_is_live_and_a_writer_has_landed(
     project: Path, state: Path
 ) -> None:
-    """checkpoint.md runs at each wave's end; a landing while another agent works, or is briefed to, ends none."""
+    """checkpoint.md runs at each wave's end; a landing while another agent works ends none.
+
+    A brief drafted and not dispatched holds none open, since review.md drafts the review's while the last writers run.
+    """
     store.write_text(state / store.PLAN, PACED_PLAN)
     briefed(project, "W", "writer", owns="lib/a.py")
     dispatched(project, "W", "writer", "w1")
@@ -1187,8 +1190,6 @@ def test_the_checkpoint_is_due_at_a_waves_end_once_no_agent_is_live_and_a_writer
     assert _due(project) == []
     changed(state, "R", status="judged")
     briefed(project, "N", "auditor")
-    assert _due(project) == []
-    changed(state, "N", status="pruned")
     ended = f"- no agent is live, and 1 writer(s) landed since the last saved estimate ({at:%H:%M})"
     assert _due(project) == [f"{ended}, and 3 plan lines are unticked: the checkpoint in checkpoint.md is due"]
     # An estimate saved after the landing starts the next wave's count.

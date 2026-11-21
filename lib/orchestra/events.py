@@ -951,8 +951,9 @@ def _checkpoint(state: Path, entries: list[log.Entry], agents: list[model.Agent]
             and datetime.datetime.fromisoformat(stamp) >= newest
             for agent in agents
         )
-        # The transcripts are read last, and only where a landing could end a wave.
-        if landed and not any(findings.is_live(agent, session) for agent in agents):
+        # The transcripts are read last, and only where a landing could end a wave. A brief drafted and not yet
+        # dispatched holds no wave open: review.md drafts the review's briefs while the last writers run.
+        if landed and not any(agent.status == "running" and findings.is_live(agent, session) for agent in agents):
             why = f"no agent is live, and {landed} writer(s) landed since the last saved estimate ({newest:%H:%M})"
         else:
             # The brief is read last, so only an entry judged since the estimate costs a read.
