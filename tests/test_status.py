@@ -12,7 +12,9 @@ from pathlib import Path
 import pytest
 
 from conftest import claude_stub, git, inprocess, line, transcript, usage_answer, write_agent, write_config
-from orchestra import ci, model, override, status, store
+from orchestra import ci, model, override, report, status, store
+from test_hooks import briefed, changed, dispatched, run
+from test_report import text
 
 PLAN = """# Plan
 
@@ -487,6 +489,69 @@ def test_a_landed_slice_is_done_before_its_line_is_ticked(project: Path, built: 
     assert "waits     slice S6, which no agent took: it is after S5, which is unticked" in measured
     assert any(line.startswith("drift     slices S5 and S7 share") for line in _lines(inprocess("status", cwd=project)))
     assert "held      no landed slice unticked" in _lines(inprocess("status", "--end", cwd=project))
+
+
+CHAINED = (
+    "# Plan\n\n## Slices and their files\n\n- [ ] S1 `lib/a.py`\n- [ ] S2 `lib/b.py` after: S1\n\n"
+    "## Ending\n\n- [ ] the checklist\n"
+)
+S1_DONE = "unticked  S1, 1 file(s): landed, so done; tick its line"
+S2_FREE = "waits     slice S2, which no agent took: its files are free"
+S2_HELD = "waits     slice S2, which no agent took: it is after S1, which is unticked"
+
+
+@pytest.fixture
+def chained(project: Path) -> Path:
+    """A session whose writer W, dispatched as `w1`, is on S1, the slice S2 is after."""
+    (project / "lib").mkdir()
+    (project / "lib" / "a.py").write_bytes(b"x\n")
+    git(project, "add", ".")
+    git(project, "commit", "-m", "lib")
+    assert run("init", "s1", cwd=project).returncode == 0
+    state = store.state_dir(project)
+    store.write_text(state / store.PLAN, CHAINED)
+    briefed(project, "W", "writer")
+    dispatched(project, "W", "writer", "w1")
+    return state
+
+
+@pytest.mark.parametrize("tree", ["gone", "standing"])
+def test_a_writer_pruned_before_its_first_commit_leaves_its_slice_to_do(
+    project: Path, chained: Path, tree: str
+) -> None:
+    """A usage limit stops it with nothing committed, and the checkpoint's plain `prune` settles it.
+
+    Its tree goes with its branch, by Claude Code or by the prune; neither makes the slice landed.
+    """
+    worktree = project.parent / "trees" / "agent-w1"
+    git(project, "worktree", "add", "-b", "worktree-agent-w1", str(worktree))
+    changed(chained, "W", status="stopped", reason="You've hit your limit", branch="worktree-agent-w1")
+    if tree == "gone":
+        git(project, "worktree", "remove", "--force", str(worktree))
+        git(project, "branch", "-D", "worktree-agent-w1")
+    assert run("prune", cwd=project).returncode == 0
+    assert model.read_agent(chained, "W").status == "pruned"
+    measured = _lines(run("status", "--measure", cwd=project))
+    assert S1_DONE not in measured
+    assert "waits     slice S1, which no agent took: its files are free" in measured
+    assert S2_HELD in measured
+    ended = _lines(run("status", "--end", cwd=project))
+    assert "held      no landed slice unticked" in ended
+    assert "NOT held  no planned slice untaken: S1, S2" in " ".join(ended)
+
+
+def test_a_writer_whose_branch_the_session_already_holds_lands_its_slice(project: Path, chained: Path) -> None:
+    """`land` finds nothing to land and prunes the writer with no `landed` stamp: its DONE report lands the slice."""
+    git(project, "branch", "worktree-agent-w1")
+    report.path(chained, "W").write_bytes(text("writer", "W", status="DONE").encode())
+    changed(chained, "W", status="judged", outcome="DONE", branch="worktree-agent-w1")
+    landed = run("land", "W", cwd=project)
+    assert "nothing to land" in landed.stdout, landed.stderr
+    agent = model.read_agent(chained, "W")
+    assert (agent.status, "landed" in agent.since) == ("pruned", False)
+    measured = _lines(run("status", "--measure", cwd=project))
+    assert S1_DONE in measured
+    assert S2_FREE in measured
 
 
 def test_a_discarded_agents_slice_reads_planned_and_its_owns_excuses_no_drift(project: Path, built: Path) -> None:

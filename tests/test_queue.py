@@ -60,8 +60,30 @@ def test_a_landed_item_never_falls_due_when_its_agent_is_discarded(project: Path
     assert inprocess("prune", "--discard", "B", cwd=project).returncode == 0
     assert model.read_agent(state, "B").status == "pruned"
     assert numbers(state) == []
-    said = "which was discarded and never lands: `orchestra queue done 1` ends it"
+    said = "which settled with nothing landed and never lands: `orchestra queue done 1` ends it"
     assert any(said in line for line in paced(state))
+
+
+@pytest.mark.parametrize(
+    ("outcome", "due"),
+    [
+        # Stopped by a limit before its first commit, then settled by a plain prune: nothing of it landed.
+        (None, []),
+        # A report stopped on a question, judged and pruned: nothing of it landed either.
+        ("NEEDS-ANSWER", []),
+        # `land` found the session branch holding its branch already, and stamped no landing.
+        ("DONE", [1]),
+    ],
+)
+def test_a_landed_item_falls_due_for_a_pruned_agent_only_where_its_work_landed(
+    state: Path, outcome: str | None, due: list[int]
+) -> None:
+    write_agent(state, model.Agent("B", "writer", "pruned", outcome=outcome, reason="You've hit your limit"))
+    queued(state, model.QueueItem(1, "landed", "tell X the contract landed", "B", time=EARLY))
+    assert numbers(state) == due
+    if not due:
+        said = "which settled with nothing landed and never lands: `orchestra queue done 1` ends it"
+        assert any(said in line for line in paced(state))
 
 
 def reported(state: Path, at: str) -> None:
@@ -105,7 +127,12 @@ def test_add_and_done_number_the_items_and_log_the_end(project: Path, state: Pat
 @pytest.mark.parametrize(
     ("args", "said"),
     [
-        (["add", "--when", "landed:NOBODY", "x"], "no agent NOBODY in this session"),
+        (
+            ["add", "--when", "landed:NOBODY", "x"],
+            "no agent NOBODY in this session and no slice of PLAN.md: `orchestra status` lists both",
+        ),
+        # A report is an agent's, so a name with no record, a slice's included, is no `reported:` event's.
+        (["add", "--when", "reported:S1", "x"], "no agent S1 in this session: `reported:` names an agent"),
         (["add", "--when", "merged:A", "x"], "`merged:A` is none of ci, landed:NAME and reported:NAME"),
     ],
 )
@@ -117,20 +144,22 @@ def test_an_event_naming_no_agent_or_no_kind_is_refused(project: Path, state: Pa
 
 
 def test_an_item_may_wait_on_a_planned_slice_no_agent_took_yet(project: Path, state: Path) -> None:
-    """The agent of a slice is briefed under its name later; until then the item waits as for any record."""
+    """Its writer is briefed later under a name of its own, as brief.md's example names one: due once it lands."""
     store.write_text(state / store.PLAN, "# Plan\n\n## Slices and their files\n\n- [ ] LATER `b.txt`\n")
     added = inprocess("queue", "add", "--when", "landed:LATER", "dispatch", "C", cwd=project)
     assert added.returncode == 0, added.stderr
     assert added.stdout.splitlines() == ["  1  waits  landed:LATER              dispatch C"]
     assert numbers(state) == []
-    write_agent(state, model.Agent("LATER", "writer", "landed"))
+    body = project.parent / "body.md"
+    body.write_bytes(b"Rows: none\nWrites: none\nLens: none\n\nGOAL      x\nWORK      x\nPREMISES  x\nTRAPS     x\n")
+    # Its check refuses beside A, which the fixture records with no brief; the header written is what is read.
+    inprocess("brief", "API-RETRY", "--type", "writer", "--slice", "LATER", "--body", str(body), cwd=project)
+    assert "Slice: LATER" in (state / "briefs" / "API-RETRY.md").read_bytes().decode()
+    status(state, "API-RETRY", "running")
+    assert numbers(state) == []
+    assert "waits     #1 (when landed:LATER) dispatch C: waits on slice LATER, which has not landed" in paced(state)
+    status(state, "API-RETRY", "landed")
     assert numbers(state) == [1]
-    unplanned = inprocess("queue", "add", "--when", "landed:NOBODY", "x", cwd=project)
-    assert (unplanned.returncode, unplanned.stderr) == (
-        2,
-        "orchestra queue: no agent NOBODY in this session and no slice of PLAN.md: `orchestra status` lists both\n",
-    )
-    assert list(model.read_queue(state)) == [1]
 
 
 def test_a_fault_exits_with_a_code_of_its_own_and_prints_its_trace(project: Path, state: Path) -> None:

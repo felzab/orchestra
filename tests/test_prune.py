@@ -385,12 +385,18 @@ def test_two_spellings_of_one_tree_name_one_tree(tmp_path: Path) -> None:
     assert prune.strangers([prune.Tree(other)], {prune.Tree(real).key}, tmp_path / "trees") == []
 
 
-def test_a_stopped_writer_with_no_tree_and_no_branch_left_is_settled(fleet: Fleet) -> None:
-    """It can never be resumed, so it would stand under "to resume" until the session ends."""
-    gone = add_agent(fleet, "GONE", "g1", "stopped")
-    ran(fleet, "g1")
-    git(fleet.root, "worktree", "remove", "--force", str(gone))
-    git(fleet.root, "branch", "-D", "worktree-agent-g1")
+def test_a_stopped_or_judged_writer_with_no_tree_and_no_branch_left_is_settled(fleet: Fleet) -> None:
+    """It can never be resumed, so it would stand under "to resume", or as judged with its slice held, for good.
+
+    A question no answer reached is judged as it stands, and the record settled then counts as landing nothing.
+    """
+    records: tuple[tuple[str, str, model.AgentStatus], ...] = (("GONE", "g1", "stopped"), ("ASKED", "j1", "judged"))
+    for name, ident, held in records:
+        gone = add_agent(fleet, name, ident, held)
+        ran(fleet, ident)
+        git(fleet.root, "worktree", "remove", "--force", str(gone))
+        git(fleet.root, "branch", "-D", f"worktree-agent-{ident}")
+    model.update_agent(fleet.state, "ASKED", lambda held: replace(held, outcome="NEEDS-ANSWER"))
     write_agent(fleet.state, model.Agent("READER", "auditor", status="stopped"))
     # A tree outside the worktrees folder, whose branch neither the record nor the harness names, may hold work.
     lost = fleet.root.parent / "elsewhere-s1"
@@ -402,6 +408,8 @@ def test_a_stopped_writer_with_no_tree_and_no_branch_left_is_settled(fleet: Flee
     assert code == 0, (out, err)
     assert "settled GONE: nothing of it is left" in out
     assert model.read_agent(fleet.state, "GONE").status == "pruned"
+    assert "settled ASKED: nothing of it is left" in out
+    assert queue.landed_nothing(model.read_agent(fleet.state, "ASKED"))
     # A reader runs in the coordinator's checkout and has no tree to lose: a resume still reaches it.
     assert model.read_agent(fleet.state, "READER").status == "stopped"
     assert "kept its record (LOST): its branch is unknown; `orchestra prune --discard LOST` settles it" in out

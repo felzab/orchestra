@@ -91,22 +91,24 @@ def worktrees(root: Path) -> dict[str, Path]:
     }
 
 
-def gone(agent: model.Agent, root: Path) -> str | None:
+def gone(agent: model.Agent, root: Path, listed: Callable[[], dict[str, Path]] | None = None) -> str | None:
     """The branch of a writer or a driver whose worktree is gone, so that no resume reaches it; None otherwise.
 
     Claude Code removes a subagent's worktree when it finishes with no change (worktrees.md), so a writer
     that committed nothing, and any driver, has no worktree left once it stops, and none to resume in.
+    `listed` gives `worktrees(root)` read once for a caller judging several agents.
     """
     if agent.type not in report.COMMITTING:
         return None
     if agent.branch is None:
         return "no branch recorded"
-    return None if agent.branch in worktrees(root) else agent.branch
+    held = worktrees(root) if listed is None else listed()
+    return None if agent.branch in held else agent.branch
 
 
-def unreached(agent: model.Agent, root: Path) -> str | None:
+def unreached(agent: model.Agent, root: Path, listed: Callable[[], dict[str, Path]] | None = None) -> str | None:
     """Why the report of an agent stopped on a question is judged as it stands, no answer reaching it; else None."""
-    if agent.outcome not in report.STOPPED or (branch := gone(agent, root)) is None:
+    if agent.outcome not in report.STOPPED or (branch := gone(agent, root, listed)) is None:
         return None
     return (
         f"{agent.name} stopped {agent.outcome}, and its worktree is gone ({branch}), so no answer reaches it:"
@@ -125,11 +127,8 @@ def waiting(state: Path, agent: model.Agent) -> str | None:
     """
     if agent.status == "stopped" or (agent.status == "running" and not is_live(agent)):
         round_ = max(agent.reports, default=1)
-        try:
-            held = report.read(report.path(state, agent.name, round_), agent.type)
-        except Refused:
-            return None
-        if held.status in report.STOPPED:
+        held = _latest(state, agent)
+        if held is None or held.status in report.STOPPED:
             return None
         why = f" ({agent.reason})" if agent.reason else ""
         return (
@@ -143,6 +142,19 @@ def waiting(state: Path, agent: model.Agent) -> str | None:
         or unreached(agent, config.checkout().root)
         or f"{agent.name} stopped {agent.outcome}: answer it by message, and judge the report it writes"
     )
+
+
+def _latest(state: Path, agent: model.Agent) -> report.Report | None:
+    """The agent's latest round's report as `judge` reads it; None where it does not read."""
+    try:
+        return report.read(report.path(state, agent.name, max(agent.reports, default=1)), agent.type)
+    except Refused:
+        return None
+
+
+def readable(state: Path, agent: model.Agent) -> bool:
+    """Whether `judge` can read the agent's latest report, one stopped on a question included."""
+    return _latest(state, agent) is not None
 
 
 def is_live(agent: model.Agent, session: str | None = None) -> bool:

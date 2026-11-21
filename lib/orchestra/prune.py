@@ -279,9 +279,11 @@ def prune(
         mine = list({tree.key: tree for tree in found}.values())
         claimed |= {tree.key for tree in mine}
         held = branch if branch is not None and branch_exists(root, branch) else None
-        stopped = agent.status == "stopped" and agent.type in report.COMMITTING
-        # A writer or a driver stopped with neither left can never be resumed, so its record is settled too;
-        # one whose branch nothing names may have a tree elsewhere holding its work, so it keeps its record.
+        # Judged counts as stopped: a question no answer reached is judged as it stands, and no resume follows.
+        stopped = agent.status in ("stopped", "judged") and agent.type in report.COMMITTING
+        # A writer or a driver stopped with neither left can never be resumed, so its record is settled too, and
+        # `queue.landed_nothing` reads it as having landed nothing; one whose branch nothing names may have a tree
+        # elsewhere holding its work, so it keeps its record.
         lost = discard or (stopped and branch is not None and held is None)
         if not mine and held is None and not lost:
             if stopped and branch is None:

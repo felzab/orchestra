@@ -373,7 +373,10 @@ def _dispatch(where: Where, given: Record) -> str | None:
         why = "an orchestra dispatch's prompt is the agent's name alone, as `orchestra brief NAME` wrote its brief"
     elif not model.has_agent(state, name):
         sliced = " --slice S" if kind == brief.SLICED else ""
-        why = f"no agent {name} in this session: `orchestra brief {name} --type {kind}{sliced}` writes its brief"
+        why = (
+            f"no agent {name} in this session: `orchestra brief {name} --type {kind}{sliced} --body FILE` writes its"
+            " brief from a file holding its lists and its four sections, and checks it"
+        )
     else:
         return _start(where, given, model.read_agent(state, name), root)
     return None if _waived(where, call) else _deny(why)
@@ -551,12 +554,9 @@ def _resume(where: Where, given: Record) -> str | None:
     name = agent.name
     why = None
     if (held := findings.gone(agent, root)) is not None:
-        # No answer reaches it, so `judge` takes its report as it stands, a question included, and a judged
-        # record holds nothing a successor's brief needs.
-        settle = "" if agent.status in findings.JUDGED else f"`orchestra judge {name}` banks its report, then "
         why = (
             f"{name}'s worktree is gone ({held}), so a resume has no worktree to run in:"
-            f" {settle}dispatch a successor briefed with what is left"
+            f" {_settle(state, agent)}dispatch a successor briefed with what is left"
         )
     elif (unjudged := findings.unjudged(agent)) is not None:
         # `judge` reads an agent's latest round alone, so a round begun before it would leave this one's unread.
@@ -588,6 +588,20 @@ def _resume(where: Where, given: Record) -> str | None:
     else:
         told = f"This is round {following}: write its report to {path}, titled `round {following}`."
     return _allow({**given, "message": f"{message.rstrip()}\n\n{told}"})
+
+
+def _settle(state: Path, agent: model.Agent) -> str:
+    """The verb that settles an agent no resume reaches, ahead of its successor's dispatch; empty where it is judged.
+
+    No answer reaches it, so `judge` takes its report as it stands, a question included, and a judged record
+    holds nothing a successor's brief needs. A round stopped before its report reads, which `judge` refuses,
+    has nothing to bank, and `prune` settles it.
+    """
+    if agent.status in findings.JUDGED:
+        return ""
+    if agent.status == "reported" or findings.readable(state, agent):
+        return f"`orchestra judge {agent.name}` banks its report, then "
+    return "`orchestra prune` settles its record, then "
 
 
 def _running(state: Path, agent: model.Agent) -> tuple[int, bool] | None:
@@ -867,6 +881,8 @@ def stop(where: Where) -> str | None:
     if not where.coordinator or state is None or where.data.get("stop_hook_active"):
         return None
     agents = model.agents(state)
+    # Listed once for every report stopped on a question, and only once one is read.
+    listed = functools.cache(lambda: {} if where.root is None else findings.worktrees(where.root))
 
     def reported(agent: model.Agent) -> str:
         if agent.outcome not in report.STOPPED:
@@ -875,7 +891,7 @@ def stop(where: Where) -> str | None:
         # no answer can reach the agent: its worktree is gone, and its report is judged as it stands. The
         # root's git runs only here, so a turn's end with no such report pays nothing for it.
         root = where.root
-        unreached = None if root is None else findings.unreached(agent, root)
+        unreached = None if root is None else findings.unreached(agent, root, listed)
         return unreached or f"{agent.name} stopped {agent.outcome} and waits on your answer by message"
 
     undone = [reported(agent) for agent in agents if agent.status == "reported"]
@@ -940,8 +956,9 @@ def _checkpoint(state: Path, entries: list[log.Entry], agents: list[model.Agent]
             and datetime.datetime.fromisoformat(stamp) >= newest
             for agent in agents
         )
-        # The transcripts are read last, and only where a landing could end a wave.
-        if landed and not any(findings.is_live(agent, session) for agent in agents):
+        # The transcripts are read last, and only where a landing could end a wave. A brief drafted and not yet
+        # dispatched holds no wave open: review.md drafts the review's briefs while the last writers run.
+        if landed and not any(agent.status == "running" and findings.is_live(agent, session) for agent in agents):
             why = f"no agent is live, and {landed} writer(s) landed since the last saved estimate ({newest:%H:%M})"
         else:
             # The brief is read last, so only an entry judged since the estimate costs a read.

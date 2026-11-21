@@ -14,13 +14,14 @@ import os
 import subprocess
 import sys
 import time
+from collections.abc import Sequence
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 import pytest
 
 from conftest import LIB, MakeRepo, git, inprocess, write_agent, write_config
-from orchestra import context, events, findings, hooks, log, model, queue, report, store
+from orchestra import context, events, findings, hooks, log, model, process, queue, report, store
 from test_context import line, transcript
 from test_report import text
 
@@ -600,6 +601,19 @@ def test_a_resume_of_a_writer_whose_worktree_is_gone_is_refused(project: Path, s
         "W's worktree is gone (gone), so a resume has no worktree to run in: `orchestra judge W` banks its report,"
         " then dispatch a successor briefed with what is left",
     )
+    # A limit's stop before the report reads leaves nothing for `judge`, which refuses it, so `prune` settles it.
+    changed(state, "W", status="stopped", reason="You've hit your limit")
+    report.path(state, "W").write_bytes(text("writer", "W", status="IN-PROGRESS").encode())
+    said = hook("PreToolUse", project, tool_name="SendMessage", tool_input={"to": "W", "message": "go on"})[1]
+    assert decision(said) == (
+        "deny",
+        "W's worktree is gone (gone), so a resume has no worktree to run in: `orchestra prune` settles its record,"
+        " then dispatch a successor briefed with what is left",
+    )
+    # One whose report reads, written before the limit, is judged as a reported one is.
+    report.path(state, "W").write_bytes(text("writer", "W", status="DONE").encode())
+    said = hook("PreToolUse", project, tool_name="SendMessage", tool_input={"to": "W", "message": "go on"})[1]
+    assert "`orchestra judge W` banks its report, then dispatch a successor" in str(decision(said)[1])
     # A judged record has nothing left to bank.
     changed(state, "W", status="judged")
     said = hook("PreToolUse", project, tool_name="SendMessage", tool_input={"to": "W", "message": "fix F1"})[1]
@@ -880,6 +894,38 @@ def test_a_writer_stopped_on_a_question_whose_worktree_is_gone_is_judged_and_lea
     assert undone() == []
 
 
+def test_a_turns_end_lists_the_worktrees_once_for_every_report_stopped_on_a_question(
+    project: Path, state: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Each such report asks whether its worktree is gone, and the turn's end waits on every git run."""
+    ran: list[tuple[str, ...]] = []
+    started = process.run
+
+    def counted(argv: Sequence[str], **given: Any) -> subprocess.CompletedProcess[bytes]:
+        if argv[0] == "git":
+            ran.append(tuple(argv))
+        return started(argv, **given)
+
+    def runs() -> int:
+        """The git runs of one turn's end, once its lines are read."""
+        ran.clear()
+        said = context_of(hook("Stop", project, stop_hook_active=False, background_tasks=[])[1], "Stop")
+        assert said.count("so no answer reaches it") == len(model.agents(state)), said
+        return len(ran)
+
+    def asked(name: str, ident: str) -> None:
+        briefed(project, name, "writer", owns="lib/a.py")
+        dispatched(project, name, "writer", ident)
+        changed(state, name, status="reported", outcome="NEEDS-ANSWER", branch=f"worktree-agent-{ident}")
+
+    monkeypatch.setattr(process, "run", counted)
+    asked("W", "w1")
+    one = runs()
+    asked("X", "x1")
+    asked("Y", "y1")
+    assert runs() == one, ran
+
+
 def test_a_writer_stopped_on_a_question_whose_worktree_stands_waits_on_its_answer(project: Path, state: Path) -> None:
     """Its answer resumes it in its worktree, so `judge` waits for the report that answer completes."""
     briefed(project, "W", "writer", owns="lib/a.py")
@@ -1101,14 +1147,17 @@ def _judged(project: Path, name: str, kind: str, lens: str = "none") -> subproce
     return judged
 
 
-def test_a_falsely_sequenced_slice_waits_free_and_eight_judged_reports_not_disclosure_only_make_the_checkpoint_due(
-    project: Path, state: Path
+def test_a_falsely_sequenced_slice_waits_free_and_judged_reports_not_disclosure_only_make_the_checkpoint_due(
+    project: Path, state: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """S2 needs nothing of S1, so the program names it free; the estimate is looked at again every eight reports.
+    """S2 needs nothing of S1, so the program names it free; the estimate is looked at again every `JUDGED` reports.
 
     A researcher whose `Lens:` names disclosure alone frees no planned work, before a push or in the review, in
-    any round; a report whose brief cannot be read, or whose `Lens:` names another lens beside, counts.
+    any round; a report whose brief cannot be read, or whose `Lens:` names another lens beside, counts. The count
+    is lowered for the case, since each report it counts costs a brief, a dispatch, a stop and a judge.
     """
+    monkeypatch.setattr(events, "JUDGED", 3)
+    count = events.JUDGED
     store.write_text(state / store.PLAN, PACED_PLAN)
     briefed(project, "W", "writer", owns="lib/a.py")
     free = "waits     slice S2, which no agent took: its files are free"
@@ -1136,16 +1185,16 @@ def test_a_falsely_sequenced_slice_waits_free_and_eight_judged_reports_not_discl
     second = run("judge", "DISCLOSE", "F1=close:MOOT:x", "F2=close:MOOT:x", "--verdict", "v", cwd=project)
     assert second.returncode == 0, second.stderr
     at = datetime.datetime.fromtimestamp(saved.stat().st_mtime).astimezone()
-    eighth = f"- 8 reports were judged since the last saved estimate ({at:%H:%M}), and 3 plan lines are unticked"
+    last = f"- {count} reports were judged since the last saved estimate ({at:%H:%M}), and 3 plan lines are unticked"
     # W and MAP stay at work throughout, so no wave ends: the count alone makes the checkpoint due.
-    for k in range(1, 9):
+    for k in range(1, count + 1):
         # A lens beside disclosure makes the read more than a disclosure-only one, so its report counts.
-        judged = _judged(project, f"A{k}", "auditor", lens="disclosure, contract" if k == 8 else "none")
+        judged = _judged(project, f"A{k}", "auditor", lens="disclosure, contract" if k == count else "none")
         assert free in judged.stdout.splitlines()
         if k == 1:
             # A brief that cannot be read is counted, as the report of any other agent is.
             (state / "briefs" / "A1.md").unlink()
-        assert _due(project) == ([] if k < 8 else [f"{eighth}: the checkpoint in checkpoint.md is due"])
+        assert _due(project) == ([] if k < count else [f"{last}: the checkpoint in checkpoint.md is due"])
     # A landing closes on what still waits.
     tree = project.parent / "trees" / "agent-w1"
     git(project, "worktree", "add", "-b", "worktree-agent-w1", str(tree))
@@ -1160,7 +1209,10 @@ def test_a_falsely_sequenced_slice_waits_free_and_eight_judged_reports_not_discl
 def test_the_checkpoint_is_due_at_a_waves_end_once_no_agent_is_live_and_a_writer_has_landed(
     project: Path, state: Path
 ) -> None:
-    """checkpoint.md runs at each wave's end; a landing while another agent works, or is briefed to, ends none."""
+    """checkpoint.md runs at each wave's end; a landing while another agent works ends none.
+
+    A brief drafted and not dispatched holds none open, since review.md drafts the review's while the last writers run.
+    """
     store.write_text(state / store.PLAN, PACED_PLAN)
     briefed(project, "W", "writer", owns="lib/a.py")
     dispatched(project, "W", "writer", "w1")
@@ -1174,8 +1226,6 @@ def test_the_checkpoint_is_due_at_a_waves_end_once_no_agent_is_live_and_a_writer
     assert _due(project) == []
     changed(state, "R", status="judged")
     briefed(project, "N", "auditor")
-    assert _due(project) == []
-    changed(state, "N", status="pruned")
     ended = f"- no agent is live, and 1 writer(s) landed since the last saved estimate ({at:%H:%M})"
     assert _due(project) == [f"{ended}, and 3 plan lines are unticked: the checkpoint in checkpoint.md is due"]
     # An estimate saved after the landing starts the next wave's count.

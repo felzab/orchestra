@@ -356,8 +356,8 @@ def _drift(snap: Snapshot) -> list[str]:
         # A reader or a driver briefed with no slice works outside the plan, which is no drift: neither lands work.
         if header.slice not in planned and not (header.slice == brief.NONE and agent.type != brief.SLICED):
             lines.append(_row("drift", f"agent {agent.name}: on no slice of PLAN.md (its slice is {header.slice!r})"))
-        # A discarded agent landed nothing, so its `Owns:` excuses no change.
-        if agent.status in model.SETTLED and not _discarded(agent):
+        # An agent settled with nothing landed, discarded or pruned before its work, excuses no change.
+        if agent.status in model.SETTLED and not queue.landed_nothing(agent):
             owned += header.owns
     branch = f"refs/heads/{snap.session.branch}"
     # `-z` gives each change as its status letter and its path, in fields of their own; under `--no-renames`
@@ -425,19 +425,14 @@ def _before(name: str, after: dict[str, list[str]]) -> set[str]:
     return seen
 
 
-def _discarded(agent: model.Agent) -> bool:
-    """Whether `prune --discard` settled the agent, which then landed nothing, as `queue.due` reads it."""
-    return agent.status in model.SETTLED and agent.reason == model.DISCARDED
-
-
 def _on(state: Path, agents: list[model.Agent]) -> dict[str, list[model.Agent]]:
-    """The agents on each slice their briefs name, a discarded agent left out: it took nothing.
+    """The agents on each slice their briefs name, one settled with nothing landed left out: it took nothing.
 
     A brief that cannot be read takes nothing; `_drift` names it.
     """
     held: dict[str, list[model.Agent]] = {}
     for agent in agents:
-        if _discarded(agent):
+        if queue.landed_nothing(agent):
             continue
         with contextlib.suppress(Refused):
             held.setdefault(brief.header(state, agent.name).slice, []).append(agent)
@@ -462,7 +457,7 @@ def _untaken(state: Path, agents: list[model.Agent]) -> list[str]:
     """Each unticked slice no agent's brief names: work planned ahead while running, drift once the session ends.
 
     The overview, the ending and `waits` all read it here, so `status` and `land` never disagree on what
-    waits. A discarded agent's brief takes nothing, since its work never landed.
+    waits. The brief of an agent settled with nothing landed takes nothing, since its work never landed.
     """
     taken = _on(state, agents)
     return [name for name, ticked in slices(state).items() if not ticked and name not in taken]
@@ -863,9 +858,11 @@ def waits(state: Path, agents: list[model.Agent], clock: datetime.datetime, *, p
         if item.agent is None:
             on = "the next CI reading"
         elif (agent := named.get(item.agent)) is None:
-            on = f"{item.agent}, which has no record"
-        elif item.trigger == "landed" and agent.reason == model.DISCARDED:
-            on = f"{agent.name}, which was discarded and never lands: `orchestra queue done {number}` ends it"
+            # `queue add` takes a name with no record only for a slice of the plan.
+            on = f"slice {item.agent}, which has not landed"
+        elif item.trigger == "landed" and queue.landed_nothing(agent):
+            ended = f"`orchestra queue done {number}` ends it"
+            on = f"{agent.name}, which settled with nothing landed and never lands: {ended}"
         else:
             on = f"{agent.name}, {_for(agent, clock)}"
         lines.append(_row("waits", f"{_item(item)}: waits on {on}"))
