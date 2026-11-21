@@ -15,12 +15,27 @@ import typing
 from collections.abc import Callable
 from pathlib import Path
 
-from orchestra import DONE, Refused, cli, log, model, store
+from orchestra import DONE, Refused, cli, log, model, report, store
 
 # The log kind the `ci` verb writes each time it reads a concluded run, and only then.
 CI_READ = "ci"
 # The log kind of a queue item's end.
 KIND = "queue"
+# The report statuses of an agent whose work is done, which `land` may find already on the session branch.
+DELIVERED: frozenset[str] = frozenset(report.STATUSES) - report.STOPPED
+
+
+def landed_nothing(agent: model.Agent) -> bool:
+    """Whether the agent is settled with none of its work landed, so that its slice is not done by it.
+
+    `prune --discard` threw its work away. Otherwise a `pruned` record landed where `land` stamped it
+    `landed`, a stamp later statuses keep, or where its report says its work is done: `land` prunes such
+    a writer with no stamp when the session branch already holds its branch. A writer pruned before its
+    first commit, or after a report stopped on a question, has neither.
+    """
+    return agent.status == "pruned" and (
+        agent.reason == model.DISCARDED or ("landed" not in agent.since and agent.outcome not in DELIVERED)
+    )
 
 
 def _when(value: str) -> tuple[model.Trigger, str | None]:
@@ -67,8 +82,8 @@ def due(state: Path) -> list[model.QueueItem]:
         if agent is None:
             return False
         if item.trigger == "landed":
-            # A discarded agent is settled with nothing landed, so what waits on its landing never falls due.
-            return agent.status in model.SETTLED and agent.reason != model.DISCARDED
+            # One settled with nothing landed never lands, so what waits on its landing never falls due.
+            return agent.status in model.SETTLED and not landed_nothing(agent)
         # Due from the first report at or after it was queued: each report stamps the record anew, so an
         # item queued after one, for the round a resume starts, waits for that round's report.
         since = agent.since.get("reported")
