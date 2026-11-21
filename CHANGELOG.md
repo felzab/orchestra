@@ -16,9 +16,11 @@ The fixes from the third project session that ran on the plugin.
 - The plugin's first mod, `hooks/compact.js`, gives the coordinator `mcp__orchestra__compact`. The
   coordinator calls it at each natural seam, where the state holds all in flight (a wave has landed
   or a checkpoint has rewritten `NOW.md`, and no report waits to be judged), attended or away. Below
-  60% of the compaction window the tool answers that compacting is not needed yet; past it, the
+  60% of the compaction window the tool answers that compacting is not needed yet; from it, the
   conversation compacts once the turn ends, and a one-line prompt then resumes the session. The tool
-  refuses a call from an agent and from a checkout with no orchestra session. Where the tool is
+  refuses a call from an agent and from a checkout with no orchestra session, and, after a
+  compaction it scheduled was vetoed or failed, every call until the owner's next prompt or a
+  compaction that runs. Where the tool is
   absent or fails, the coordinator tells the owner at each seam to type `/compact`. The mod has been
   driven in headless sessions only. `claude plugin test .` runs its tests, in CI too.
 - The prompt hook tells the coordinator, from 75% of a compaction window that a settings file or the

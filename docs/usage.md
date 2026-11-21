@@ -59,7 +59,9 @@ at natural seams, where the state holds all in flight: a wave has landed or a ch
 rewritten `NOW.md`, and no report waits to be judged. At each seam, attended or away, it calls
 `mcp__orchestra__compact`, a tool the plugin's mod (`hooks/compact.js`) adds. The tool refuses an
 agent and a checkout whose branch holds no session, and below 60% of the compaction window it
-answers that compacting is not needed yet. Otherwise the conversation compacts once the
+answers that compacting is not needed yet. After a compaction it scheduled was vetoed or failed,
+it refuses every call until your next prompt or a compaction that runs, so a compaction that
+fails each time cannot repeat while you are away. Otherwise the conversation compacts once the
 coordinator's turn ends, and a one-line prompt from the plugin then starts its next turn, so a
 coordinator with no agent left to report carries on; a turn that ends interrupted or in an error
 drops the compaction. This has been driven in headless `claude -p` sessions only, not yet in an
