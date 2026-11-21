@@ -13,6 +13,7 @@ import dataclasses
 import datetime
 import functools
 import typing
+from collections.abc import Mapping
 from pathlib import Path
 
 from orchestra import DONE, Refused, brief, cli, log, model, report, store
@@ -104,27 +105,35 @@ def due(
     return [item for item in waiting if happened(item)]
 
 
-def on_slice(state: Path, agents: list[model.Agent]) -> dict[str, list[model.Agent]]:
+def on_slice(
+    state: Path, agents: list[model.Agent], heads: Mapping[str, brief.Header] | None = None
+) -> dict[str, list[model.Agent]]:
     """The agents on each slice their briefs name, one settled with nothing landed left out: it took nothing.
 
-    A brief that cannot be read takes nothing; the status view's drift names it.
+    A brief that cannot be read takes nothing; the status view's drift names it. `heads` is each readable
+    brief's header where the caller has read them, as the status view does; each is read here where not given.
     """
     held: dict[str, list[model.Agent]] = {}
     for agent in agents:
         if landed_nothing(agent):
             continue
-        with contextlib.suppress(Refused):
-            held.setdefault(brief.header(state, agent.name).slice, []).append(agent)
+        if heads is None:
+            with contextlib.suppress(Refused):
+                held.setdefault(brief.header(state, agent.name).slice, []).append(agent)
+        # A name missing from `heads` is a brief that cannot be read.
+        elif (head := heads.get(agent.name)) is not None:
+            held.setdefault(head.slice, []).append(agent)
     return held
 
 
-def landed_slices(state: Path, agents: list[model.Agent]) -> set[str]:
+def landed_slices(state: Path, agents: list[model.Agent], heads: Mapping[str, brief.Header] | None = None) -> set[str]:
     """Each slice an agent on it has landed, with no agent on it still unsettled: done, whether ticked or not.
 
     `land` writes no tick, so a slice reads as done the moment its last agent lands, not once the
     coordinator ticks its line.
     """
-    return {name for name, held in on_slice(state, agents).items() if all(a.status in model.SETTLED for a in held)}
+    taken = on_slice(state, agents, heads)
+    return {name for name, held in taken.items() if all(a.status in model.SETTLED for a in held)}
 
 
 def _shown(item: model.QueueItem, held: set[int]) -> str:

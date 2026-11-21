@@ -314,8 +314,10 @@ def update_agent(state: Path, name: str, edit: Callable[[Agent], Agent]) -> Agen
 # --- findings -------------------------------------------------------------------------------------
 
 
-def read_findings(state: Path) -> dict[str, FindingEvent]:
-    return _read(state / store.FINDINGS, FindingEvent, "row")
+def read_findings(state: Path, records: list[Record] | None = None) -> dict[str, FindingEvent]:
+    """Each row's state; `records` are the file's lines where the caller has read them already."""
+    path = state / store.FINDINGS
+    return _fold(store.read_jsonl(path) if records is None else records, FindingEvent, "row", path)
 
 
 def write_findings(state: Path, edit: Callable[[dict[str, FindingEvent]], list[FindingEvent]]) -> list[FindingEvent]:
