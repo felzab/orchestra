@@ -11,6 +11,7 @@ before the merge commit leaves the session branch where it stood; `EXITS` gives 
 from __future__ import annotations
 
 import argparse
+import functools
 import re
 import subprocess
 import sys
@@ -210,8 +211,13 @@ def _others(state: Path, name: str, root: Path) -> list[tuple[model.Agent, str]]
     return found
 
 
-def _abort(state: Path, name: str, root: Path, branch: str, stop: Stop, written: list[str]) -> Stop:
-    """The merge aborted and this run's writes put back; the stop, its lines completed."""
+def _abort(
+    root: Path, branch: str, stop: Stop, written: list[str], others: Callable[[], list[tuple[model.Agent, str]]]
+) -> Stop:
+    """The merge aborted and this run's writes put back; the stop, its lines completed.
+
+    `others` gives `_others`' answer, read only where a conflict names who else changes its paths.
+    """
     if stop.code == REFUSED:
         stop.code = GIT_FAILED
     config.run_git(root, "merge", "--abort")
@@ -232,8 +238,7 @@ def _abort(state: Path, name: str, root: Path, branch: str, stop: Stop, written:
         stop.lines = (head, "route the red at HEAD to its owner and land again once it clears", *stop.lines)
     if stop.code == CONFLICT:
         conflicted = {line.removeprefix("CONFLICT in ") for line in stop.lines if line.startswith("CONFLICT in ")}
-        # Read here alone, since only a conflict names who else changes its paths.
-        for agent, other in _others(state, name, root):
+        for agent, other in others():
             if _ok(root, "merge-base", "--is-ancestor", other, "HEAD"):
                 continue
             shared = sorted(conflicted & set(_names(root, "diff", "--name-only", f"HEAD...{other}", code=7)))
@@ -391,14 +396,15 @@ def land(here: Checkout, state: Path, name: str, args: argparse.Namespace) -> in
         )
     steps = config.load(root).land.steps
     written: list[str] = []
+    others = functools.partial(_others, state, name, root)
     try:
         # `Merge <a> into <b>` is a subject commit-message linters pass as a merge.
         message = f"Merge {name} into {model.read_session(state).branch}"
         did = _merge(root, message, branch, steps, written)
     except Stop as stop:
-        raise _abort(state, name, root, branch, stop, written) from None
+        raise _abort(root, branch, stop, written, others) from None
     except Refused as refused:
-        raise _abort(state, name, root, branch, Stop(7, str(refused)), written) from None
+        raise _abort(root, branch, Stop(7, str(refused)), written, others) from None
     merge = _git(root, "rev-parse", "HEAD", code=10).strip()
     said = f": {'; '.join(did)}" if did else ""
     lines, summary = _finish(
