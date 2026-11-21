@@ -945,6 +945,57 @@ def test_a_turns_end_lists_the_worktrees_once_for_every_report_stopped_on_a_ques
     assert runs() == one, ran
 
 
+def test_the_root_comes_from_session_json_where_exact_and_a_git_fault_drops_no_dispatch(
+    project: Path, state: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Every prompt and post-call event read the primary checkout, which two git runs found, though the state names it.
+
+    The recorded checkout is the root where its `.git` folder is the common directory holding the branch's
+    pointer; any other, a moved checkout among them, asks git. A dispatch reads the root only to route its rows,
+    so a git fault leaves its record written and names the rows left unrouted.
+    """
+    banked = [model.FindingEvent("X-F1", "bank", "OPEN"), model.FindingEvent("X-F2", "bank", "OPEN")]
+    model.write_findings(state, lambda _: banked)
+    briefed(project, "A", "auditor", rows="X-F1")
+    briefed(project, "B", "auditor", rows="X-F2")
+    main = project.parent / "main.jsonl"
+    main.write_bytes(line("assistant", "m1", 400_000))
+    near = "Your context is 400,474 tokens, at least 75% of the 500,000-token compaction window"
+    ran: list[tuple[str, ...]] = []
+    started = process.run
+    broken: list[bool] = []
+
+    def counted(argv: Sequence[str], **given: Any) -> subprocess.CompletedProcess[bytes]:
+        if argv[0] == "git":
+            ran.append(tuple(argv))
+            if broken:
+                return subprocess.CompletedProcess(argv, 128, b"", b"fatal: not a git repository")
+        return started(argv, **given)
+
+    def prompted() -> str:
+        return context_of(hook("UserPromptSubmit", project, prompt="go", transcript_path=str(main))[1], "UserPromptSubmit")
+
+    monkeypatch.setattr(process, "run", counted)
+    assert near in prompted()
+    assert dispatched(project, "A", "auditor", "a1") is None
+    assert model.read_findings(state)["X-F1"].owner == "A"
+    assert ran == []
+    # A checkout recorded elsewhere, as after a move, is no proof: git finds the root, and it is the same.
+    facts = model.read_session(state)
+    model.write_session(state, dataclasses.replace(facts, checkout=str(project.parent / "moved")))
+    assert near in prompted()
+    assert [argv[3] for argv in ran] == ["rev-parse", "worktree"]
+    # With git failing, the dispatch is recorded all the same, and its rows wait for `orchestra route`.
+    broken.append(True)
+    said = dispatched(project, "B", "auditor", "b1")
+    assert context_of(said, "PostToolUse") == (
+        "Not routed to B: git cannot find the primary checkout; `orchestra route B X-F2` routes them"
+    )
+    agent = model.read_agent(state, "B")
+    assert (agent.ids, agent.status) == (("b1",), "running")
+    assert model.read_findings(state)["X-F2"].status == "OPEN"
+
+
 def test_a_writer_stopped_on_a_question_whose_worktree_stands_waits_on_its_answer(project: Path, state: Path) -> None:
     """Its answer resumes it in its worktree, so `judge` waits for the report that answer completes."""
     briefed(project, "W", "writer", owns="lib/a.py")

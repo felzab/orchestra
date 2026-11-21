@@ -136,6 +136,8 @@ class Where:
     agent: model.Agent | None
     # Whether the main session's id holds the state's lease.
     coordinator: bool
+    # The branch's pointer `hooks` read from git's own files, `<common>/orchestra/<branch>`; None where git found it.
+    pointer: Path | None
 
     @property
     def session(self) -> str | None:
@@ -145,13 +147,36 @@ class Where:
 
     @functools.cached_property
     def root(self) -> Path | None:
-        """The primary checkout, from git, which only the events reading the project run; None without a state."""
+        """The primary checkout, read only by the events that use it; None without a state.
+
+        It is the checkout `session.json` records where that folder's `.git` is the common directory holding the
+        pointer, since git names the folder holding a `.git` common directory the primary worktree
+        (gitrepository-layout(5)). Any other layout, and an older record naming none, asks git, at two runs.
+        """
         if self.state is None:
             return None
+        if (recorded := _recorded(self.state, self.pointer)) is not None:
+            return recorded
         try:
             return config.checkout(self.place).root
         except Refused:
             return None
+
+
+def _recorded(state: Path, pointer: Path | None) -> Path | None:
+    """The checkout `session.json` records, where its `.git` folder is the common directory holding `pointer`."""
+    if pointer is None:
+        return None
+    try:
+        held = model.read_session(state).checkout
+    except (Refused, OSError):
+        # Unreadable or missing, git decides, as it did before the record named a checkout.
+        return None
+    if held is None:
+        return None
+    root = Path(held)
+    dot = root / ".git"
+    return root if dot.is_dir() and config.identical(dot, pointer.parent.parent) else None
 
 
 def answer(event: str, data: Record, *, held: Path | bool, place: Path | None) -> str | None:
@@ -254,7 +279,8 @@ def _where(data: Record, *, held: Path | bool, place: Path) -> Where:
         else:
             owner = store.lease(state).get("owner")
             coordinator = owner is not None and owner == data.get("session_id")
-    return Where(data, cwd, place, state, agent_id, plugin, agent, coordinator)
+    pointer = held if isinstance(held, Path) else None
+    return Where(data, cwd, place, state, agent_id, plugin, agent, coordinator, pointer)
 
 
 def _quietly(act: Callable[[], object]) -> None:
@@ -703,27 +729,32 @@ def permission_denied(where: Where) -> str | None:
 
 
 def post_tool_use(where: Where) -> str | None:
-    if not where.coordinator or where.state is None or where.root is None:
+    # The root is read only where rows are routed, so a git fault never drops a dispatch's record or a message.
+    if not where.coordinator or where.state is None:
         return None
     given = context.as_object(where.data.get("tool_input"))
     tool = where.data.get("tool_name")
     if tool == "Agent":
         response = context.as_object(where.data.get("tool_response"))
-        said = _dispatched(where.state, where.root, given, response, where.session)
+        said = _dispatched(where, where.state, given, response)
     elif tool == "SendMessage":
-        said = _sent(where.state, where.root, given, where.session)
+        said = _sent(where, where.state, given)
     else:
         said = None
     return _context("PostToolUse", said) if said else None
 
 
-def _route_to(state: Path, root: Path, name: str, rows: list[str], session: str | None) -> str | None:
+def _route_to(where: Where, state: Path, name: str, rows: list[str]) -> str | None:
     """Each row routed to the agent on its own, so a row another agent holds keeps no other from it; what was not."""
     if not rows:
         return None
+    root = where.root
+    if root is None:
+        named = " ".join(rows)
+        return f"Not routed to {name}: git cannot find the primary checkout; `orchestra route {name} {named}` routes them"
     owner = findings.owners(state, root)(name)
     # Read once for every row: each running agent's transcript is read to judge it, and the hook's caller waits.
-    held = findings.live(state, session)
+    held = findings.live(state, where.session)
     refused: list[str] = []
     for row in rows:
         try:
@@ -733,7 +764,7 @@ def _route_to(state: Path, root: Path, name: str, rows: list[str], session: str 
     return f"Not routed to {name}: {'; '.join(refused)}" if refused else None
 
 
-def _dispatched(state: Path, root: Path, given: Record, response: Record, session: str | None) -> str | None:
+def _dispatched(where: Where, state: Path, given: Record, response: Record) -> str | None:
     """The id the harness gave a dispatched agent and `running` in its record, and its brief's `Rows:` routed to it.
 
     Routed here, so a row a brief names is the agent's as a row a message names is, and its landing closes it.
@@ -757,10 +788,10 @@ def _dispatched(state: Path, root: Path, given: Record, response: Record, sessio
 
     agent = model.update_agent(state, name, start)
     log.record(state, log.DISPATCH, f"{name} as {ident} on {agent.model or 'the inherited model'}")
-    return _route_to(state, root, name, list(brief.header(state, name).rows), session)
+    return _route_to(where, state, name, list(brief.header(state, name).rows))
 
 
-def _sent(state: Path, root: Path, given: Record, session: str | None) -> str | None:
+def _sent(where: Where, state: Path, given: Record) -> str | None:
     """A message kept in its agent's messages file, and its `Rows:` routed; the resume is `_resume`'s."""
     agent = _addressee(state, given.get("to"))
     if agent is None:
@@ -770,7 +801,7 @@ def _sent(state: Path, root: Path, given: Record, session: str | None) -> str | 
     if text.strip():
         _keep_message(state, agent.name, text)
     rows = [row[0] for line in ROWS_RE.finditer(text) for row in model.ROW_RE.finditer(line["rows"])]
-    return _route_to(state, root, agent.name, rows, session)
+    return _route_to(where, state, agent.name, rows)
 
 
 def _keep_message(state: Path, name: str, text: str) -> None:
