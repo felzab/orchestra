@@ -60,7 +60,22 @@ The fixes from the third project session that ran on the plugin.
     a successor needs into its report, since no answer can resume it;
   - a checked brief that will not go out is settled with `orchestra prune --discard NAME`, and a brief
     names the parts of an earlier report its agent needs;
-  - the disclosure lens passes the plugin's two merge subjects while still reading their agent names.
+  - the disclosure lens passes the plugin's two merge subjects while still reading their agent names;
+  - the agent definitions, the shared agent page, three lenses and the coordinator's start and review
+    pages drop the rules their reader already holds in the same load or in a hook's refusal, and an
+    agent that stops on a question writes `NEEDS-ANSWER` alone, though the program still reads
+    `BLOCKED`;
+  - a defect an agent describes under `## Outside the scope` is also a finding, so judging banks it;
+  - the review sends a verifier every row a fixer would take and every `defect` row it would close
+    as no defect or moot, holding the latter open until the verdict;
+  - the coordinator writes a ruling that changes the work into `PLAN.md` in the turn it is given,
+    asks the owner only what no ruling, page or command settles, and gives an agent a run of calls
+    that needs none of its context;
+  - a brief names a cheaper model profile only for work it spells out, never for a lens, a verifier
+    or work of finding, judging or designing;
+  - the next session's work list is the plan's part the starter names, one line an item, and the
+    estimate's second reader also runs at each estimate the owner starts and names each row it
+    corrected the last time.
 - The guide carries the measured compaction figures and why 500,000 is kept, names `/status`'s
   setting sources, and says which switches turn the mod off.
 
