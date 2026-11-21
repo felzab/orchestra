@@ -1010,7 +1010,7 @@ def test_a_turns_end_lists_the_worktrees_once_for_every_report_stopped_on_a_ques
 
 
 def test_the_root_comes_from_session_json_where_exact_and_a_git_fault_drops_no_dispatch(
-    project: Path, state: Path, monkeypatch: pytest.MonkeyPatch
+    project: Path, state: Path, monkeypatch: pytest.MonkeyPatch, make_repo: MakeRepo
 ) -> None:
     """Every prompt and post-call event read the primary checkout, which two git runs found, though the state names it.
 
@@ -1048,6 +1048,12 @@ def test_the_root_comes_from_session_json_where_exact_and_a_git_fault_drops_no_d
     # A checkout recorded elsewhere, as after a move, is no proof: git finds the root, and it is the same.
     facts = model.read_session(state)
     model.write_session(state, dataclasses.replace(facts, checkout=str(project.parent / "moved")))
+    assert near in prompted()
+    assert [argv[3] for argv in ran] == ["rev-parse", "worktree"]
+    # Nor is another clone's checkout, as one made at the old path after a move: its `.git` holds no pointer.
+    clone = make_repo(project.parent / "clone" / "project")
+    model.write_session(state, dataclasses.replace(facts, checkout=str(clone)))
+    ran.clear()
     assert near in prompted()
     assert [argv[3] for argv in ran] == ["rev-parse", "worktree"]
     # With git failing, the dispatch is recorded all the same, and its rows wait for `orchestra route`.
