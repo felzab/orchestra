@@ -279,19 +279,9 @@ def credit(state: Path, names: list[str], merge: str) -> list[str]:
     return said
 
 
-def _reflog(root: Path, ref: str) -> list[str]:
-    """The commit each entry of the ref's reflog names, newest first; none where git keeps no reflog for it."""
-    done = config.run_git(root, "log", "--walk-reflogs", "--format=%H", ref)
-    return done.stdout.decode("utf-8", "replace").split() if done.returncode == 0 else []
-
-
-def _brought_in(root: Path, session: str, branch: str) -> tuple[str, str] | None:
-    """The span of the session branch that brought the branch in, as (before, after); None where nothing did.
-
-    A merge commit on the session branch's first-parent line brought it in, or a fast-forward, which
-    `git merge` makes by default: then the session branch's reflog holds the branch's tip, and the
-    entry before it is where the session branch stood. A branch with no commit of its own sits on the
-    first-parent line too, and its own reflog holds nothing but its creation (git-reflog(1)).
+def _brought_in(root: Path, branch: str) -> tuple[str, str] | None:
+    """The merge commit on the session branch's first-parent line that brought the branch in, as (before, after);
+    None where none did: a branch with no commit of its own, or one a fast-forward took in, which `land` never makes.
     """
     # The line's commits that descend from the branch, by any parent: with `--first-parent`, `--ancestry-path`
     # walks no second parent, so it misses a branch another agent's merged branch carried in.
@@ -299,15 +289,7 @@ def _brought_in(root: Path, session: str, branch: str) -> tuple[str, str] | None
     line = [made for made in _git(root, "rev-list", "--first-parent", f"{branch}..HEAD").split() if made in descends]
     if line and not _ok(root, "merge-base", "--is-ancestor", branch, f"{line[-1]}^1"):
         return f"{line[-1]}^1", line[-1]
-    tip = _git(root, "rev-parse", f"refs/heads/{branch}").strip()
-    own = _reflog(root, f"refs/heads/{branch}")
-    if not own or own[-1] == tip:
-        return None
-    moves = _reflog(root, f"refs/heads/{session}")
-    at = moves.index(tip) if tip in moves else len(moves)
-    if at + 1 >= len(moves) or not _ok(root, "merge-base", "--is-ancestor", moves[at + 1], tip):
-        return None
-    return moves[at + 1], tip
+    return None
 
 
 def _settle(
@@ -379,9 +361,7 @@ def land(here: Checkout, state: Path, name: str, args: argparse.Namespace) -> in
         raise Stop(2, waits)
     preflight(root, branch)
     if _ok(root, "merge-base", "--is-ancestor", branch, "HEAD"):
-        merged = (
-            None if agent.status in model.SETTLED or here.branch is None else _brought_in(root, here.branch, branch)
-        )
+        merged = None if agent.status in model.SETTLED else _brought_in(root, branch)
         if merged is None:
             # Work its report calls delivered is on the session branch already, so it is stamped landed, which
             # is what `queue.landed_nothing` reads; a report stopped on a question delivered nothing.
@@ -391,7 +371,7 @@ def land(here: Checkout, state: Path, name: str, args: argparse.Namespace) -> in
             said = prune.prune(here, state, {name})
             cli.emit(args, said.failed + said.lines, f"nothing to land: the session branch already holds {branch}")
             return 0
-        # A landing stopped after its merge commit, or a merge or fast-forward made by hand: what it left
+        # A landing stopped after its merge commit, or a merge made by hand: what it left
         # undone is done now.
         lines, summary = _finish(
             here,
