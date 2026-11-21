@@ -324,6 +324,14 @@ def test_a_confirmed_verdict_on_a_fixed_row_needs_no_disposition_and_one_on_a_re
     assert (held["REVIEW-F2"].kind, held["REVIEW-F2"].owner) == ("reopen", "FIXER")
     # The one line written is REVIEW-F2's reopening.
     assert len(lines(state).splitlines()) == len(before.splitlines()) + 1
+    # Only a confirmation agrees with a fix: a correction of the fixed row takes a disposition, or it would be lost.
+    correction = f"F1 · defect · silent · {STORE}\nThe fix guards `save` but not `load`."
+    agent(state, "AGAIN", Written("verifier", verdicts=(("REVIEW-F1", "CORRECTED", correction),)))
+    after = lines(state)
+    corrected = inprocess("judge", "AGAIN", "--verdict", "v", cwd=project)
+    assert corrected.returncode == 2
+    assert "every verdict but REFUTED takes a disposition, and REVIEW-F1 has none" in corrected.stderr
+    assert lines(state) == after
 
 
 def test_a_verifiers_verdict_on_a_row_never_banked_moves_nothing_and_takes_no_disposition(
