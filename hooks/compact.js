@@ -7,10 +7,18 @@
 // The registered name, which the model calls as `mcp__<plugin>__<name>` (plugins/mods/api.md, "Add a tool").
 const NAME = 'compact'
 const TOOL = 'mcp__orchestra__compact'
+// The share of the compaction window from which the tool compacts. A seam loses least, since the state then holds
+// everything in flight, and compacting lower costs less: replayed over one long coordinator day, compacting near
+// 300,000 and 400,000 tokens cost 0.85 and 0.91 of compacting near 500,000. Below it, the summary's own cost
+// outweighs what it saves; from it, a wave's growth still fits before Claude Code compacts on its own, about 33,000
+// tokens short of the window.
+const THRESHOLD = 0.6
 const DESCRIPTION =
   'Compacts this conversation as /compact does, once your current turn ends, then sends a one-line prompt so the' +
-  ' session carries on. For the orchestra coordinator at a seam, such as a wave’s end once the state holds' +
-  ' everything in flight. Refused in an agent and in a session with no orchestra state. End your turn after the call.'
+  ' session carries on. For the orchestra coordinator: call it at each natural seam, such as a wave’s end once the' +
+  ` state holds everything in flight; it compacts only from ${THRESHOLD * 100}% of the compaction window and` +
+  ' otherwise answers that no compaction is needed yet. Refused in an agent and in a session with no orchestra' +
+  ' state. End your turn after a call that schedules one.'
 // What the tool answers once the compaction is scheduled.
 const SCHEDULED = 'scheduled: end your turn, and the conversation compacts once it has ended'
 // `store.POINTERS`: the folder in git's common directory holding each branch's pointer to its state.
@@ -20,6 +28,14 @@ const POINTERS = 'orchestra'
 let pending = false
 // While the queued `/compact` runs: the main conversation's compaction result, once one settles.
 let running
+// Set once a compaction the tool scheduled is known not to have run, a veto or a rejected `/compact`, until the
+// owner's next prompt or a main compaction that runs: the resume prompt starts a turn, so a compaction that fails
+// each time would repeat for as long as the model calls the tool again (plugins/mods/api.md, "A `claude -p` run with
+// your mod never exits").
+let failed = false
+// The origins of a prompt that is the owner's own input (PromptOrigin): Enter at the terminal, the Remote Control
+// bridge, the SDK host's own turn, and a ping from Slack.
+const OWNER = new Set(['composer', 'bridge', 'sdk', 'slack-ping'])
 
 // `store.pointer`'s quoting, Python's `quote(branch, safe="")`: every byte but RFC 3986's unreserved characters
 // percent-encoded, which `encodeURIComponent` does once `!'()*` are encoded too (MDN, `encodeURIComponent`,
@@ -48,6 +64,16 @@ export async function stateOf($) {
   return state !== '' && (await $.fs.exists(state)) ? state : null
 }
 
+// The context in tokens and the compaction window it fills; null where either goes unread.
+async function fill($) {
+  // `percent` is of `window`, the model's whole context; the breakdown "measures against the compaction window
+  // (`rawMaxTokens`), which may be smaller than `window`" (SessionContextUsage), and `summary` "estimates locally
+  // and sends none" (SessionUsageArgs). `tokens` is the last response's input, as `context.size` reads it.
+  const { context } = await $.session.usage({ breakdown: 'summary' })
+  const window = context.breakdown?.rawMaxTokens
+  return context.tokens === undefined || window === undefined ? null : { tokens: context.tokens, window }
+}
+
 // Runs the queued `/compact`, then wakes the session whatever came of it: the coordinator ended its turn to let
 // the compaction run, and with no agent left to report, nothing else would start its next one.
 async function compactThenResume($) {
@@ -58,17 +84,29 @@ async function compactThenResume($) {
     // session is idle".
     await $.command.run({ command: 'compact', args: '' })
     const outcome = running.outcome
-    said =
-      outcome !== undefined && outcome.skip === undefined
-        ? 'The compaction scheduled with the compact tool has run.'
-        : `The compaction scheduled with the compact tool did not run: ${outcome?.skip ?? 'no compaction happened'}.`
+    if (outcome?.skip !== undefined) {
+      said = `The compaction scheduled with the compact tool did not run: ${outcome.skip}.`
+      failed = true
+    } else if (outcome !== undefined || (await $.session.usage()).context.tokens === undefined) {
+      // Where Claude Code's built-in guard loads, no `session.compact` hook of this mod runs (plugins/mods/admin.md,
+      // "Know which hooks of a user's mod don't run"). The context's `tokens` then tells: "absent until the first
+      // response of the live window: a fresh session, or one just compacted" (SessionContextUsage).
+      said = 'The compaction scheduled with the compact tool has run.'
+    } else {
+      // A reading may come from a turn something else started since, so it is no evidence the compaction failed.
+      said = 'The compaction scheduled with the compact tool reported no outcome, so whether it ran is unknown.'
+    }
   } catch (error) {
     said = `The compaction scheduled with the compact tool failed: ${error instanceof Error ? error.message : error}.`
+    failed = true
   } finally {
     running = undefined
   }
   // `$.prompt.submit`: "a turn of its own, once the session is idle", read after a sentence naming this mod.
-  await $.prompt.submit({ text: said })
+  const sent = await $.prompt.submit({ text: said })
+  // A refused prompt "resolves with `{ drop: '<reason>' }` and queues no prompt" (plugins/mods/api.md, "What
+  // refused calls return"), so the session stays idle; the engine's own reason is logged nowhere else.
+  if (sent.drop !== undefined) $.ui.log(`the compaction's resume prompt was refused: ${sent.drop}`)
 }
 
 export function register(on) {
@@ -90,10 +128,26 @@ export function register(on) {
     if (e.agentId !== undefined) {
       return { deny: `${TOOL} compacts the main conversation alone; agent ${e.agentId} called it.` }
     }
+    if (failed) {
+      return {
+        deny: `${TOOL} schedules nothing until the owner's next prompt or a compaction that runs, since the one it last scheduled did not run.`,
+      }
+    }
     if (pending) return { result: SCHEDULED }
     if ((await stateOf($)) === null) {
       return {
         deny: `${TOOL} compacts an orchestra coordinator, and this session's checkout holds no orchestra session on its branch.`,
+      }
+    }
+    const read = await fill($)
+    // A size that goes unread schedules, as the tool did before it read one: the seam is where to compact.
+    if (read !== null && read.tokens < THRESHOLD * read.window) {
+      const share = Math.floor((100 * read.tokens) / read.window)
+      return {
+        result:
+          `not needed yet: the context is ${share}% of the ${read.window.toLocaleString('en-US')}-token compaction` +
+          ` window, below the ${THRESHOLD * 100}% from which this tool compacts. Nothing was scheduled; call it` +
+          ' again at a later seam.',
       }
     }
     pending = true
@@ -101,7 +155,7 @@ export function register(on) {
   }).catch(($, e, next) => ({
     // Without it a failed check, such as no `git` on the path, would leave the call to no hook, and it would fail
     // without saying why (`next.error`: "`kind` is `throw` or `timeout`, and `message` is the error's text").
-    deny: `${TOOL} could not check for an orchestra session, so nothing was scheduled: ${next.error.message}`,
+    deny: `${TOOL} could not check this session, so nothing was scheduled: ${next.error.message}`,
   }))
 
   on('turn.complete', ($, e, next) => {
@@ -122,11 +176,24 @@ export function register(on) {
     return next(e)
   })
 
+  // The owner's input lets the tool schedule again, as Claude Code refuses a mod's calls after an interruption
+  // "until the user's next input" (plugins/mods/api.md, "Retry a refused or dropped call"). `prompt.submit` "Fires
+  // when a prompt is submitted, before the turn starts", the mod's own resume prompt among them, whose `origin` is
+  // a plugin's.
+  on('prompt.submit', ($, e, next) => {
+    if (OWNER.has(e.origin.kind)) failed = false
+    return next(e)
+  })
+
   // Records whether the queued `/compact` compacted the main conversation: `next(e)` resolves to the compaction or
   // to `{ skip }` (SessionCompactResult), and `precompute` installs nothing (SessionCompactTrigger).
   on('session.compact', async ($, e, next) => {
     const result = await next(e)
-    if (running !== undefined && e.agentId === undefined && e.trigger !== 'precompute') running.outcome = result
+    if (e.agentId === undefined && e.trigger !== 'precompute') {
+      if (running !== undefined) running.outcome = result
+      // Any main compaction that ran, the owner's `/compact` or Claude Code's own at the window, shows the next may.
+      if (result.skip === undefined) failed = false
+    }
     return result
   })
 }
