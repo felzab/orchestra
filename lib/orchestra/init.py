@@ -34,11 +34,9 @@ DIRECTORIES = "additionalDirectories"
 # of the default there, which compacts near 967,000 tokens, and 600,000 about 1.1 of this one.
 WINDOW_TOKENS = 500_000
 
-# The heading whose task lines are the slices, which `status` reads.
-SLICES = "## Slices and their files"
 # The request first, in the owner's words verbatim, so a session resumed after a crash or a `/clear` reads
-# what was asked rather than a paraphrase.
-PLAN_HEADINGS = ("## The request", SLICES, "## Landing order", "## Ending")
+# what was asked rather than a paraphrase. The slices' heading is `model`'s, where the plan's readers find it.
+PLAN_HEADINGS = ("## The request", model.SLICES, "## Landing order", "## Ending")
 # Only what the state cannot give: where the session waits, the newest estimate and the last gate run
 # are in the log and the state's folders, and `status` prints them.
 NOW_LABELS = ("Next action:", "Why it is next:")
