@@ -298,9 +298,11 @@ session's end, as a line of the plan's ending; [the away mode](#the-away-mode) s
 command changes.
 
 The coordinator asks you a question the moment it arises. In the terminal,
-`askUserQuestionTimeout` in your user settings closes a question you leave unanswered, and the
-coordinator goes on without you; it has no effect in the desktop app's Code tab or while Remote
-Control is connected. While you are away it holds the question instead, and records your answer
+`askUserQuestionTimeout` in your user settings, off until you set it to `60s`, `5m` or `10m`,
+closes a question you leave unanswered while the terminal's window is not focused, and the
+coordinator goes on without you
+([tools reference](https://code.claude.com/docs/en/tools-reference), "Question auto-continue
+timeout"); it has no effect in the desktop app's Code tab or while Remote Control is connected. While you are away it holds the question instead, and records your answer
 later in your own words:
 
 ```sh
