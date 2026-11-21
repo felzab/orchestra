@@ -178,9 +178,8 @@ def test_a_row_routed_back_after_a_landing_is_closed_by_the_latest_report_alone(
     ("status", "turn", "after"),
     [
         ("judged", "ended", "pruned"),
-        ("running", "mid-turn", "running"),
-        ("running", "silent", "running"),
         ("running", "unseen", "running"),
+        ("judged", "mid-turn", "judged"),
         ("reported", "ended", "reported"),
         ("stopped", "ended", "stopped"),
     ],
@@ -194,10 +193,10 @@ def test_a_landing_credits_every_agent_whose_branch_it_brought_in(
     """
     fixer = agent(fleet, "FIXER", "b1")
     model.update_agent(fleet.state, "FIXER", lambda held: replace(held, status=status))
-    # A `running` record whose turn ended long ago is a stop hook that never ran: its report is still unjudged.
-    # One with no transcript found is still running all the same, which only its record says.
+    # A `running` record is kept by its status alone, whatever its transcript shows; one with none found is too.
+    # A judged one whose transcript is mid-turn may still be working, though no report of it waits.
     if turn != "unseen":
-        ran(fleet, "b1", ended=turn != "mid-turn", minutes=20 if turn == "silent" else None)
+        ran(fleet, "b1", ended=turn != "mid-turn")
     write(fleet.state, "reports/FIXER.md", text("writer", "FIXER", fixed="A-F1."))
     commit(fixer, "Docs: A note", {"notes.txt": "second\n"})
     merger = agent(fleet, "MERGER", "b2")
