@@ -93,8 +93,8 @@ The fixes from the third project session that ran on the plugin.
   owner's word or call is routed to an agent; a route to a queue is not warned of.
 - A verifier's `CONFIRMED` verdict on a row closed `FIXED`, `RULED` or `HANDOFF` takes no
   disposition and moves nothing; one on a row closed `NOT A DEFECT` or `MOOT` still takes one.
-- `orchestra ask "<question>" --supersedes N` takes a ruled question too and marks its ruling replaced, and
-  `rule`'s refusal of a second ruling names `--supersedes`.
+- A question asked again with `--supersedes` may replace a ruled one too, which marks its ruling
+  replaced, and `rule`'s refusal of a second ruling names `--supersedes`.
 - `orchestra status` and the session-start hook test a changed path against a brief's `Owns:`
   pattern only where the path begins with the pattern's literal start, which makes the drift check
   of a long session faster with the same lines, and the turn-end hook hands the queue the records
