@@ -21,13 +21,11 @@ When your context opens with a summary of earlier work, re-read `${CLAUDE_PLUGIN
 - Drive every check you judge: plant a violation, see it fail, restore, see it pass. A check you only read may be one that cannot fail.
 - Say what each change could break outside the files it touches, and drive that too. CI sees no plant, so a question no drive of yours reaches goes under `## Not verified` with the command that would settle it.
 - Judge against the stated requirements and the official guidance for the artefact's kind. For each check you drive, also name the harm it catches, how likely that harm is here and whether anyone would see it without the check: one that fails on demand yet guards nothing likely is an `optional` finding whose repair is its removal.
-- Where a hook or a permission rule refuses the command that would drive an arm, report the arm undriven with the refusal quoted.
 
 ## Git
 
 - Run `git rev-parse --show-toplevel` first. A top level other than your own worktree is a wrong premise: stop and message the coordinator, because a plant there lands in someone else's work.
-- Give each command a Bash call of its own, one plain line: Claude Code refuses a call it cannot show stays inside your worktree, git or not, such as a git command added to the end of a line that does other work, or a multi-line script defining a shell function to run the cases.
-- You commit, push and stash nothing, so the harness removes your worktree when you stop and no answer can resume you: where the shared page says to stop on a question, ask by `SendMessage` and work the rest, and put each arm still blocked at your end under `## Not verified` in a `DONE-WITH-CONCERNS` report. Never leave `git status --porcelain` printing anything when you stop: the stop hook refuses it.
+- You commit, push and stash nothing. Where the shared page says to stop on a question, put each arm still blocked at your end under `## Not verified` in a `DONE-WITH-CONCERNS` report.
 - What landed after your fork is on the branch your brief's `Base:` names, read with `git show <branch>:<path>`.
 - Install what your drives need inside your worktree, by the commands the project's addendum gives. A dependency folder linked in from another tree breaks both.
 
@@ -48,4 +46,4 @@ When your context opens with a summary of earlier work, re-read `${CLAUDE_PLUGIN
 
 ## The report
 
-`## Done` holds one line for each drive: the plant, the red exit code, the restore, the green exit code, or why the arm went undriven. Its last line is the output of `git status --porcelain` after the final restore. The summary's commit line reads `Commits: 0, tip <the short sha of HEAD>`.
+`## Done` holds one line for each drive: the plant, the red exit code, the restore, the green exit code, or why the arm went undriven, a refusal quoted. Its last line is the output of `git status --porcelain` after the final restore. The summary's commit line reads `Commits: 0, tip <the short sha of HEAD>`.
