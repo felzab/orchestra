@@ -57,8 +57,28 @@ def test_a_question_asked_again_closes_the_first_which_takes_no_ruling(project: 
     assert refused.returncode == 2
     assert "question 1 was asked again as question 2: rule on that one" in refused.stderr
     assert model.read_rulings(state)[1].number is None
-    assert inprocess("ask", "A third", "--supersedes", "1", cwd=project).returncode == 2
+    twice = inprocess("ask", "A third", "--supersedes", "1", cwd=project)
+    assert twice.returncode == 2
+    assert "question 1 was asked again as question 2 already: supersede that one" in twice.stderr
     assert inprocess("rule", "2", "Yes.", cwd=project).returncode == 0
+
+
+def test_a_ruled_question_asked_again_is_marked_replaced_and_takes_no_second_ruling(project: Path, state: Path) -> None:
+    """A ruling the owner later replaces must not read as standing to whoever reads the rulings."""
+    assert inprocess("ask", "Keep the cap at 20?", cwd=project).returncode == 0
+    assert inprocess("rule", "1", "Keep it.", cwd=project).returncode == 0
+    again = inprocess("ask", "Keep the cap at 20 this week too?", "--supersedes", "1", cwd=project)
+    assert again.returncode == 0, again.stderr
+    said = "queued question 2, superseding question 1 and its ruling 101: Keep the cap at 20 this week too?"
+    assert again.stdout.splitlines()[-1] == said
+    held = model.read_rulings(state)[1]
+    assert (held.number, held.words, held.superseded_by) == (101, "Keep it.", 2)
+    refused = inprocess("rule", "1", "Raise it.", cwd=project)
+    assert refused.returncode == 2
+    assert "question 1 was asked again as question 2: rule on that one" in refused.stderr
+    missing = inprocess("ask", "A fourth", "--supersedes", "9", cwd=project)
+    assert missing.returncode == 2
+    assert "--supersedes 9 names no question in this programme" in missing.stderr
 
 
 @pytest.mark.parametrize(

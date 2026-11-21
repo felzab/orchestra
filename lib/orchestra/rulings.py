@@ -4,7 +4,8 @@ A question is queued rather than asked in the session while nobody may be there 
 never parks the fleet; the owner rules on it later, and the ruling keeps the owner's own words under
 the programme's next ruling number. `ask` with no question lists the open ones, as the owner's
 return reads them. A question asked again with `--supersedes N` closes question N unruled, so one
-answer is never recorded on both.
+answer is never recorded on both; where N is ruled already, its ruling is marked replaced by the new
+question's, so no reader of the rulings takes it as standing.
 """
 
 from __future__ import annotations
@@ -31,7 +32,8 @@ def add(verb: str, parser: argparse.ArgumentParser) -> None:
             "--supersedes",
             type=int,
             metavar="ID",
-            help="the open question this one asks again, which is then closed and takes no ruling",
+            help="the question this one asks again: an open one is closed and takes no ruling, a ruled one's ruling is"
+            " marked replaced by this one's",
         )
     else:
         parser.add_argument("ask", type=int, metavar="ID", help="the question's number, as `orchestra ask` lists it")
@@ -93,12 +95,20 @@ def _ask(args: argparse.Namespace, state: Path) -> int:
         made = model.Ruling(number, question, session.session, tuple(options), recommend)
         if (old := args.supersedes) is None:
             return [made]
-        if old not in held or not held[old].open:
-            raise Refused(f"--supersedes {old} names no open question: `orchestra ask` lists them")
+        if old not in held:
+            raise Refused(
+                f"--supersedes {old} names no question in this programme: `orchestra ask` lists the open ones"
+            )
+        # A ruled question may be asked again too, so the ruling it replaces is marked as replaced.
+        if (later := held[old].superseded_by) is not None:
+            raise Refused(f"question {old} was asked again as question {later} already: supersede that one")
         return [dataclasses.replace(held[old], superseded_by=number), made]
 
-    asked = model.write_rulings(state, append)[-1]
-    again = f", superseding question {args.supersedes}" if args.supersedes is not None else ""
+    *replaced, asked = model.write_rulings(state, append)
+    again = "".join(
+        f", superseding question {old.ask}" + (f" and its ruling {old.number}" if old.number is not None else "")
+        for old in replaced
+    )
     log.record(state, "ask", f"question {asked.ask}{again}: {question}")
     cli.emit(args, shown(asked)[1:], f"queued question {asked.ask}{again}: {question}")
     return DONE
