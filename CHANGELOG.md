@@ -19,8 +19,9 @@ The fixes from the third project session that ran on the plugin.
   60% of the compaction window the tool answers that compacting is not needed yet; from it, the
   conversation compacts once the turn ends, and a one-line prompt then resumes the session. The tool
   refuses a call from an agent and from a checkout with no orchestra session, and, after a
-  compaction it scheduled was vetoed or failed, every call until the owner's next prompt or a
-  compaction that runs. Where the tool is absent or fails, the coordinator tells the owner at each
+  compaction it scheduled was vetoed, failed or not seen to run, every call until the owner's next
+  prompt or a compaction it sees run; where Claude Code's built-in guard loads it sees none, so
+  only the owner's prompt clears it. Where the tool is absent or fails, the coordinator tells the owner at each
   seam to type `/compact`. Its schedule, compaction and resume have been driven in headless sessions
   only. `claude plugin test .` runs its tests, in CI too.
 - The prompt hook tells the coordinator, from 75% of a compaction window that a settings file or the
