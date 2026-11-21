@@ -62,6 +62,10 @@ STALE_MINUTES = 30
 # A subagent's prompt cache lifetime, five minutes unless a setting lengthens it (Claude Code's prompt-caching.md,
 # "Which TTL each request gets"). A resume within it reads the agent's context from the cache, so the ceiling,
 # which spares the cost of writing that context again, waits until it has lapsed.
+# A lengthened lifetime is knowingly not read: `subagentPromptCacheTtl`, `CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL`
+# and `ENABLE_PROMPT_CACHING_1H` ("Choose the TTL yourself"). No agent of the plugin sets one. Where the owner
+# does, a resume past `contextCeiling` within the longer lifetime is refused naming this figure, which an override
+# waives, so the harm is unlikely and shows: a successor briefed where a resume would have read a warm cache.
 CACHE_MINUTES = 5
 # Log entries newer than NOW.md past which it no longer says where the session stands.
 NOW_EVENTS = 5
@@ -93,6 +97,9 @@ FINISHED_ROWS = frozenset({"judged", "pruned"})
 NEAR_WINDOW = 0.75
 # The tool `hooks/compact.js` registers, which compacts the coordinator once its turn ends.
 COMPACT_TOOL = "mcp__orchestra__compact"
+# The share of the window Claude Code applied from which that tool compacts, its `THRESHOLD`. Past a set window
+# that did not apply, the applied one may be larger, so the tool may answer that no compaction is needed yet.
+COMPACTS_FROM = 0.6
 # The reason of a `SessionEnd` that `/clear` caused, whose session id never writes again, and the source
 # of the `SessionStart` that follows it.
 CLEARED = "clear"
@@ -588,7 +595,7 @@ def _resume(where: Where, given: Record) -> str | None:
     if (held := findings.gone(agent, root)) is not None:
         why = (
             f"{name}'s worktree is gone ({held}), so a resume has no worktree to run in:"
-            f" {_settle(state, agent)}dispatch a successor briefed with what is left"
+            f" {_settle(state, root, agent, where.session)}dispatch a successor briefed with what is left"
         )
     elif (unjudged := findings.unjudged(agent)) is not None:
         # `judge` reads an agent's latest round alone, so a round begun before it would leave this one's unread.
@@ -643,17 +650,24 @@ def _cold(agent: model.Agent, session: str | None) -> str | None:
     return f"its transcript was last written {int(seconds // 60)} min ago, past the {CACHE_MINUTES}-min cache"
 
 
-def _settle(state: Path, agent: model.Agent) -> str:
+def _settle(state: Path, root: Path, agent: model.Agent, session: str | None) -> str:
     """The verb that settles an agent no resume reaches, ahead of its successor's dispatch; empty where it is judged.
 
     No answer reaches it, so `judge` takes its report as it stands, a question included, and a judged record
     holds nothing a successor's brief needs. A round stopped before its report reads, which `judge` refuses,
-    has nothing to bank, and `prune` settles it.
+    has nothing to bank. `prune` settles it where it is `stopped` and the branch it names is gone, and says what
+    keeps it where the branch stands; elsewhere only its discard settles it, which is the coordinator's word.
     """
     if agent.status in findings.JUDGED:
         return ""
     if agent.status == "reported" or findings.readable(state, agent):
         return f"`orchestra judge {agent.name}` banks its report, then "
+    # Imported here, since only this refusal reads it and every hook would pay for its imports.
+    from orchestra import prune  # noqa: PLC0415
+
+    branch = prune.branch_of(agent, session)
+    if branch is None or (agent.status != "stopped" and not prune.branch_exists(root, branch)):
+        return f"`orchestra prune --discard {agent.name}` settles its record once you have saved what it holds, then "
     return "`orchestra prune` settles its record, then "
 
 
@@ -1186,8 +1200,9 @@ def user_prompt_submit(where: Where) -> str | None:
 
     From `NEAR_WINDOW` of the window the coordinator reads that the compact tool compacts at its next seam. Past
     the window, which an applied window never lets the context reach, the owner reads it too, in a `systemMessage`:
-    the window has not applied, and where mods do not load only the owner can type `/compact` (skills.md: the model
-    cannot run it). A `Stop` hook would carry it at a model call each time it fired.
+    the window has not applied, and the compact tool measures against the one Claude Code applied, so only the
+    owner's `/compact` is sure to compact (skills.md: the model cannot run it). A `Stop` hook would carry it at a
+    model call each time it fired.
     """
     state = where.state
     if not where.coordinator or state is None:
@@ -1213,16 +1228,18 @@ def user_prompt_submit(where: Where) -> str | None:
         return _context("UserPromptSubmit", said)
     size, window = f"{near[0]:,}", f"{near[1]:,}"
     # Facts, not an order: an imperative in added context can read as an injection (hooks.md, "Add context for Claude").
-    tool = f"`{COMPACT_TOOL}`, where the session has it, or else the owner's `/compact`, compacts at the next seam"
     if near[0] <= near[1]:
+        tool = f"`{COMPACT_TOOL}`, where the session has it, or else the owner's `/compact`, compacts at the next seam"
         said += f" Your context is {size} tokens, at least {NEAR_WINDOW:.0%} of the {window}-token compaction"
         said += f" window; {tool}."
         return _context("UserPromptSubmit", said)
-    said += f" Your context is {size} tokens, past the {window}-token compaction window, which has not applied; {tool}."
+    # The tool's threshold is of the window Claude Code applied, which this one is not, so it promises nothing here.
+    waits = f"compacts only from {COMPACTS_FROM:.0%} of the window Claude Code applied, which may be larger"
+    said += f" Your context is {size} tokens, past the {window}-token compaction window, which has not applied;"
+    said += f" `{COMPACT_TOOL}` {waits}, so the owner's `/compact` compacts at the next seam."
     shown = (
         f"orchestra: this session's context is {size} tokens, past its {window}-token compaction window, which"
-        " has not applied: the coordinator compacts at its next seam where its compact tool loads, or type"
-        " `/compact` then."
+        f" has not applied. The coordinator's compact tool {waits}, so type `/compact` at its next seam."
     )
     return _json(
         {

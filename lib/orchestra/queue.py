@@ -67,12 +67,15 @@ def _seconds(stamp: str) -> datetime.datetime:
 
 
 def due(
-    state: Path, agents: list[model.Agent] | None = None, entries: list[log.Entry] | None = None
+    state: Path,
+    agents: list[model.Agent] | None = None,
+    entries: list[log.Entry] | None = None,
+    heads: Mapping[str, brief.Header] | None = None,
 ) -> list[model.QueueItem]:
     """Every item not done whose event has happened, by number.
 
-    `agents` and `entries` are the records and the log where the caller already holds them, as the turn-end hook
-    does, so they are not read twice; each is read here where not given.
+    `agents`, `entries` and `heads` are the records, the log and the brief headers where the caller already holds
+    them, as the turn-end hook and the status view do, so they are not read twice; each is read here where not given.
     """
     waiting = [item for _, item in sorted(model.read_queue(state).items()) if not item.done]
     if not waiting:
@@ -83,7 +86,7 @@ def due(
         _seconds(entry.time) for entry in (log.entries(state) if entries is None else entries) if entry.kind == CI_READ
     ]
     # Read once a call, and only for an item naming a slice, since it reads every agent's brief.
-    landed = functools.cache(lambda: landed_slices(state, held))
+    landed = functools.cache(lambda: landed_slices(state, held, heads))
 
     def happened(item: model.QueueItem) -> bool:
         if item.trigger == "ci":

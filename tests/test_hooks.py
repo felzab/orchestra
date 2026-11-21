@@ -643,6 +643,41 @@ def test_a_resume_of_a_writer_whose_worktree_is_gone_is_refused(project: Path, s
     )
 
 
+def test_a_resume_refused_for_a_record_prune_passes_over_names_the_discard(project: Path, state: Path) -> None:
+    """`prune` settles a lost record only where it is stopped and the branch it names is gone; elsewhere its
+    discard does, which loses nothing where the branch is gone. Where the branch stands, `prune` says what keeps it.
+    """
+    briefed(project, "W", "writer", owns="lib/a.py")
+    dispatched(project, "W", "writer", "w1")
+    discard = (
+        "W's worktree is gone ({}), so a resume has no worktree to run in: `orchestra prune --discard W` settles its"
+        " record once you have saved what it holds, then dispatch a successor briefed with what is left"
+    )
+
+    def refused() -> object:
+        said = hook("PreToolUse", project, tool_name="SendMessage", tool_input={"to": "W", "message": "go on"})[1]
+        return decision(said)
+
+    # A `running` record whose stop hook never ran, its branch gone: `prune` passes over it in silence.
+    changed(state, "W", status="running", branch="gone")
+    assert refused() == ("deny", discard.format("gone"))
+    assert "(W)" not in run("prune", cwd=project).stdout
+    # A limit's stop before the harness named a branch: `prune` keeps the record.
+    changed(state, "W", status="stopped", branch=None, reason="You've hit your limit")
+    assert refused() == ("deny", discard.format("no branch recorded"))
+    assert "kept its record (W): its branch is unknown" in run("prune", cwd=project).stdout
+    # A `running` record whose branch still holds its commits keeps the plain verb, which says what keeps it.
+    git(project, "branch", "kept")
+    changed(state, "W", status="running", branch="kept")
+    assert refused() == (
+        "deny",
+        "W's worktree is gone (kept), so a resume has no worktree to run in: `orchestra prune` settles its record,"
+        " then dispatch a successor briefed with what is left",
+    )
+    assert "kept kept (W): " in run("prune", cwd=project).stdout
+    assert model.read_agent(state, "W").status == "running"
+
+
 def test_a_resume_past_the_context_ceiling_is_refused_naming_the_figure_once_its_cache_has_lapsed(
     project: Path, state: Path
 ) -> None:
@@ -1501,12 +1536,16 @@ def test_a_prompt_nearing_the_compaction_window_tells_the_coordinator_and_past_i
     seam += " at the next seam."
     main.write_bytes(line("assistant", "m0", 900_000) + line("user") + line("assistant", "m1", 500_000))
     said = hook("UserPromptSubmit", project, prompt="go", transcript_path=str(main))[1]
+    # The compact tool measures against the window Claude Code applied, so past an unapplied one it may wait.
     assert context_of(said, "UserPromptSubmit").endswith(
-        " Your context is 500,474 tokens, past the 500,000-token compaction window, which has not applied; " + seam
+        " Your context is 500,474 tokens, past the 500,000-token compaction window, which has not applied;"
+        " `mcp__orchestra__compact` compacts only from 60% of the window Claude Code applied, which may be larger,"
+        " so the owner's `/compact` compacts at the next seam."
     )
     assert field(said, "systemMessage") == (
         "orchestra: this session's context is 500,474 tokens, past its 500,000-token compaction window, which has not"
-        " applied: the coordinator compacts at its next seam where its compact tool loads, or type `/compact` then."
+        " applied. The coordinator's compact tool compacts only from 60% of the window Claude Code applied, which may"
+        " be larger, so type `/compact` at its next seam."
     )
     # 375,000 is three quarters of the window; the line adds 474 tokens to the figure given.
     main.write_bytes(line("assistant", "m0", 900_000) + line("user") + line("assistant", "m1", 374_526))

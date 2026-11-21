@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 from conftest import MakeRepo, git
-from orchestra import land, model
+from orchestra import land, log, model
 from orchestra.config import Step
 from test_prune import TRASH, Fleet, add_agent, commit, make_fleet, ran, route, wait_gone, write
 from test_report import text
@@ -283,6 +283,47 @@ def test_a_branch_fast_forwarded_onto_another_agents_landing_has_nothing_to_land
     assert model.read_findings(fleet.state)["A-F1"].status == "ROUTED"
 
 
+def test_a_round_stopped_before_its_report_with_nothing_to_land_is_not_stamped_by_the_round_before(
+    fleet: Fleet,
+) -> None:
+    """A resume and a limit's stop each keep the outcome the round before reported, so only a judged record's
+    outcome is its latest round's word, and a stopped round that delivered nothing frees no slice."""
+    agent(fleet)
+    write(fleet.state, "reports/WORKER.md", text("writer", "WORKER"))
+    resumed = {1: "2026-11-21T08:00:00+00:00", 2: "2026-11-21T09:00:00+00:00"}
+    model.update_agent(
+        fleet.state,
+        "WORKER",
+        lambda held: replace(held, status="stopped", outcome="DONE", reports=resumed, reason="You've hit your limit"),
+    )
+    code, out, err = fleet.run("land", "WORKER")
+    assert code == 0, err
+    assert out.splitlines()[-1] == "nothing to land: the session branch already holds worktree-agent-a1", out
+    assert "landed" not in model.read_agent(fleet.state, "WORKER").since
+    assert not [entry for entry in log.entries(fleet.state) if entry.kind == "land"]
+
+
+def test_a_record_a_hook_changes_while_the_landing_runs_its_git_keeps_what_the_hook_wrote(
+    fleet: Fleet, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The stamp is decided on the record read before the preflight's git commands, as a resume may land meanwhile."""
+    agent(fleet)
+    write(fleet.state, "reports/WORKER.md", text("writer", "WORKER"))
+    model.update_agent(fleet.state, "WORKER", lambda held: replace(held, outcome="DONE"))
+    checked = land.preflight
+
+    def resumed(root: Path, branch: str) -> None:
+        model.update_agent(fleet.state, "WORKER", lambda held: replace(held, status="running"))
+        checked(root, branch)
+
+    monkeypatch.setattr(land, "preflight", resumed)
+    code, out, err = fleet.run("land", "WORKER")
+    assert code == 0, err
+    assert out.splitlines()[-1] == "nothing to land: the session branch already holds worktree-agent-a1", out
+    held = model.read_agent(fleet.state, "WORKER")
+    assert (held.status, "landed" in held.since) == ("running", False)
+
+
 def test_a_merge_touching_a_steps_paths_installs_regenerates_and_checks(fleet: Fleet) -> None:
     tree = agent(fleet)
     commit(tree, "Docs: The source grows", {"src/a.txt": '"a": 2', "lock.txt": "2\n"})
@@ -392,6 +433,13 @@ def _refused(fleet: Fleet, name: str = "WORKER") -> str:
     assert code == 2, err
     assert head(fleet) == before, "a refused landing committed something"
     return err
+
+
+def test_another_agents_record_that_does_not_read_refuses_the_landing_before_its_merge(fleet: Fleet) -> None:
+    """The bookkeeping reads every record, so one that does not read would stop it after the merge commit."""
+    commit(agent(fleet), "Docs: A note", {"notes.txt": "second\n"})
+    write(fleet.state, "agents/BROKEN.json", "{")
+    assert "BROKEN.json" in _refused(fleet)
 
 
 def test_a_checkout_holding_changes_is_refused(fleet: Fleet) -> None:

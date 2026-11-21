@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 
 from conftest import claude_stub, git, inprocess, line, transcript, usage_answer, write_agent, write_config
-from orchestra import ci, model, override, report, status, store
+from orchestra import brief, ci, model, override, report, status, store
 from test_hooks import briefed, changed, dispatched, run
 from test_report import text
 
@@ -585,6 +585,23 @@ def test_a_wide_slice_names_each_holding_writer_once_with_a_count(project: Path,
     assert said in status.paced(built)
     measured = _lines(inprocess("status", "--measure", cwd=project))
     assert said + ": " + ", ".join(f"`{path}`" for path in files) in measured
+
+
+def test_the_waits_lines_read_each_brief_once_while_an_item_waits_on_a_slice(
+    built: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An item naming a slice asks which slices landed, which reads every brief; the view's own read serves it."""
+    model.write_queue(built, lambda held: [*held.values(), model.QueueItem(3, "landed", "push", agent="S2")])
+    read: list[str] = []
+    header = brief.header
+
+    def counted(state: Path, name: str) -> brief.Header:
+        read.append(name)
+        return header(state, name)
+
+    monkeypatch.setattr(brief, "header", counted)
+    assert "waits     #3 (when landed:S2) push: waits on slice S2, which has not landed" in status.paced(built)
+    assert sorted(read) == sorted(agent.name for agent in model.agents(built))
 
 
 def test_a_verb_closes_on_five_waits_lines_and_a_count_of_the_rest(built: Path) -> None:
