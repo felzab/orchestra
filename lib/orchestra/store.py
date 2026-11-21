@@ -261,7 +261,7 @@ def lease(state: Path) -> Record:
 
 
 def _write_lease(state: Path, owner: str | None, since: str, *, stopped: bool) -> None:
-    # Written past the lease check, which only `check_lease`, `stop_lease` and `take_lease` decide on.
+    # Written past the lease check, which only `check_lease`, `release_lease` and `take_lease` decide on.
     held = {"owner": owner, "since": since, "stopped": stopped}
     replace_bytes(state / LEASE, _encode(held, indent=2) + b"\n")
 
@@ -333,24 +333,12 @@ def _guard(path: Path) -> None:
             return
 
 
-def stop_lease(state: Path) -> bool:
-    """The state marked stopped, so its owner's writes are refused too; False where it was stopped already."""
-    me = caller()
-    with locked(state / LEASE):
-        held = lease(state)
-        if held.get("stopped"):
-            return False
-        owner = held.get("owner") or me
-        if me is not None and owner != me:
-            raise Refused(f"session {owner} holds this session's state, so only it stops it; this is session {me}")
-        _write_lease(state, owner, held.get("since") or now(), stopped=True)
-        return True
+def release_lease(state: Path, session: str | None) -> bool:
+    """The state marked stopped where `session` holds it, refusing its owner's writes; False where it does not.
 
-
-def release_lease(state: Path, session: str) -> bool:
-    """The state marked stopped where `session` holds it, as `stop_lease` marks it; False where it does not.
-
-    For a session that has ended for good, such as one `/clear` replaced: its id never writes again.
+    False too where it is stopped already. `orchestra mode stop` passes its own session, or the holder
+    where it has no id; `SessionEnd` passes the session `/clear` replaced, whose id never writes again.
+    None stops a state no session holds yet.
     """
     with locked(state / LEASE):
         held = lease(state)
