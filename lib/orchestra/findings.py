@@ -306,6 +306,9 @@ def repeats(new: dict[str, report.Finding], rows: dict[str, FindingEvent], repor
     A closed row is named with its close and its evidence, so one defect raised again is not judged the other way
     without the first judgement in view.
     """
+    # A verifier's report banks no finding, so it repeats nothing, and no banked row's report is read for it.
+    if not new:
+        return []
     stems = {row.rsplit("-F", 1)[0] for row in new}
     said: list[str] = []
     for row, event in rows.items():

@@ -262,6 +262,33 @@ def test_a_verdict_records_its_proof_line_and_a_corrected_heading_only_where_it_
     assert held["REVIEW-F2"].evidence == "refuted by VERIFY: `emit` flushes at line 30."
 
 
+def test_a_verifiers_judge_reads_only_its_own_report_and_those_its_verdicts_name(
+    project: Path, state: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A verifier banks no finding, so no other banked row's report is read for a repeat it cannot make."""
+    _review_given_to_a_verifier(project, state)
+    agent(state, "OTHER", Written("auditor", (STORE,)))
+    model.write_findings(
+        state,
+        lambda _: [
+            model.FindingEvent("OTHER-F1", "bank", "OPEN"),
+            model.FindingEvent("OTHER-F1", "route", "ROUTED", "owner"),
+        ],
+    )
+    read: list[Path] = []
+    real = report.read
+
+    def counted(path: Path, agent_type: str | None = None) -> report.Report:
+        read.append(path)
+        return real(path, agent_type)
+
+    monkeypatch.setattr(report, "read", counted)
+    given = ("REVIEW-F2=route:ending", "REVIEW-F3=route:FIXER")
+    done = inprocess("judge", "VERIFY", *given, "--verdict", "v", cwd=project)
+    assert done.returncode == 0, done.stderr
+    assert sorted({path.stem for path in read}) == ["REVIEW", "VERIFY"]
+
+
 def test_a_verifiers_confirmed_row_takes_a_disposition(project: Path, state: Path) -> None:
     _review_given_to_a_verifier(project, state)
     before = lines(state)
