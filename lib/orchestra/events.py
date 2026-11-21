@@ -878,6 +878,8 @@ def stop(where: Where) -> str | None:
     if not where.coordinator or state is None or where.data.get("stop_hook_active"):
         return None
     agents = model.agents(state)
+    # Listed once for every report stopped on a question, and only once one is read.
+    listed = functools.cache(lambda: {} if where.root is None else findings.worktrees(where.root))
 
     def reported(agent: model.Agent) -> str:
         if agent.outcome not in report.STOPPED:
@@ -886,7 +888,7 @@ def stop(where: Where) -> str | None:
         # no answer can reach the agent: its worktree is gone, and its report is judged as it stands. The
         # root's git runs only here, so a turn's end with no such report pays nothing for it.
         root = where.root
-        unreached = None if root is None else findings.unreached(agent, root)
+        unreached = None if root is None else findings.unreached(agent, root, listed)
         return unreached or f"{agent.name} stopped {agent.outcome} and waits on your answer by message"
 
     undone = [reported(agent) for agent in agents if agent.status == "reported"]

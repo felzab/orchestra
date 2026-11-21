@@ -14,13 +14,14 @@ import os
 import subprocess
 import sys
 import time
+from collections.abc import Sequence
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 import pytest
 
 from conftest import LIB, MakeRepo, git, inprocess, write_agent, write_config
-from orchestra import context, events, findings, hooks, log, model, queue, report, store
+from orchestra import context, events, findings, hooks, log, model, process, queue, report, store
 from test_context import line, transcript
 from test_report import text
 
@@ -891,6 +892,38 @@ def test_a_writer_stopped_on_a_question_whose_worktree_is_gone_is_judged_and_lea
     assert judged.returncode == 0, judged.stderr
     assert model.read_agent(state, "W").status == "judged"
     assert undone() == []
+
+
+def test_a_turns_end_lists_the_worktrees_once_for_every_report_stopped_on_a_question(
+    project: Path, state: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Each such report asks whether its worktree is gone, and the turn's end waits on every git run."""
+    ran: list[tuple[str, ...]] = []
+    started = process.run
+
+    def counted(argv: Sequence[str], **given: Any) -> subprocess.CompletedProcess[bytes]:
+        if argv[0] == "git":
+            ran.append(tuple(argv))
+        return started(argv, **given)
+
+    def runs() -> int:
+        """The git runs of one turn's end, once its lines are read."""
+        ran.clear()
+        said = context_of(hook("Stop", project, stop_hook_active=False, background_tasks=[])[1], "Stop")
+        assert said.count("so no answer reaches it") == len(model.agents(state)), said
+        return len(ran)
+
+    def asked(name: str, ident: str) -> None:
+        briefed(project, name, "writer", owns="lib/a.py")
+        dispatched(project, name, "writer", ident)
+        changed(state, name, status="reported", outcome="NEEDS-ANSWER", branch=f"worktree-agent-{ident}")
+
+    monkeypatch.setattr(process, "run", counted)
+    asked("W", "w1")
+    one = runs()
+    asked("X", "x1")
+    asked("Y", "y1")
+    assert runs() == one, ran
 
 
 def test_a_writer_stopped_on_a_question_whose_worktree_stands_waits_on_its_answer(project: Path, state: Path) -> None:

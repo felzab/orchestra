@@ -91,22 +91,24 @@ def worktrees(root: Path) -> dict[str, Path]:
     }
 
 
-def gone(agent: model.Agent, root: Path) -> str | None:
+def gone(agent: model.Agent, root: Path, listed: Callable[[], dict[str, Path]] | None = None) -> str | None:
     """The branch of a writer or a driver whose worktree is gone, so that no resume reaches it; None otherwise.
 
     Claude Code removes a subagent's worktree when it finishes with no change (worktrees.md), so a writer
     that committed nothing, and any driver, has no worktree left once it stops, and none to resume in.
+    `listed` gives `worktrees(root)` read once for a caller judging several agents.
     """
     if agent.type not in report.COMMITTING:
         return None
     if agent.branch is None:
         return "no branch recorded"
-    return None if agent.branch in worktrees(root) else agent.branch
+    held = worktrees(root) if listed is None else listed()
+    return None if agent.branch in held else agent.branch
 
 
-def unreached(agent: model.Agent, root: Path) -> str | None:
+def unreached(agent: model.Agent, root: Path, listed: Callable[[], dict[str, Path]] | None = None) -> str | None:
     """Why the report of an agent stopped on a question is judged as it stands, no answer reaching it; else None."""
-    if agent.outcome not in report.STOPPED or (branch := gone(agent, root)) is None:
+    if agent.outcome not in report.STOPPED or (branch := gone(agent, root, listed)) is None:
         return None
     return (
         f"{agent.name} stopped {agent.outcome}, and its worktree is gone ({branch}), so no answer reaches it:"
