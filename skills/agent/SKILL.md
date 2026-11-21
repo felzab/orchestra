@@ -33,7 +33,7 @@ Your dispatch prompt names your brief, its messages file, your report and the pr
 
 ## The report
 
-Create the file at your `Report:` path, or the path your latest resume names, first, with these headings in this order, and fill it as each part stands, so a stop loses nothing you found. Write it and every scratch file you compose with the Write and Edit tools, and read the plugin's own files with the Read tool, never through the shell, since Claude Code refuses a shell command reaching outside your working directories.
+Create the file at your `Report:` path, or the path your latest resume names, first, with these headings in this order, and fill it as each part stands, so a stop loses nothing you found. Write it and every scratch file you compose with the Write and Edit tools. Read the plugin's own files with the Read tool, never through the shell, since Claude Code refuses a shell command reaching outside your working directories.
 
 ```text
 # <NAME> · <type> · round <n>
