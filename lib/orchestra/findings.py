@@ -27,6 +27,8 @@ JUDGED: frozenset[str] = frozenset({"judged", "landed", "pruned"})
 CLOSING: tuple[FindingStatus, ...] = tuple(status for status in model.FINDING_STATUSES if status in model.CLOSED)
 KEY_RE = re.compile(r"F[1-9][0-9]*")
 FORM = "`route:<owner>` or `close:<STATUS>:<evidence>`, STATUS one of " + ", ".join(CLOSING)
+# How a finding says its change is the owner's to decide: the run page's "the owner's call", and the reports' word.
+OWNERS_RE = re.compile("\\bowner['\N{RIGHT SINGLE QUOTATION MARK}]s (?:word|call)\\b", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -316,6 +318,34 @@ def repeats(new: dict[str, report.Finding], rows: dict[str, FindingEvent], repor
     return said
 
 
+def _judged_on(verdict: report.Verdict, reports: Reports) -> str:
+    """A verdict's body and the body of the finding it judges, where that report still reads."""
+    try:
+        banked = reports.finding(verdict.row)[0].body
+    except Refused:
+        banked = ""
+    return f"{verdict.body}\n{banked}"
+
+
+def _owners_word(state: Path, given: dict[str, Disposition], texts: dict[str, tuple[str, str]]) -> list[str]:
+    """A warning for each row routed to an agent whose text says its change is the owner's word or call.
+
+    `texts` holds each disposition's key with its row and the text judged. A row on a queue waits to be
+    taken, so its question can still be asked in time, and a queue's route is never warned of.
+    """
+    said: list[str] = []
+    for key, chosen in given.items():
+        if not isinstance(chosen, Route) or chosen.owner in model.QUEUES or not model.has_agent(state, chosen.owner):
+            continue
+        row, text = texts.get(key, (key, ""))
+        if OWNERS_RE.search(text):
+            said.append(
+                f"{row} says its change is the owner's word or call, and goes to the agent {chosen.owner}:"
+                " ask the owner before it is built, unless a ruling covers it"
+            )
+    return said
+
+
 # --- the verbs ----------------------------------------------------------------------------------------
 
 
@@ -407,6 +437,11 @@ def judge(args: argparse.Namespace, state: Path, owner: Callable[[str], str]) ->
     if new and not events:
         lines.append(f"its {len(new)} row(s) were banked by an earlier judge, and stand as it left them")
     lines += repeats(new, rows, reports)
+    if verifier:
+        texts = {verdict.row: (verdict.row, _judged_on(verdict, reports)) for verdict in held.verdicts}
+    else:
+        texts = {f"F{finding.number}": (row, finding.body) for row, finding in new.items()}
+    lines += _owners_word(state, given, texts)
     # Imported here, since the hooks import this module and none of them reads the status view.
     paced = typing.cast("Callable[[Path], list[str]]", importlib.import_module("orchestra.status").paced)
     lines += paced(state)

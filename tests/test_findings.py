@@ -310,6 +310,34 @@ def test_judge_names_a_finding_at_the_anchor_of_another_reports_row_and_how_it_w
     assert "LENS-F3 may repeat" not in done.stdout
 
 
+def test_a_row_naming_the_owners_word_warns_where_it_goes_to_an_agent_and_not_to_a_queue(
+    project: Path, state: Path
+) -> None:
+    """A queue builds nothing, so only a route to an agent can build what the owner has not ruled on."""
+    agent(state, "FIXER", "writer", "briefed")
+    agent(state, "REVIEW", Written("auditor", (STORE, CLI, "README :: install")))
+    path = report.path(state, "REVIEW")
+    text = path.read_bytes().decode("utf-8")
+    text = text.replace("The write at F1.", "Lowering it is the owner's word.")
+    path.write_bytes(
+        text.replace("The write at F2.", "This is the Owner\N{RIGHT SINGLE QUOTATION MARK}s call.").encode("utf-8")
+    )
+    given = ("F1=route:FIXER", "F2=route:ending", "F3=route:FIXER")
+    done = inprocess("judge", "REVIEW", *given, "--verdict", "v", cwd=project)
+    assert done.returncode == 0, done.stderr
+    warned = [line for line in done.stdout.splitlines() if "the owner's word or call" in line]
+    assert warned == [
+        "REVIEW-F1 says its change is the owner's word or call, and goes to the agent FIXER:"
+        " ask the owner before it is built, unless a ruling covers it"
+    ]
+    # A verifier's verdict is read too, as the text the row is judged on.
+    proof = "F3 · optional · silent · README :: install\nRemoving the check is the owner's call."
+    agent(state, "VERIFY", Written("verifier", verdicts=(("REVIEW-F3", "CORRECTED", proof),)))
+    verified = inprocess("judge", "VERIFY", "REVIEW-F3=route:FIXER", "--verdict", "v", cwd=project)
+    assert verified.returncode == 0, verified.stderr
+    assert "REVIEW-F3 says its change is the owner's word or call, and goes to the agent FIXER:" in verified.stdout
+
+
 def test_show_prints_whole_findings_judged_or_not_and_names_a_row_it_cannot(project: Path, state: Path) -> None:
     agent(state, "REVIEW", Written("auditor", (STORE, CLI)))
     assert (
