@@ -192,9 +192,9 @@ def coordinator(clock: datetime.datetime, state: Path, root: Path, caller: str |
     """The overview a coordinator's session is given when it starts, resumes or compacts, under `status`'s title.
 
     The title names the state and the session's branch, and the overview each running agent, which is
-    all a compaction's summary must keep. NOW.md follows it whole there, so its `now` lines are left
-    out rather than given twice. `caller` is the Claude Code session the hook's input names, whose
-    folder holds the transcripts of the agents it dispatched.
+    all a compaction's summary must keep. NOW.md follows it there, whole where it fits the hook's room,
+    so its `now` lines are left out rather than given twice. `caller` is the Claude Code session the
+    hook's input names, whose folder holds the transcripts of the agents it dispatched.
     """
     snap = Snapshot(clock, state, root, model.read_session(state), model.agents(state))
     lines, summary = overview(snap, now=False, caller=caller)

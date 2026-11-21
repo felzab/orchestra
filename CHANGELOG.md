@@ -78,6 +78,13 @@ The fixes from the third project session that ran on the plugin.
     corrected the last time.
 - The guide carries the measured compaction figures and why 500,000 is kept, names `/status`'s
   setting sources, and says which switches turn the mod off.
+- `contextCeiling` refuses a resume only once the agent's prompt cache has lapsed, five minutes after
+  its transcript was last written; a resume within them reads the context from the cache and goes
+  ahead, and the refusal names the transcript's age.
+- The hooks wait on less: an attended turn's end reads no agent's transcript, the prompt and
+  post-call hooks take the primary checkout from `session.json` where its `.git` folder holds the
+  session's pointer, rather than from two git runs, and an agent's `SendMessage` loads nothing.
+- The guide's sample `mechanical` profile runs Sonnet at `high` effort rather than `medium`.
 
 ### Fixed
 
@@ -86,6 +93,13 @@ The fixes from the third project session that ran on the plugin.
 - The `/usage` reading gives up after 90 seconds rather than 120, short of the Bash tool's default limit.
 - The report check reads a finding's whole first paragraph for `Harm:` and `Likelihood:`, and accepts
   `Rows fixed: none.`.
+- The overview after a compaction or a resume gives `NOW.md` the room first, where the hook's
+  10,000-character cap cut its tail without a sign. The status rows give way, ending in a line that
+  counts them and names `orchestra status`, and a `NOW.md` longer than the room keeps its head and
+  names the characters left out and its path.
+- A dispatch is recorded where git cannot find the primary checkout, and the hook names the rows it
+  left unrouted and the `orchestra route <owner> <row>` that routes them.
+- A hook fault no longer refuses an agent's message to its coordinator.
 
 ## [0.3.0] - 2026-11-19
 
