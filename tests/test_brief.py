@@ -122,6 +122,12 @@ def test_a_body_file_is_written_below_the_header_and_the_brief_checked_in_the_sa
     head = f"Agent: A    Type: writer    Slice: S1\nBase: main at {short}\nReport: {state / 'reports' / 'A.md'}\n"
     assert path.read_bytes().decode() == f"{head}Owns: lib/a.py\nRows: none\nWrites: none\nLens: none\n\n{BODY}"
     assert brief.stamped(state, model.read_agent(state, "A"))
+    # A check given a body would check the brief written and drop the body unread, so it is refused.
+    done = inprocess("brief", "A", "--check", "--body", str(body), cwd=project)
+    assert (done.returncode, done.stderr) == (
+        2,
+        "orchestra brief: --check takes the name alone: the header already names the type and the slice\n",
+    )
     # A body naming its own `Owns:` keeps it, and one with a fault is written and refused as a check refuses it.
     body.write_bytes(f"Owns: lib/b.py (new)\nRows: none\nWrites: none\nLens:\n\n{BODY}".encode())
     done = inprocess("brief", "B", "--type", "writer", "--slice", "S1", "--body", str(body), cwd=project)
