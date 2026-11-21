@@ -33,16 +33,19 @@ The fixes from the third project session that ran on the plugin.
   minutes from a landing to the next dispatch.
 - `orchestra status` names a path on a slice still to do that the session deleted or moved.
 - `orchestra status --end` names a slice whose agents landed while its line is unticked.
-- `orchestra queue add --when landed:NAME <what>` accepts a planned slice no agent has taken yet.
+- `orchestra queue add --when landed:NAME <what>` accepts a planned slice no agent has taken yet, and
+  the item falls due once the slice lands, whatever its agent's name.
 
 ### Changed
 
-- `orchestra status` reads a slice as done once its agents land, before its line is ticked, and a
-  discarded agent's slice as still to do, its `Owns:` excusing no drift.
+- `orchestra status` reads a slice as done once its agents land, before its line is ticked, and the
+  slice of an agent settled with nothing landed, discarded or pruned before its first commit, as
+  still to do, its `Owns:` excusing no drift.
 - `orchestra status --measure` prints an unticked slice as its id, its count of files and its `after:`
   edges rather than its whole line.
-- The checkpoint falls due at a wave's end, when no agent is live and a writer has landed since the
-  last estimate, or after eight judged reports; only a writer's dispatch makes the first one due.
+- The checkpoint falls due at a wave's end, when no dispatched agent is live and a writer has landed
+  since the last estimate, so a drafted brief holds it off no longer, or after eight judged reports;
+  only a writer's dispatch makes the first one due.
 - A verb's notice that it cut its output goes to standard error, and the overview after a compaction
   leaves out judged and pruned agents.
 - The writer and driver definitions name the tools they use.
