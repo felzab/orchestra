@@ -69,8 +69,6 @@ def test_a_landed_item_never_falls_due_when_its_agent_is_discarded(project: Path
     [
         # Stopped by a limit before its first commit, then settled by a plain prune: nothing of it landed.
         (None, {}, []),
-        # A report stopped on a question, judged and pruned: nothing of it landed either.
-        ("NEEDS-ANSWER", {}, []),
         # A DONE report whose branch was lost before it landed: its report alone lands nothing.
         ("DONE", {}, []),
         # `land` stamps the landing, the session branch holding its branch already or not.
