@@ -11,10 +11,11 @@ before the merge commit leaves the session branch where it stood; `EXITS` gives 
 from __future__ import annotations
 
 import argparse
+import functools
 import re
 import subprocess
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Collection
 from dataclasses import replace
 from pathlib import Path
 
@@ -136,8 +137,9 @@ def _due(step: Step, touched: list[str]) -> bool:
     return any(path == when or (when.endswith("/") and path.startswith(when)) for path in touched for when in step.when)
 
 
-def _writes(step: Step, path: str) -> bool:
-    return any(path == out.rstrip("/") or path.startswith(out.rstrip("/") + "/") for out in step.writes)
+def _under(path: str, outs: Collection[str]) -> bool:
+    """Whether the path is one of the outputs or lies in one, a folder written with or without its `/`."""
+    return any(path == out.rstrip("/") or path.startswith(out.rstrip("/") + "/") for out in outs)
 
 
 def run_step(root: Path, step: Step) -> subprocess.CompletedProcess[bytes]:
@@ -167,12 +169,12 @@ def _merge(root: Path, message: str, branch: str, steps: tuple[Step, ...], writt
     if not merged and not conflicted:
         raise Stop(7, f"git merge --no-ff --no-commit {branch} failed with no file in conflict")
     regenerations = [step for step in steps if step.kind == "regenerate"]
-    if unanswered := [path for path in conflicted if not any(_writes(step, path) for step in regenerations)]:
+    if unanswered := [path for path in conflicted if not any(_under(path, step.writes) for step in regenerations)]:
         raise Stop(3, *(f"CONFLICT in {path}" for path in unanswered))
     touched = sorted({*_names(root, "diff", "--cached", "--name-only", "HEAD", code=7), *conflicted})
     said: list[str] = []
     for step in sorted(steps, key=lambda step: ORDER[step.kind]):
-        answers = step.kind == "regenerate" and any(_writes(step, path) for path in conflicted)
+        answers = step.kind == "regenerate" and any(_under(path, step.writes) for path in conflicted)
         if not (_due(step, touched) or answers):
             continue
         shown = " ".join(step.run)
@@ -198,15 +200,24 @@ def _merge(root: Path, message: str, branch: str, steps: tuple[Step, ...], writt
 
 
 def _others(state: Path, name: str, root: Path) -> list[tuple[model.Agent, str]]:
+    """Each unsettled agent but `name` whose branch exists, with it: a landed one's branch is on the session
+    branch already, and a pruned one's is deleted, so neither can bring anything in."""
     found: list[tuple[model.Agent, str]] = []
     for agent in model.agents(state):
-        if agent.name != name and (branch := prune.branch_of(agent)) and prune.branch_exists(root, branch):
+        if agent.name == name or agent.status in model.SETTLED:
+            continue
+        if (branch := prune.branch_of(agent)) and prune.branch_exists(root, branch):
             found.append((agent, branch))
     return found
 
 
-def _abort(root: Path, branch: str, stop: Stop, written: list[str], others: list[tuple[model.Agent, str]]) -> Stop:
-    """The merge aborted and this run's writes put back; the stop, its lines completed."""
+def _abort(
+    root: Path, branch: str, stop: Stop, written: list[str], others: Callable[[], list[tuple[model.Agent, str]]]
+) -> Stop:
+    """The merge aborted and this run's writes put back; the stop, its lines completed.
+
+    `others` gives `_others`' answer, read only where a conflict names who else changes its paths.
+    """
     if stop.code == REFUSED:
         stop.code = GIT_FAILED
     config.run_git(root, "merge", "--abort")
@@ -214,9 +225,7 @@ def _abort(root: Path, branch: str, stop: Stop, written: list[str], others: list
     # under a path a step writes is this run's own.
     status = config.run_git(root, "status", "--porcelain", "-z")
     dirty = {entry[3:] for entry in status.stdout.decode("utf-8", "replace").split("\0") if entry}
-    if mine := sorted(
-        path for path in dirty if any(path == out or path.startswith(out.rstrip("/") + "/") for out in written)
-    ):
+    if mine := sorted(path for path in dirty if _under(path, written)):
         config.run_git(root, "restore", "--source=HEAD", "--staged", "--worktree", "--", *mine)
     status = config.run_git(root, "status", "--porcelain")
     clean = status.returncode == 0 and not status.stdout.strip()
@@ -229,7 +238,7 @@ def _abort(root: Path, branch: str, stop: Stop, written: list[str], others: list
         stop.lines = (head, "route the red at HEAD to its owner and land again once it clears", *stop.lines)
     if stop.code == CONFLICT:
         conflicted = {line.removeprefix("CONFLICT in ") for line in stop.lines if line.startswith("CONFLICT in ")}
-        for agent, other in others:
+        for agent, other in others():
             if _ok(root, "merge-base", "--is-ancestor", other, "HEAD"):
                 continue
             shared = sorted(conflicted & set(_names(root, "diff", "--name-only", f"HEAD...{other}", code=7)))
@@ -275,19 +284,9 @@ def credit(state: Path, names: list[str], merge: str) -> list[str]:
     return said
 
 
-def _reflog(root: Path, ref: str) -> list[str]:
-    """The commit each entry of the ref's reflog names, newest first; none where git keeps no reflog for it."""
-    done = config.run_git(root, "log", "--walk-reflogs", "--format=%H", ref)
-    return done.stdout.decode("utf-8", "replace").split() if done.returncode == 0 else []
-
-
-def _brought_in(root: Path, session: str, branch: str) -> tuple[str, str] | None:
-    """The span of the session branch that brought the branch in, as (before, after); None where nothing did.
-
-    A merge commit on the session branch's first-parent line brought it in, or a fast-forward, which
-    `git merge` makes by default: then the session branch's reflog holds the branch's tip, and the
-    entry before it is where the session branch stood. A branch with no commit of its own sits on the
-    first-parent line too, and its own reflog holds nothing but its creation (git-reflog(1)).
+def _brought_in(root: Path, branch: str) -> tuple[str, str] | None:
+    """The merge commit on the session branch's first-parent line that brought the branch in, as (before, after);
+    None where none did: a branch with no commit of its own, or one a fast-forward took in, which `land` never makes.
     """
     # The line's commits that descend from the branch, by any parent: with `--first-parent`, `--ancestry-path`
     # walks no second parent, so it misses a branch another agent's merged branch carried in.
@@ -295,15 +294,7 @@ def _brought_in(root: Path, session: str, branch: str) -> tuple[str, str] | None
     line = [made for made in _git(root, "rev-list", "--first-parent", f"{branch}..HEAD").split() if made in descends]
     if line and not _ok(root, "merge-base", "--is-ancestor", branch, f"{line[-1]}^1"):
         return f"{line[-1]}^1", line[-1]
-    tip = _git(root, "rev-parse", f"refs/heads/{branch}").strip()
-    own = _reflog(root, f"refs/heads/{branch}")
-    if not own or own[-1] == tip:
-        return None
-    moves = _reflog(root, f"refs/heads/{session}")
-    at = moves.index(tip) if tip in moves else len(moves)
-    if at + 1 >= len(moves) or not _ok(root, "merge-base", "--is-ancestor", moves[at + 1], tip):
-        return None
-    return moves[at + 1], tip
+    return None
 
 
 def _settle(
@@ -319,14 +310,13 @@ def _settle(
     carried = [
         agent.name
         for agent, other in _others(state, name, root)
-        if agent.status not in model.SETTLED
-        and not _ok(root, "merge-base", "--is-ancestor", other, before)
+        if not _ok(root, "merge-base", "--is-ancestor", other, before)
         and _ok(root, "merge-base", "--is-ancestor", other, after)
     ]
     names = [name, *carried]
     # Each agent is judged once, before any row closes: one whose record stays is credited nothing, since its
     # report may still change or be refused, and its rows are credited when it lands itself.
-    kept = {each: why for each in names if (why := _kept(state, model.read_agent(state, each)))}
+    kept = {each: why for each in names if (why := _kept(state, model.read_agent(state, each), root))}
     lines = credit(state, [each for each in names if each not in kept], short)
     for each in names:
         if each not in kept:
@@ -335,7 +325,7 @@ def _settle(
     return names, [*lines, *kept.values()], prune.prune(here, state, set(names))
 
 
-def _kept(state: Path, agent: model.Agent) -> str | None:
+def _kept(state: Path, agent: model.Agent, root: Path) -> str | None:
     """Why a landing leaves the agent's record as it is, said so; None where the agent lands."""
     # An agent still at work keeps its record: its stop reports, and landing it then settles it.
     if agent.status in findings.LIVE:
@@ -343,7 +333,7 @@ def _kept(state: Path, agent: model.Agent) -> str | None:
     if why := context.working(agent):
         return f"{agent.name} may still be working ({why}), so its record stays: land it again then"
     # A carried agent's report not yet judged keeps its record too, so `judge` can still bank it.
-    if waits := findings.waiting(state, agent):
+    if waits := findings.waiting(state, agent, root):
         return f"{waits}; its record stays: land it again then"
     return None
 
@@ -372,13 +362,11 @@ def land(here: Checkout, state: Path, name: str, args: argparse.Namespace) -> in
         raise Stop(2, f"{name} is {agent.status} and has not reported: land it once its report is judged")
     if why := context.working(agent):
         raise Stop(2, f"{name} may still be working ({why}), so its branch may still move: land it once its turn ends")
-    if waits := findings.waiting(state, agent):
+    if waits := findings.waiting(state, agent, root):
         raise Stop(2, waits)
     preflight(root, branch)
     if _ok(root, "merge-base", "--is-ancestor", branch, "HEAD"):
-        merged = (
-            None if agent.status in model.SETTLED or here.branch is None else _brought_in(root, here.branch, branch)
-        )
+        merged = None if agent.status in model.SETTLED else _brought_in(root, branch)
         if merged is None:
             # Work its report calls delivered is on the session branch already, so it is stamped landed, which
             # is what `queue.landed_nothing` reads; a report stopped on a question delivered nothing.
@@ -388,7 +376,7 @@ def land(here: Checkout, state: Path, name: str, args: argparse.Namespace) -> in
             said = prune.prune(here, state, {name})
             cli.emit(args, said.failed + said.lines, f"nothing to land: the session branch already holds {branch}")
             return 0
-        # A landing stopped after its merge commit, or a merge or fast-forward made by hand: what it left
+        # A landing stopped after its merge commit, or a merge made by hand: what it left
         # undone is done now.
         lines, summary = _finish(
             here,
@@ -406,9 +394,9 @@ def land(here: Checkout, state: Path, name: str, args: argparse.Namespace) -> in
             *strays,
             "add each to the brief's `Owns:` if it is the agent's, or have the agent revert it",
         )
-    others = _others(state, name, root)
     steps = config.load(root).land.steps
     written: list[str] = []
+    others = functools.partial(_others, state, name, root)
     try:
         # `Merge <a> into <b>` is a subject commit-message linters pass as a merge.
         message = f"Merge {name} into {model.read_session(state).branch}"

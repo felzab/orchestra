@@ -242,8 +242,8 @@ def test_a_landing_credits_no_agent_whose_branch_had_landed_before_it(fleet: Fle
 
 
 def test_a_branch_merged_before_its_bookkeeping_is_settled_by_landing_it_again(fleet: Fleet) -> None:
-    """A landing stopped after its merge commit, or a merge or fast-forward by hand, leaves rows routed and its
-    agent unlanded; landing it ends both. A branch with no commit of its own, behind them, is credited nothing."""
+    """A landing stopped after its merge commit, or a merge by hand, leaves rows routed and its agent unlanded;
+    landing it ends both. A branch with no commit of its own, behind them, is credited nothing."""
     agent(fleet, "EMPTY", "e1")
     route(fleet, "A-F3", "EMPTY")
     tree = agent(fleet)
@@ -264,15 +264,23 @@ def test_a_branch_merged_before_its_bookkeeping_is_settled_by_landing_it_again(f
     assert code == 0, err
     assert out.splitlines()[-1] == "nothing to land: the session branch already holds worktree-agent-e1"
     assert model.read_findings(fleet.state)["A-F3"].status == "ROUTED"
-    fast = agent(fleet, "FAST", "f1")
-    write(fleet.state, "reports/FAST.md", text("writer", "FAST", fixed="A-F2."))
-    tip = git(fleet.root, "rev-parse", "--short", commit(fast, "Docs: B", {"other.txt": "b\n"}))
-    route(fleet, "A-F2", "FAST")
-    git(fleet.root, "merge", "-q", "--ff-only", "worktree-agent-f1")
-    code, out, err = fleet.run("land", "FAST")
+
+
+def test_a_branch_fast_forwarded_onto_another_agents_landing_has_nothing_to_land(fleet: Fleet) -> None:
+    """A branch with no commit of its own that took in the session branch, as an agent merges it into its own,
+    fast-forwards onto another agent's merge: that merge is no landing of its, so its claim closes nothing."""
+    late = agent(fleet, "LATE", "g1")
+    tree = agent(fleet)
+    commit(tree, "Docs: A note", {"notes.txt": "second\n"})
+    assert fleet.run("land", "WORKER")[0] == 0
+    git(late, "merge", "-q", "main")
+    assert git(late, "rev-parse", "HEAD") == head(fleet)
+    write(fleet.state, "reports/LATE.md", text("writer", "LATE", fixed="A-F1."))
+    route(fleet, "A-F1", "LATE")
+    code, out, err = fleet.run("land", "LATE")
     assert code == 0, err
-    assert out.splitlines()[0] == f"worktree-agent-f1 was merged already, as {tip}: its bookkeeping is done now"
-    assert model.read_findings(fleet.state)["A-F2"].evidence == tip
+    assert out.splitlines()[-1] == "nothing to land: the session branch already holds worktree-agent-g1", out
+    assert model.read_findings(fleet.state)["A-F1"].status == "ROUTED"
 
 
 def test_a_merge_touching_a_steps_paths_installs_regenerates_and_checks(fleet: Fleet) -> None:

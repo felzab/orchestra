@@ -85,11 +85,14 @@ def test_a_running_records_ended_turn_counts_only_once_silent_and_a_stopped_reco
         "its record is running, and its transcript's turn ended 2 min ago, which its stop hook may still refuse;"
         f" it counts as ended once silent past 15 min, at {at}"
     )
-    assert context.gone(running) is None
+    assert context.ended(running, datetime.datetime.now().astimezone())[1] is None
     later = written + datetime.timedelta(minutes=context.SILENT_MINUTES + 1)
     assert context.ended(running, later)[1] == "its transcript's last message ends its turn"
     assert context.working(reported) is None
-    assert context.gone(reported) == "its transcript's last message ends its turn"
+    assert (
+        context.ended(reported, datetime.datetime.now().astimezone())[1]
+        == "its transcript's last message ends its turn"
+    )
 
 
 def test_a_turn_the_last_64_kib_settle_reads_nothing_before_them(
@@ -108,7 +111,8 @@ def test_a_turn_the_last_64_kib_settle_reads_nothing_before_them(
         # Everything before the last 64 KiB is locked, so a read reaching into it fails.
         msvcrt.locking(held.fileno(), msvcrt.LK_NBLCK, path.stat().st_size - context.FIRST_BYTES)
         try:
-            assert context.gone(model.read_agent(state, "A")) == "its transcript's last message ends its turn"
+            ended = context.ended(model.read_agent(state, "A"), datetime.datetime.now().astimezone())
+            assert ended[1] == "its transcript's last message ends its turn"
         finally:
             held.seek(0)
             msvcrt.locking(held.fileno(), msvcrt.LK_UNLCK, path.stat().st_size - context.FIRST_BYTES)

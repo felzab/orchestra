@@ -81,12 +81,7 @@ def last_call(path: Path) -> dict[str, object] | None:
     A tail whose last compaction follows its last call reads as none too: the compacted context is smaller than
     that call read, and no call has measured it yet.
     """
-    offset = max(0, path.stat().st_size - TAIL_BYTES)
-    with path.open("rb") as held:
-        held.seek(offset)
-        data = held.read()
-    # A read from the middle starts inside a line.
-    lines = data.splitlines()[1:] if offset else data.splitlines()
+    lines = _tail(path, max(0, path.stat().st_size - TAIL_BYTES))
     # Only the calls after the tail's last compaction measure the context it left.
     for index in range(len(lines) - 1, -1, -1):
         if _boundary(lines[index]):
@@ -94,6 +89,15 @@ def last_call(path: Path) -> dict[str, object] | None:
             break
     made = _made(lines)
     return made[-1] if made else None
+
+
+def _tail(path: Path, offset: int) -> list[bytes]:
+    """The transcript's lines from `offset`; the first is left out where `offset` is past the start."""
+    with path.open("rb") as held:
+        held.seek(offset)
+        data = held.read()
+    # A read from the middle starts inside a line.
+    return data.splitlines()[1:] if offset else data.splitlines()
 
 
 def _boundary(raw: bytes) -> bool:
@@ -128,13 +132,8 @@ def _made(lines: list[bytes]) -> list[dict[str, object]]:
 
 def _messages(path: Path, offset: int) -> list[dict[str, object]]:
     """Each user or assistant message of a transcript from `offset`, the harness's own notices left out."""
-    with path.open("rb") as held:
-        held.seek(offset)
-        data = held.read()
-    # A read from the middle starts inside a line.
-    raw = data.split(b"\n")[1:] if offset else data.split(b"\n")
     found: list[dict[str, object]] = []
-    for line in raw:
+    for line in _tail(path, offset):
         try:
             entry = as_object(json.loads(line))
         except ValueError:
@@ -211,15 +210,6 @@ def _judged(
     if silent:
         return quiet, f"its transcript is silent {quiet} min mid-turn, past {SILENT_MINUTES}", written, done
     return quiet, None, written, done
-
-
-def gone(agent: model.Agent, session: str | None = None) -> str | None:
-    """Why the agent no longer works, from a transcript that shows it; None where it may, or no transcript is read.
-
-    No transcript shows nothing either way, which a harness that keeps them elsewhere leaves for a live agent.
-    """
-    quiet, why = ended(agent, datetime.datetime.now().astimezone(), session)
-    return why if quiet is not None else None
 
 
 def working(agent: model.Agent, session: str | None = None) -> str | None:

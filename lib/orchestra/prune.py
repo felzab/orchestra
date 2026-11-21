@@ -113,7 +113,10 @@ def branch_of(agent: model.Agent, session: str | None = None) -> str | None:
     """The agent's branch: its record's, else the one the harness's file beside its transcript names.
 
     `session` is the one a hook's input names, whose folder is searched first, as `context.transcript` takes it.
+    Only a writer or a driver runs in a worktree, so no other's transcript is searched.
     """
+    if agent.type not in report.COMMITTING:
+        return None
     if agent.branch:
         return agent.branch
     named = _meta(agent, session).get("worktreeBranch")
@@ -139,15 +142,15 @@ def _unread(agent: model.Agent) -> str | None:
     return f"its record is running, and {why}" if quiet is None else None
 
 
-def _busy(state: Path, agent: model.Agent, branch: str | None, never: Collection[str], *, discard: bool) -> str | None:
-    """Why the agent's tree stays whatever it holds; None where nothing keeps it.
+def _busy(state: Path, root: Path, agent: model.Agent, *, discard: bool) -> str | None:
+    """Why the agent's tree stays whatever it holds, its branch aside; None where nothing keeps it.
 
     A tree its agent may be working in is never moved, a folder git dropped included, nor one whose report
     waits: a pruned agent's report can no longer be judged, nor its question answered. A `running` record
     no transcript shows is kept unless discarded, the coordinator's own word, since nothing else settles it.
     """
     unread = None if discard else _unread(agent)
-    return context.working(agent) or unread or findings.waiting(state, agent) or _spared(branch, never)
+    return context.working(agent) or unread or findings.waiting(state, agent, root)
 
 
 def _discarded(agent: model.Agent, rows: list[str], out: Outcome) -> str | None:
@@ -193,13 +196,12 @@ def _routed_to(rows: list[str]) -> str | None:
     return f"rows are routed to it: {', '.join(rows[:SHOWN])}{more}"
 
 
-def _kept(root: Path, session: str, agent: model.Agent, tree: Tree | None, rows: list[str]) -> str | None:
-    """Why a finished agent's branch and tree stay; None where both can go."""
+def _kept(root: Path, session: str, branch: str | None, tree: Tree | None, rows: list[str]) -> str | None:
+    """Why a finished agent's branch and tree stay; None where both can go. `branch` is its branch where it exists."""
     if held := _routed_to(rows):
         return held
-    branch = branch_of(agent)
     # A detached tree's commits are on no branch: its head is read as well.
-    refs = [branch] if branch and branch_exists(root, branch) else []
+    refs = [branch] if branch else []
     refs += [tree.head] if tree is not None and tree.head and not tree.branch else []
     for ref in refs:
         if ahead := _ahead(root, session, ref):
@@ -292,14 +294,14 @@ def prune(
                     " settles it once you have saved what it holds"
                 )
             continue
-        if why := _busy(state, agent, branch, never, discard=discard):
+        if why := _busy(state, root, agent, discard=discard) or _spared(branch, never):
             out.lines += [f"kept {tree.path} ({agent.name}): {why}" for tree in mine] or [
                 f"kept {held or 'its record'} ({agent.name}): {why}"
             ]
             continue
         listed = next((tree for tree in mine if tree.listed), None)
         rows = routed.get(agent.name, [])
-        keep = _discarded(agent, rows, out) if discard else _kept(root, session.branch, agent, listed, rows)
+        keep = _discarded(agent, rows, out) if discard else _kept(root, session.branch, held, listed, rows)
         if keep is not None and listed is None:
             out.lines.append(f"kept {held or 'its record'} ({agent.name}): {keep}")
         removed = _clear(agent, mine, keep, out, moved)
