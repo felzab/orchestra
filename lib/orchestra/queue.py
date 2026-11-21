@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import dataclasses
 import datetime
+import functools
 import importlib
 import typing
 from collections.abc import Callable
@@ -56,7 +57,7 @@ def add(_verb: str, parser: argparse.ArgumentParser) -> None:
         required=True,
         type=_when,
         metavar="ci|landed:NAME|reported:NAME",
-        help="the event it waits on; NAME is an agent's, or a slice's that PLAN.md lists and no agent took yet",
+        help="the event it waits on; NAME is an agent's, or for landed:NAME a slice's that PLAN.md lists",
     )
     adding.add_argument("text", nargs="+", help="what to do, or - to read it from stdin")
     ending = actions.add_parser("done", help="mark an item done", description="mark an item done")
@@ -72,18 +73,24 @@ def due(state: Path) -> list[model.QueueItem]:
     waiting = [item for _, item in sorted(model.read_queue(state).items()) if not item.done]
     if not waiting:
         return []
-    agents = {agent.name: agent for agent in model.agents(state)}
+    held = model.agents(state)
+    agents = {agent.name: agent for agent in held}
     reads = [_seconds(entry.time) for entry in log.entries(state) if entry.kind == CI_READ]
+    # Read once a call, and only for an item naming a slice, so a hook reading `due` never imports the status view.
+    landed = functools.cache(lambda: _landed(state, held))
 
     def happened(item: model.QueueItem) -> bool:
         if item.trigger == "ci":
             return any(read > _seconds(item.time) for read in reads)
         agent = agents.get(item.agent or "")
-        if agent is None:
-            return False
         if item.trigger == "landed":
+            if agent is None:
+                # A slice `run` accepted, whose agents may carry any name: due once the status view reads it landed.
+                return item.agent in landed()
             # One settled with nothing landed never lands, so what waits on its landing never falls due.
             return agent.status in model.SETTLED and not landed_nothing(agent)
+        if agent is None:
+            return False
         # Due from the first report at or after it was queued: each report stamps the record anew, so an
         # item queued after one, for the round a resume starts, waits for that round's report.
         since = agent.since.get("reported")
@@ -102,6 +109,12 @@ def _planned(state: Path) -> set[str]:
         return set()
 
 
+def _landed(state: Path, agents: list[model.Agent]) -> set[str]:
+    """Each slice the status view reads as landed, by the agents its briefs name whatever their names."""
+    view = importlib.import_module("orchestra.status")
+    return typing.cast("Callable[[Path, list[model.Agent]], set[str]]", view._landed)(state, agents)
+
+
 def _shown(item: model.QueueItem, held: set[int]) -> str:
     when = item.trigger if item.agent is None else f"{item.trigger}:{item.agent}"
     return f"{item.number:>3}  {'DUE' if item.number in held else 'waits':<5}  {when:<24}  {item.text}"
@@ -111,11 +124,17 @@ def run(args: argparse.Namespace) -> int:
     state = store.state_dir()
     if args.action == "add":
         trigger, agent = args.when
-        # A slice PLAN.md lists may be briefed later, under its own name; `due` waits for a name with no record.
-        if agent is not None and not model.agent_path(state, agent).exists() and agent not in _planned(state):
-            raise Refused(
-                f"no agent {agent} in this session and no slice of {store.PLAN}: `orchestra status` lists both"
-            )
+        # A slice PLAN.md lists may be briefed later, under any name: `due` reads a landing of the slice itself.
+        # A report is an agent's alone, so `reported:` takes an agent's name.
+        if agent is not None and not model.agent_path(state, agent).exists():
+            if trigger != "landed":
+                raise Refused(
+                    f"no agent {agent} in this session: `reported:` names an agent, as `orchestra status` lists"
+                )
+            if agent not in _planned(state):
+                raise Refused(
+                    f"no agent {agent} in this session and no slice of {store.PLAN}: `orchestra status` lists both"
+                )
         text = cli.one_line(cli.given(args.text))
         if not text:
             raise Refused("an item needs words: give them as arguments, or `-` and the text on stdin")

@@ -858,7 +858,8 @@ def waits(state: Path, agents: list[model.Agent], clock: datetime.datetime, *, p
         if item.agent is None:
             on = "the next CI reading"
         elif (agent := named.get(item.agent)) is None:
-            on = f"{item.agent}, which has no record"
+            # `queue add` takes a name with no record only for a slice of the plan.
+            on = f"slice {item.agent}, which has not landed"
         elif item.trigger == "landed" and queue.landed_nothing(agent):
             ended = f"`orchestra queue done {number}` ends it"
             on = f"{agent.name}, which settled with nothing landed and never lands: {ended}"
