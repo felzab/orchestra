@@ -98,7 +98,12 @@ def test_a_detached_program_started_through_a_launcher_opens_no_window(tmp_path:
     # its child, as a launcher or shim on a user's PATH may.
     process.detach((sys.executable, "-c", WRITTEN, str(said)), cwd=tmp_path, env=dict(os.environ))
     deadline = time.monotonic() + 30
-    while not said.exists() and time.monotonic() < deadline:
-        time.sleep(0.1)
+    answer = None
+    while answer is None and time.monotonic() < deadline:
+        # Read until it reads: just after the rename, Windows may still refuse the file to another reader for a moment.
+        try:
+            answer = said.read_bytes()
+        except OSError:
+            time.sleep(0.1)
     # The console the interpreter holds, and whether it has a window: one with none, as `process.run`'s children.
-    assert said.read_bytes() == b"True False"
+    assert answer == b"True False"
