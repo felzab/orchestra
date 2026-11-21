@@ -390,7 +390,8 @@ def test_a_stopped_or_judged_writer_with_no_tree_and_no_branch_left_is_settled(f
 
     A question no answer reached is judged as it stands, and the record settled then counts as landing nothing.
     """
-    for name, ident, held in (("GONE", "g1", "stopped"), ("ASKED", "j1", "judged")):
+    records: tuple[tuple[str, str, model.AgentStatus], ...] = (("GONE", "g1", "stopped"), ("ASKED", "j1", "judged"))
+    for name, ident, held in records:
         gone = add_agent(fleet, name, ident, held)
         ran(fleet, ident)
         git(fleet.root, "worktree", "remove", "--force", str(gone))
