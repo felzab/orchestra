@@ -8,15 +8,15 @@ waiting on an event is named the moment the event has happened.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import dataclasses
 import datetime
 import functools
-import importlib
 import typing
-from collections.abc import Callable
+from collections.abc import Mapping
 from pathlib import Path
 
-from orchestra import DONE, Refused, cli, log, model, report, store
+from orchestra import DONE, Refused, brief, cli, log, model, report, store
 
 # The log kind the `ci` verb writes each time it reads a concluded run, and only then.
 CI_READ = "ci"
@@ -82,8 +82,8 @@ def due(
     reads = [
         _seconds(entry.time) for entry in (log.entries(state) if entries is None else entries) if entry.kind == CI_READ
     ]
-    # Read once a call, and only for an item naming a slice, so a hook reading `due` never imports the status view.
-    landed = functools.cache(lambda: _landed(state, held))
+    # Read once a call, and only for an item naming a slice, since it reads every agent's brief.
+    landed = functools.cache(lambda: landed_slices(state, held))
 
     def happened(item: model.QueueItem) -> bool:
         if item.trigger == "ci":
@@ -105,17 +105,35 @@ def due(
     return [item for item in waiting if happened(item)]
 
 
-def _planned(state: Path) -> set[str]:
-    """Each slice PLAN.md lists, as `status` reads the plan; refused, naming the fault, where there is none to read."""
-    # Imported here, as `brief` does: the status view imports this module.
-    slices = typing.cast("Callable[[Path], dict[str, bool]]", importlib.import_module("orchestra.status").slices)
-    return set(slices(state))
+def on_slice(
+    state: Path, agents: list[model.Agent], heads: Mapping[str, brief.Header] | None = None
+) -> dict[str, list[model.Agent]]:
+    """The agents on each slice their briefs name, one settled with nothing landed left out: it took nothing.
+
+    A brief that cannot be read takes nothing; the status view's drift names it. `heads` is each readable
+    brief's header where the caller has read them, as the status view does; each is read here where not given.
+    """
+    held: dict[str, list[model.Agent]] = {}
+    for agent in agents:
+        if landed_nothing(agent):
+            continue
+        if heads is None:
+            with contextlib.suppress(Refused):
+                held.setdefault(brief.header(state, agent.name).slice, []).append(agent)
+        # A name missing from `heads` is a brief that cannot be read.
+        elif (head := heads.get(agent.name)) is not None:
+            held.setdefault(head.slice, []).append(agent)
+    return held
 
 
-def _landed(state: Path, agents: list[model.Agent]) -> set[str]:
-    """Each slice the status view reads as landed, by the agents its briefs name whatever their names."""
-    view = importlib.import_module("orchestra.status")
-    return typing.cast("Callable[[Path, list[model.Agent]], set[str]]", view._landed)(state, agents)
+def landed_slices(state: Path, agents: list[model.Agent], heads: Mapping[str, brief.Header] | None = None) -> set[str]:
+    """Each slice an agent on it has landed, with no agent on it still unsettled: done, whether ticked or not.
+
+    `land` writes no tick, so a slice reads as done the moment its last agent lands, not once the
+    coordinator ticks its line.
+    """
+    taken = on_slice(state, agents, heads)
+    return {name for name, held in taken.items() if all(a.status in model.SETTLED for a in held)}
 
 
 def _shown(item: model.QueueItem, held: set[int]) -> str:
@@ -134,7 +152,7 @@ def run(args: argparse.Namespace) -> int:
                 raise Refused(
                     f"no agent {agent} in this session: `reported:` names an agent, as `orchestra status` lists"
                 )
-            if agent not in _planned(state):
+            if agent not in model.slices(model.plan_lines(state)):
                 raise Refused(
                     f"no agent {agent} in this session and no slice of {store.PLAN}: `orchestra status` lists both"
                 )
