@@ -35,9 +35,9 @@ BUDGETS = {
     "skills/end/SKILL.md": 500,
     "skills/resume/SKILL.md": 500,
     "skills/plan/SKILL.md": 1913,
-    "skills/agent/SKILL.md": 7142,
+    "skills/agent/SKILL.md": 7168,
     "agents/writer.md": 6763,
-    "agents/driver.md": 4311,
+    "agents/driver.md": 4164,
     "agents/researcher.md": 3844,
     "agents/auditor.md": 2734,
     "agents/verifier.md": 3500,
@@ -82,7 +82,8 @@ RULES = {
         " stops",
         # An earlier rewording gave the handover to the driver alone, and a writer with nothing done lost its own.
         "and a writer with nothing yet to commit cannot be resumed",
-        "since a successor takes the answer",
+        # The one place that names the status of an agent no answer can resume, the driver's page included.
+        "and stops with `DONE-WITH-CONCERNS` once nothing is left, since a successor takes the answer",
     ),
     "skills/run/SKILL.md": (
         "a dispatch waits for nothing but its `after:` edges and its files",
