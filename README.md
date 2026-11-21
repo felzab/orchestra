@@ -104,7 +104,8 @@ permission prompt or a question still refuses it.
 
 The coordinator's compact tool comes from the plugin's mod, so it is absent where mods are off, as
 under an organization's `allowManagedModsOnly`; the coordinator then asks you to type `/compact` at
-each seam, as [the usage guide](docs/usage.md#setting-up-a-project) says. `--safe-mode` and
+a seam once its context nears the compaction window, as
+[the usage guide](docs/usage.md#setting-up-a-project) says. `--safe-mode` and
 `"disableAllHooks": true` turn mods off too, but they also stop the hooks above, so no session can
 run: `--safe-mode` loads no plugin, and under `disableAllHooks` each agent replies `BLOCKED: the
 plugin's hooks did not run`.

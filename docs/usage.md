@@ -67,8 +67,9 @@ coordinator's turn ends, and a one-line prompt from the plugin then starts its n
 coordinator with no agent left to report carries on; a turn that ends interrupted or in an error
 drops the compaction. Scheduling, compacting and the resume prompt have been driven in headless
 `claude -p` sessions only, not yet in an interactive terminal or the desktop app; the 60% gate and
-the refusal after a failed compaction have run only in the mod's tests. Where the tool is absent or fails, the coordinator tells
-you at each seam that it is one to type `/compact` at, attended or away.
+the refusal after a failed compaction have run only in the mod's tests. Where the tool is absent or
+fails, the coordinator tells you at a seam to type `/compact`, attended or away, once the hook on
+your prompts has told it that its context nears the window (below).
 
 Mods are on by default in the terminal and the desktop app
 ([mods overview](https://code.claude.com/docs/en/plugins/mods/overview), "Turn mods on or off"). An
