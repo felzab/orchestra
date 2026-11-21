@@ -7,6 +7,7 @@ import dataclasses
 import datetime
 import io
 import json
+import subprocess
 import sys
 from pathlib import Path
 
@@ -460,6 +461,25 @@ def test_a_verb_changing_the_record_is_refused_in_an_agents_worktree_and_one_rea
     for args in READING:
         done = inprocess(*args, cwd=agent)
         assert done.returncode == 0, (args, done.stderr)
+
+
+def test_a_command_finds_its_checkout_once_however_many_of_its_parts_ask(
+    project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The guard, the verb and `init`'s doctor each ask, and each answer would cost two git runs."""
+    listed: list[tuple[str, ...]] = []
+    run_git = config.run_git
+
+    def counted(cwd: Path, *args: str) -> subprocess.CompletedProcess[bytes]:
+        if args[:2] == ("worktree", "list"):
+            listed.append(args)
+        return run_git(cwd, *args)
+
+    monkeypatch.setattr(config, "run_git", counted)
+    for args in [("init", "s1"), ("note", "a line")]:
+        listed.clear()
+        done = inprocess(*args, cwd=project)
+        assert (done.returncode, len(listed)) == (0, 1), (args, done.stderr)
 
 
 def test_doctor_names_each_thing_a_session_rests_on_that_fails(project: Path) -> None:

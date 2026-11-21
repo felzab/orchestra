@@ -149,10 +149,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         top, found = parser(chosen)
         args = top.parse_args(words)
-        if not READS.get(args.verb, lambda _: False)(args):
-            config.primary_checkout(args.verb)
-        # parse_args exits on any verb but `chosen`, which alone has a module.
-        return cast("Verbs", found).run(args)
+        # One checkout for the whole command: the guard's, which the verb's own call reads again.
+        with config.once():
+            if not READS.get(args.verb, lambda _: False)(args):
+                config.primary_checkout(args.verb)
+            # parse_args exits on any verb but `chosen`, which alone has a module.
+            return cast("Verbs", found).run(args)
     except Refused as refused:
         print(f"orchestra {chosen}: {refused}" if chosen else f"orchestra: {refused}", file=sys.stderr)
         return REFUSED

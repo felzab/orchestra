@@ -8,7 +8,10 @@ the same keys for an editor, and a test holds the two equal.
 
 from __future__ import annotations
 
+import contextlib
+import contextvars
 import dataclasses
+import functools
 import json
 import os
 import re
@@ -17,6 +20,7 @@ import subprocess
 import sys
 import types
 import typing
+from collections.abc import Callable, Generator
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal, NamedTuple, TypeVar
@@ -256,6 +260,11 @@ class Checkout(NamedTuple):
     primary: bool
 
 
+# The running command's checkout of its working directory, found at the first `checkout()` that asks; None
+# outside `once`, as in a hook, which finds each folder's checkout afresh.
+_ONCE: contextvars.ContextVar[Callable[[], Checkout] | None] = contextvars.ContextVar("checkout", default=None)
+
+
 def run_git(cwd: Path, *args: str) -> subprocess.CompletedProcess[bytes]:
     """One git command run, whatever its exit; refused where git is not on PATH."""
     try:
@@ -356,9 +365,29 @@ def worktrees(cwd: Path) -> list[dict[str, str]]:
     return found
 
 
+@contextlib.contextmanager
+def once() -> Generator[None, None, None]:
+    """Inside the block, `checkout()` with no `cwd` asks git the first time alone: a command's whole run.
+
+    Nothing a command runs changes its working directory or the primary checkout's branch, so the first
+    answer holds to its end, and each verb's own call costs no second pair of git runs. A refusal is not
+    kept, so a later call asks again.
+    """
+    token = _ONCE.set(functools.cache(lambda: _checkout(Path.cwd())))
+    try:
+        yield
+    finally:
+        _ONCE.reset(token)
+
+
 def checkout(cwd: Path | None = None) -> Checkout:
     """The checkout the directory belongs to, from git; refused outside a repository or in a bare one."""
-    here = Path.cwd() if cwd is None else cwd
+    if cwd is None and (held := _ONCE.get()) is not None:
+        return held()
+    return _checkout(Path.cwd() if cwd is None else cwd)
+
+
+def _checkout(here: Path) -> Checkout:
     found = run_git(here, "rev-parse", "--path-format=absolute", "--git-common-dir", "--show-toplevel")
     if found.returncode != 0:
         said = found.stderr.decode("utf-8", "replace").strip()
