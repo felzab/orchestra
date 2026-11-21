@@ -600,6 +600,19 @@ def test_a_resume_of_a_writer_whose_worktree_is_gone_is_refused(project: Path, s
         "W's worktree is gone (gone), so a resume has no worktree to run in: `orchestra judge W` banks its report,"
         " then dispatch a successor briefed with what is left",
     )
+    # A limit's stop before the report reads leaves nothing for `judge`, which refuses it, so `prune` settles it.
+    changed(state, "W", status="stopped", reason="You've hit your limit")
+    report.path(state, "W").write_bytes(text("writer", "W", status="IN-PROGRESS").encode())
+    said = hook("PreToolUse", project, tool_name="SendMessage", tool_input={"to": "W", "message": "go on"})[1]
+    assert decision(said) == (
+        "deny",
+        "W's worktree is gone (gone), so a resume has no worktree to run in: `orchestra prune` settles its record,"
+        " then dispatch a successor briefed with what is left",
+    )
+    # One whose report reads, written before the limit, is judged as a reported one is.
+    report.path(state, "W").write_bytes(text("writer", "W", status="DONE").encode())
+    said = hook("PreToolUse", project, tool_name="SendMessage", tool_input={"to": "W", "message": "go on"})[1]
+    assert "`orchestra judge W` banks its report, then dispatch a successor" in str(decision(said)[1])
     # A judged record has nothing left to bank.
     changed(state, "W", status="judged")
     said = hook("PreToolUse", project, tool_name="SendMessage", tool_input={"to": "W", "message": "fix F1"})[1]

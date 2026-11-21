@@ -551,12 +551,9 @@ def _resume(where: Where, given: Record) -> str | None:
     name = agent.name
     why = None
     if (held := findings.gone(agent, root)) is not None:
-        # No answer reaches it, so `judge` takes its report as it stands, a question included, and a judged
-        # record holds nothing a successor's brief needs.
-        settle = "" if agent.status in findings.JUDGED else f"`orchestra judge {name}` banks its report, then "
         why = (
             f"{name}'s worktree is gone ({held}), so a resume has no worktree to run in:"
-            f" {settle}dispatch a successor briefed with what is left"
+            f" {_settle(state, agent)}dispatch a successor briefed with what is left"
         )
     elif (unjudged := findings.unjudged(agent)) is not None:
         # `judge` reads an agent's latest round alone, so a round begun before it would leave this one's unread.
@@ -588,6 +585,20 @@ def _resume(where: Where, given: Record) -> str | None:
     else:
         told = f"This is round {following}: write its report to {path}, titled `round {following}`."
     return _allow({**given, "message": f"{message.rstrip()}\n\n{told}"})
+
+
+def _settle(state: Path, agent: model.Agent) -> str:
+    """The verb that settles an agent no resume reaches, ahead of its successor's dispatch; empty where it is judged.
+
+    No answer reaches it, so `judge` takes its report as it stands, a question included, and a judged record
+    holds nothing a successor's brief needs. A round stopped before its report reads, which `judge` refuses,
+    has nothing to bank, and `prune` settles it.
+    """
+    if agent.status in findings.JUDGED:
+        return ""
+    if agent.status == "reported" or findings.readable(state, agent):
+        return f"`orchestra judge {agent.name}` banks its report, then "
+    return "`orchestra prune` settles its record, then "
 
 
 def _running(state: Path, agent: model.Agent) -> tuple[int, bool] | None:

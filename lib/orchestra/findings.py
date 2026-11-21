@@ -125,11 +125,8 @@ def waiting(state: Path, agent: model.Agent) -> str | None:
     """
     if agent.status == "stopped" or (agent.status == "running" and not is_live(agent)):
         round_ = max(agent.reports, default=1)
-        try:
-            held = report.read(report.path(state, agent.name, round_), agent.type)
-        except Refused:
-            return None
-        if held.status in report.STOPPED:
+        held = _latest(state, agent)
+        if held is None or held.status in report.STOPPED:
             return None
         why = f" ({agent.reason})" if agent.reason else ""
         return (
@@ -143,6 +140,19 @@ def waiting(state: Path, agent: model.Agent) -> str | None:
         or unreached(agent, config.checkout().root)
         or f"{agent.name} stopped {agent.outcome}: answer it by message, and judge the report it writes"
     )
+
+
+def _latest(state: Path, agent: model.Agent) -> report.Report | None:
+    """The agent's latest round's report as `judge` reads it; None where it does not read."""
+    try:
+        return report.read(report.path(state, agent.name, max(agent.reports, default=1)), agent.type)
+    except Refused:
+        return None
+
+
+def readable(state: Path, agent: model.Agent) -> bool:
+    """Whether `judge` can read the agent's latest report, one stopped on a question included."""
+    return _latest(state, agent) is not None
 
 
 def is_live(agent: model.Agent, session: str | None = None) -> bool:
