@@ -4,7 +4,7 @@ Every registration in `hooks/hooks.json` runs `orchestra hook <event>`, in every
 plugin enabled. Most of them hold no fleet on the branch a session is keyed by, so this module decides
 that from git's own files, without running git or importing the state's modules, and answers nothing:
 such a session pays the shell and one Python start. Where a fleet may exist, or the event concerns
-one of the plugin's agents, `events` answers.
+one of the plugin's agents, `events` answers, except a subagent's `SendMessage`, which it never decides.
 
 An answered event exits 0. A refusal is the JSON decision its event documents, never exit 2, which
 on `UserPromptSubmit` would block the owner's prompt (Claude Code's hooks.md, "Exit code 2 behavior
@@ -86,7 +86,7 @@ def run(args: argparse.Namespace) -> int:
 def main(event: str) -> int:
     """The event answered on stdout, as UTF-8 bytes whatever the console's code page; 0, or a fault raised."""
     data = _input()
-    if event not in EVENTS:
+    if event not in EVENTS or _agents_message(event, data):
         return DONE
     cwd = data.get("cwd")
     place = Path(cwd) if isinstance(cwd, str) else None
@@ -137,6 +137,17 @@ def _away(*, held: Path | bool) -> bool:
     except (OSError, UnicodeDecodeError):
         return True
     return (state / AWAY).exists()
+
+
+def _agents_message(event: str, data: dict[str, object]) -> bool:
+    """Whether the event is a subagent's `SendMessage` call, which `events` decides nothing on.
+
+    Only the coordinator's message resumes an agent or routes rows, and an event carrying `agent_id` is never
+    the coordinator's. Loaded, `events` could only fault here, and a fault denies a plugin agent's call.
+    """
+    agent = data.get("agent_id")
+    named = isinstance(agent, str) and bool(agent)
+    return event in {"PreToolUse", "PostToolUse"} and data.get("tool_name") == "SendMessage" and named
 
 
 def concerns_plugin(event: str, data: dict[str, object]) -> bool:

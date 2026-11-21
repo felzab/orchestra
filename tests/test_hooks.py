@@ -251,6 +251,25 @@ def test_a_fleets_edit_loads_no_status_and_a_prompt_at_work_loads_no_events(proj
     assert loaded(project, "PermissionRequest", BASH) == ["orchestra.events"]
 
 
+def test_an_agents_message_loads_no_events_and_no_fault_denies_it(project: Path, state: Path) -> None:
+    """Only the coordinator's message resumes an agent or routes its rows, so an agent's decides nothing.
+
+    Loaded, `events` could only fault on it, and a fault denies a plugin agent's call: the agent's word to its
+    coordinator would be refused.
+    """
+    briefed(project, "A", "auditor")
+    dispatched(project, "A", "auditor", "a1")
+    message: dict[str, object] = {"tool_name": "SendMessage", "tool_input": {"to": "main", "message": "F1 blocks"}}
+    fields = inside(project, "a1", "auditor")
+    assert loaded(project, "PreToolUse", fields, message) == []
+    assert loaded(project, "PostToolUse", fields, message, {"tool_response": {}}) == []
+    # A record an older or newer build wrote faults every event that reads the records.
+    (state / "agents" / "Z.json").write_bytes(b'{"name": "Z", "type": "auditor", "laterField": 1}\n')
+    assert hook("PreToolUse", project, fields, message) == (0, None)
+    # The same fault still denies the agent's write, which the records decide.
+    assert decision(hook("PreToolUse", project, fields, edit(project / "lib" / "a.py"), quiet=False)[1])[0] == "deny"
+
+
 @pytest.mark.usefixtures("state")
 def test_another_session_in_the_same_checkout_gets_no_answer(project: Path) -> None:
     assert hook("Stop", project, session_id=OTHER, process=OTHER) == (0, None)
