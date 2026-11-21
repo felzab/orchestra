@@ -14,14 +14,16 @@ import os
 import subprocess
 import sys
 import time
+from collections.abc import Sequence
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 import pytest
 
-from conftest import LIB, MakeRepo, git, inprocess, write_config
-from orchestra import context, events, findings, hooks, log, model, queue, report, store
+from conftest import LIB, MakeRepo, MakeSession, git, inprocess, write_agent, write_config
+from orchestra import context, events, findings, hooks, log, model, process, queue, report, store
 from test_context import line, transcript
+from test_pages import parses
 from test_report import text
 
 SID = "c0ffee00-0000-4000-8000-000000000001"
@@ -42,6 +44,8 @@ NO_FLEET = (
     "except SystemExit as done:\n"
     "    print(done.code)\n"
     "heavy = {'orchestra.cli', 'orchestra.config', 'orchestra.store', 'orchestra.events', 'argparse', 'subprocess'}\n"
+    # Before Python 3.13, `pathlib` imports `urllib.parse` itself, so only from 3.13 is its absence the hook's.
+    "heavy |= {'urllib.parse'} if sys.version_info >= (3, 13) else set()\n"
     "print(sorted(heavy & set(sys.modules)))\n"
 )
 # One event answered as the launcher answers it, then which of the fleet's heavier modules it loaded.
@@ -110,14 +114,17 @@ def changed(state: Path, name: str, **values: object) -> None:
     model.update_agent(state, name, lambda held: dataclasses.replace(held, **values))
 
 
-@pytest.fixture
-def state(project: Path) -> Path:
+def _session(project: Path) -> None:
     (project / "lib").mkdir()
     (project / "lib" / "a.py").write_bytes(b"x\n")
     git(project, "add", ".")
     git(project, "commit", "-m", "lib")
     assert run("init", "s1", cwd=project).returncode == 0
-    return store.state_dir(project)
+
+
+@pytest.fixture
+def state(make_session: MakeSession) -> Path:
+    return make_session("hooks", _session)
 
 
 def briefed(project: Path, name: str, kind: str, *, checked: bool = True, **lists: str) -> Path:
@@ -159,7 +166,9 @@ def edit(target: Path) -> dict[str, object]:
 
 def test_each_event_is_one_registration_calling_the_launcher_by_the_plugin_root() -> None:
     held = json.loads(HOOKS_JSON.read_bytes())
-    assert list(held) == ["hooks"]
+    # The registrations, and at most a `modules` key beside them.
+    assert "hooks" in held
+    assert set(held) <= {"hooks", "modules"}
     assert set(held["hooks"]) == set(hooks.EVENTS)
     matchers = {}
     for event, groups in held["hooks"].items():
@@ -238,12 +247,33 @@ def test_a_fleets_edit_loads_no_status_and_a_prompt_at_work_loads_no_events(proj
     assert loaded(project, "PermissionRequest", BASH) == []
     assert loaded(project, "PreToolUse", QUESTION) == []
     store.write_text(state / store.PLAN, "## Slices\n\n- [ ] S1: the store\n")
+    # Only a writer's dispatch makes the first checkpoint due.
+    write_agent(state, model.Agent("A", "writer", "running"))
     log.record(state, log.DISPATCH, "A as a1 on the inherited model")
     stopped = context_of(hook("Stop", project, stop_hook_active=False)[1], "Stop")
     assert "1 plan line is unticked: the checkpoint in checkpoint.md is due" in stopped
     assert loaded(project, "Stop", {"stop_hook_active": False}) == ["orchestra.events"]
     assert run("mode", "away", "07:30", cwd=project).returncode == 0
     assert loaded(project, "PermissionRequest", BASH) == ["orchestra.events"]
+
+
+def test_an_agents_message_loads_no_events_and_no_fault_denies_it(project: Path, state: Path) -> None:
+    """Only the coordinator's message resumes an agent or routes its rows, so an agent's decides nothing.
+
+    Loaded, `events` could only fault on it, and a fault denies a plugin agent's call: the agent's word to its
+    coordinator would be refused.
+    """
+    briefed(project, "A", "auditor")
+    dispatched(project, "A", "auditor", "a1")
+    message: dict[str, object] = {"tool_name": "SendMessage", "tool_input": {"to": "main", "message": "F1 blocks"}}
+    fields = inside(project, "a1", "auditor")
+    assert loaded(project, "PreToolUse", fields, message) == []
+    assert loaded(project, "PostToolUse", fields, message, {"tool_response": {}}) == []
+    # A record an older or newer build wrote faults every event that reads the records.
+    (state / "agents" / "Z.json").write_bytes(b'{"name": "Z", "type": "auditor", "laterField": 1}\n')
+    assert hook("PreToolUse", project, fields, message) == (0, None)
+    # The same fault still denies the agent's write, which the records decide.
+    assert decision(hook("PreToolUse", project, fields, edit(project / "lib" / "a.py"), quiet=False)[1])[0] == "deny"
 
 
 @pytest.mark.usefixtures("state")
@@ -343,6 +373,19 @@ def test_a_hook_gives_up_on_a_held_lock_within_its_budget(project: Path, state: 
 
 
 # --- the dispatch ---------------------------------------------------------------------------------
+
+
+@pytest.mark.usefixtures("state")
+def test_a_dispatch_of_an_agent_with_no_record_names_a_brief_command_that_parses(project: Path) -> None:
+    """The refusal hands the coordinator the command that writes the brief, so the command must still be one."""
+    call = {"description": "NEW", "prompt": "NEW", "subagent_type": "orchestra:writer"}
+    verdict, why = decision(hook("PreToolUse", project, tool_name="Agent", tool_input=call)[1])
+    assert (verdict, why) == (
+        "deny",
+        "no agent NEW in this session: `orchestra brief NEW --type writer --slice S --body FILE` writes its brief"
+        " from a file holding its lists and its four sections, and checks it",
+    )
+    assert parses(str(why).split("`")[1])
 
 
 def test_a_dispatch_is_refused_until_its_brief_is_checked_then_filled(project: Path, state: Path) -> None:
@@ -593,20 +636,90 @@ def test_a_resume_of_a_writer_whose_worktree_is_gone_is_refused(project: Path, s
     said = hook("PreToolUse", project, tool_name="SendMessage", tool_input={"to": "W", "message": "fix F1"})[1]
     assert decision(said) == (
         "deny",
-        "W's worktree is gone (gone), so a resume would run it in the coordinator's checkout: dispatch a successor",
+        "W's worktree is gone (gone), so a resume has no worktree to run in: `orchestra judge W` banks its report,"
+        " then dispatch a successor briefed with what is left",
+    )
+    # A limit's stop before the report reads leaves nothing for `judge`, which refuses it, so `prune` settles it.
+    changed(state, "W", status="stopped", reason="You've hit your limit")
+    report.path(state, "W").write_bytes(text("writer", "W", status="IN-PROGRESS").encode())
+    said = hook("PreToolUse", project, tool_name="SendMessage", tool_input={"to": "W", "message": "go on"})[1]
+    assert decision(said) == (
+        "deny",
+        "W's worktree is gone (gone), so a resume has no worktree to run in: `orchestra prune` settles its record"
+        " or says what keeps it, then dispatch a successor briefed with what is left",
+    )
+    # One whose report reads, written before the limit, is judged as a reported one is.
+    report.path(state, "W").write_bytes(text("writer", "W", status="DONE").encode())
+    said = hook("PreToolUse", project, tool_name="SendMessage", tool_input={"to": "W", "message": "go on"})[1]
+    assert "`orchestra judge W` banks its report, then dispatch a successor" in str(decision(said)[1])
+    # A judged record has nothing left to bank.
+    changed(state, "W", status="judged")
+    said = hook("PreToolUse", project, tool_name="SendMessage", tool_input={"to": "W", "message": "fix F1"})[1]
+    assert decision(said) == (
+        "deny",
+        "W's worktree is gone (gone), so a resume has no worktree to run in: dispatch a successor briefed with what"
+        " is left",
     )
 
 
-def test_a_resume_past_the_context_ceiling_is_refused_naming_the_figure(project: Path, state: Path) -> None:
+def test_a_resume_refused_for_a_record_prune_passes_over_names_the_discard(project: Path, state: Path) -> None:
+    """`prune` settles a lost record only where it is stopped and the branch it names is gone; elsewhere its
+    discard does, which loses nothing where the branch is gone. Where the branch stands, `prune` says what keeps it.
+    """
+    briefed(project, "W", "writer", owns="lib/a.py")
+    dispatched(project, "W", "writer", "w1")
+    discard = (
+        "W's worktree is gone ({}), so a resume has no worktree to run in: `orchestra prune --discard W` settles its"
+        " record once you have saved what it holds, then dispatch a successor briefed with what is left"
+    )
+
+    def refused() -> object:
+        said = hook("PreToolUse", project, tool_name="SendMessage", tool_input={"to": "W", "message": "go on"})[1]
+        return decision(said)
+
+    # A `running` record whose stop hook never ran, its branch gone: `prune` passes over it in silence.
+    changed(state, "W", status="running", branch="gone")
+    assert refused() == ("deny", discard.format("gone"))
+    assert "(W)" not in run("prune", cwd=project).stdout
+    # A limit's stop before the harness named a branch: `prune` keeps the record.
+    changed(state, "W", status="stopped", branch=None, reason="You've hit your limit")
+    assert refused() == ("deny", discard.format("no branch recorded"))
+    assert "kept its record (W): its branch is unknown" in run("prune", cwd=project).stdout
+    # A `running` record whose branch still holds its commits keeps the plain verb, which says what keeps it.
+    git(project, "branch", "kept")
+    changed(state, "W", status="running", branch="kept")
+    assert refused() == (
+        "deny",
+        "W's worktree is gone (kept), so a resume has no worktree to run in: `orchestra prune` settles its record"
+        " or says what keeps it, then dispatch a successor briefed with what is left",
+    )
+    assert "kept kept (W): " in run("prune", cwd=project).stdout
+    assert model.read_agent(state, "W").status == "running"
+
+
+def test_a_resume_past_the_context_ceiling_is_refused_naming_the_figure_once_its_cache_has_lapsed(
+    project: Path, state: Path
+) -> None:
+    """A resume within a subagent's five-minute cache reads its context, which costs about what a successor does."""
     write_config(project, {"stateRoot": (project.parent / "state").as_posix(), "contextCeiling": 100_000})
     briefed(project, "A", "auditor")
     dispatched(project, "A", "auditor", "a1")
     changed(state, "A", status="judged")
-    transcript(project.parent / "claude-config", "a1", line("assistant", "m1", 150_000))
+    config_dir = project.parent / "claude-config"
+    transcript(config_dir, "a1", line("assistant", "m1", 150_000), minutes=events.CACHE_MINUTES + 1)
     said = hook("PreToolUse", project, tool_name="SendMessage", tool_input={"to": "A", "message": "fix F1"})[1]
-    assert str(decision(said)[1]).startswith(
-        "A's context is 150,474 tokens, over the configuration's contextCeiling of 100,000"
+    assert decision(said) == (
+        "deny",
+        "A's context is 150,474 tokens, over the configuration's contextCeiling of 100,000, and its transcript was"
+        " last written 6 min ago, past the 5-min cache: a resume writes it all to the cache again, so dispatch a"
+        " successor briefed with what is left",
     )
+    # Written a moment inside the cache's lifetime, the same resume goes ahead.
+    transcript(config_dir, "a1", line("assistant", "m1", 150_000), minutes=events.CACHE_MINUTES - 0.5)
+    said = hook("PreToolUse", project, tool_name="SendMessage", tool_input={"to": "A", "message": "fix F1"})[1]
+    assert decision(said)[0] == "allow"
+    changed(state, "A", status="judged")
+    transcript(config_dir, "a1", line("assistant", "m1", 150_000), minutes=events.CACHE_MINUTES + 1)
     # Under the ceiling, the same resume goes ahead.
     write_config(project, {"stateRoot": (project.parent / "state").as_posix(), "contextCeiling": 200_000})
     said = hook("PreToolUse", project, tool_name="SendMessage", tool_input={"to": "A", "message": "fix F1"})[1]
@@ -616,12 +729,13 @@ def test_a_resume_past_the_context_ceiling_is_refused_naming_the_figure(project:
 def test_a_writer_stopped_on_a_question_past_the_ceiling_is_answered_and_a_finished_one_is_not_resumed(
     project: Path, state: Path
 ) -> None:
-    """Until its question is answered, `judge`, `land` and `prune --discard` hold it, so no successor takes over."""
+    """While its worktree stands and its question waits, `judge`, `land` and `prune --discard` hold it."""
     write_config(project, {"stateRoot": (project.parent / "state").as_posix(), "contextCeiling": 100_000})
     briefed(project, "W", "writer", owns="lib/a.py")
     dispatched(project, "W", "writer", "w1")
     git(project, "worktree", "add", "-b", "worktree-agent-w1", str(project.parent / "trees" / "agent-w1"))
-    transcript(project.parent / "claude-config", "w1", line("assistant", "m1", 150_000))
+    stale = events.CACHE_MINUTES + 1
+    transcript(project.parent / "claude-config", "w1", line("assistant", "m1", 150_000), minutes=stale)
     sent = {"to": "W", "message": "Keep the old name."}
     changed(state, "W", status="judged", outcome="DONE", branch="worktree-agent-w1")
     said = hook("PreToolUse", project, tool_name="SendMessage", tool_input=sent)[1]
@@ -798,6 +912,21 @@ def test_an_agent_ended_by_a_limit_is_stopped_never_asked_to_repair(project: Pat
         assert (agent.status, agent.reason) == ("stopped", said)
 
 
+def test_a_report_quoting_a_limit_notice_or_an_api_error_is_reported_not_stopped(project: Path, state: Path) -> None:
+    """A notice ends the turn as the whole message; a summary citing one, as its sources line may, is a report."""
+    briefed(project, "A", "auditor")
+    dispatched(project, "A", "auditor", "a1")
+    report.path(state, "A").write_bytes(text("auditor", "A").encode())
+    summary = (
+        "## Summary\nDONE\nI read the errors page.\n"
+        "- [Errors: You've hit your session limit](https://code.claude.com/docs/en/errors.md)\n"
+        "API Error: 529 Overloaded is the text an overload ends a turn with.\n"
+    )
+    assert hook("SubagentStop", project, inside(project, "a1", "auditor", last_assistant_message=summary)) == (0, None)
+    agent = model.read_agent(state, "A")
+    assert (agent.status, agent.outcome) == ("reported", "DONE")
+
+
 def test_a_stop_failure_marks_its_agent_stopped(project: Path, state: Path) -> None:
     briefed(project, "A", "auditor")
     dispatched(project, "A", "auditor", "a1")
@@ -837,6 +966,191 @@ def test_the_turn_continues_once_with_what_is_undone(project: Path, state: Path)
         "- NOW.md predates the last 5 log entries",
     ]
     assert hook("Stop", project, stop_hook_active=True, background_tasks=[]) == (0, None)
+
+
+def test_a_turns_end_lists_a_set_once_until_a_line_or_the_log_moves(project: Path, state: Path) -> None:
+    """A set the coordinator has read and chosen to wait on would otherwise start a turn at every turn's end.
+
+    A listing counts as read once the turn it continued ends, `stop_hook_active` then set, so one lost before
+    that, as to a crash, is listed again. The away line is listed at every turn's end that holds it.
+    """
+    later = time.time() + 86_400
+    # NOW.md stays newer than every entry the case logs, so its line never joins the set.
+    os.utime(state / store.NOW, (later, later))
+    briefed(project, "A", "auditor")
+    dispatched(project, "A", "auditor", "a1")
+    briefed(project, "B", "auditor")
+    dispatched(project, "B", "auditor", "b1")
+    changed(state, "A", status="reported", outcome="DONE")
+
+    def ended(*, active: bool = False) -> list[str]:
+        said = hook("Stop", project, stop_hook_active=active, background_tasks=[])[1]
+        return [] if said is None else context_of(said, "Stop").splitlines()
+
+    head = "Undone in this orchestra session:"
+    a, b = "- A reported (DONE) and is not judged", "- B reported (DONE) and is not judged"
+    assert ended() == [head, a]
+    # The continued turn never ended, as after a crash, so the listing is not known read.
+    assert ended() == [head, a]
+    assert ended(active=True) == []
+    assert ended() == []
+    assert ended() == []
+    # A note may move what waits.
+    assert run("note", "the cap stays at 20", cwd=project).returncode == 0
+    assert ended() == [head, a]
+    assert ended(active=True) == []
+    assert ended() == []
+    # A new report, with nothing logged, lists the set again, whole; so does a line gone.
+    changed(state, "B", status="reported", outcome="DONE")
+    assert ended() == [head, a, b]
+    assert ended(active=True) == []
+    assert ended() == []
+    changed(state, "A", status="judged")
+    assert ended() == [head, b]
+    assert ended(active=True) == []
+    assert ended() == []
+    # Away, a session nobody watches must never stall unseen, so its line is listed until a waiting note stands.
+    changed(state, "B", status="judged")
+    store.write_json(state / store.AWAY, {"since": model.now(), "until": None, "log": 0, "files": []})
+    idle = '- nothing runs, and no `orchestra note --waiting "<what>"` names what the session waits on'
+    assert ended() == [head, idle]
+    assert ended(active=True) == []
+    assert ended() == [head, idle]
+
+
+def test_a_writer_stopped_on_a_question_whose_worktree_is_gone_is_judged_and_leaves_the_turns_end(
+    project: Path, state: Path
+) -> None:
+    """Claude Code removes a commit-less writer's worktree when it stops (worktrees.md), so no answer reaches it."""
+    briefed(project, "W", "writer", owns="lib/a.py")
+    dispatched(project, "W", "writer", "w1")
+    asked = text("writer", "W", status="NEEDS-ANSWER: which queue takes it?").replace("Commits: 2,", "Commits: 0,")
+    report.path(state, "W").write_bytes(asked.encode())
+    changed(state, "W", status="reported", outcome="NEEDS-ANSWER", branch="worktree-agent-w1")
+
+    def undone() -> list[str]:
+        said = hook("Stop", project, stop_hook_active=False, background_tasks=[])[1]
+        return [] if said is None else context_of(said, "Stop").splitlines()
+
+    assert undone() == [
+        "Undone in this orchestra session:",
+        "- W stopped NEEDS-ANSWER, and its worktree is gone (worktree-agent-w1), so no answer reaches it:"
+        " `orchestra judge W` banks its report as it stands",
+    ]
+    # A discard waits for the judge too, since a pruned agent's report can no longer be judged.
+    kept = run("prune", "--discard", "W", cwd=project)
+    assert "kept its record (W): W stopped NEEDS-ANSWER, and its worktree is gone" in kept.stdout, kept.stdout
+    judged = run("judge", "W", "F1=route:owner", "F2=route:owner", "--verdict", "superseded by W2", cwd=project)
+    assert judged.returncode == 0, judged.stderr
+    assert model.read_agent(state, "W").status == "judged"
+    assert undone() == []
+
+
+def test_a_turns_end_lists_the_worktrees_once_for_every_report_stopped_on_a_question(
+    project: Path, state: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Each such report asks whether its worktree is gone, and the turn's end waits on every git run."""
+    ran: list[tuple[str, ...]] = []
+    started = process.run
+
+    def counted(argv: Sequence[str], **given: Any) -> subprocess.CompletedProcess[bytes]:
+        if argv[0] == "git":
+            ran.append(tuple(argv))
+        return started(argv, **given)
+
+    def runs() -> int:
+        """The git runs of one turn's end, once its lines are read."""
+        ran.clear()
+        said = context_of(hook("Stop", project, stop_hook_active=False, background_tasks=[])[1], "Stop")
+        assert said.count("so no answer reaches it") == len(model.agents(state)), said
+        return len(ran)
+
+    def asked(name: str, ident: str) -> None:
+        briefed(project, name, "writer", owns="lib/a.py")
+        dispatched(project, name, "writer", ident)
+        changed(state, name, status="reported", outcome="NEEDS-ANSWER", branch=f"worktree-agent-{ident}")
+
+    monkeypatch.setattr(process, "run", counted)
+    asked("W", "w1")
+    one = runs()
+    asked("X", "x1")
+    asked("Y", "y1")
+    assert runs() == one, ran
+
+
+def test_the_root_comes_from_session_json_where_exact_and_a_git_fault_drops_no_dispatch(
+    project: Path, state: Path, monkeypatch: pytest.MonkeyPatch, make_repo: MakeRepo
+) -> None:
+    """Every prompt and post-call event read the primary checkout, which two git runs found, though the state names it.
+
+    The recorded checkout is the root where its `.git` folder is the common directory holding the branch's
+    pointer; any other, a moved checkout among them, asks git. A dispatch reads the root only to route its rows,
+    so a git fault leaves its record written and names the rows left unrouted.
+    """
+    banked = [model.FindingEvent("X-F1", "bank", "OPEN"), model.FindingEvent("X-F2", "bank", "OPEN")]
+    model.write_findings(state, lambda _: banked)
+    briefed(project, "A", "auditor", rows="X-F1")
+    briefed(project, "B", "auditor", rows="X-F2")
+    main = project.parent / "main.jsonl"
+    main.write_bytes(line("assistant", "m1", 400_000))
+    near = "Your context is 400,474 tokens, at least 75% of the 500,000-token compaction window"
+    ran: list[tuple[str, ...]] = []
+    started = process.run
+    broken: list[bool] = []
+
+    def counted(argv: Sequence[str], **given: Any) -> subprocess.CompletedProcess[bytes]:
+        if argv[0] == "git":
+            ran.append(tuple(argv))
+            if broken:
+                return subprocess.CompletedProcess(argv, 128, b"", b"fatal: not a git repository")
+        return started(argv, **given)
+
+    def prompted() -> str:
+        said = hook("UserPromptSubmit", project, prompt="go", transcript_path=str(main))[1]
+        return context_of(said, "UserPromptSubmit")
+
+    monkeypatch.setattr(process, "run", counted)
+    assert near in prompted()
+    assert dispatched(project, "A", "auditor", "a1") is None
+    assert model.read_findings(state)["X-F1"].owner == "A"
+    assert ran == []
+    # A checkout recorded elsewhere, as after a move, is no proof: git finds the root, and it is the same.
+    facts = model.read_session(state)
+    model.write_session(state, dataclasses.replace(facts, checkout=str(project.parent / "moved")))
+    assert near in prompted()
+    assert [argv[3] for argv in ran] == ["rev-parse", "worktree"]
+    # Nor is another clone's checkout, as one made at the old path after a move: its `.git` holds no pointer.
+    clone = make_repo(project.parent / "clone" / "project")
+    model.write_session(state, dataclasses.replace(facts, checkout=str(clone)))
+    ran.clear()
+    assert near in prompted()
+    assert [argv[3] for argv in ran] == ["rev-parse", "worktree"]
+    # With git failing, the dispatch is recorded all the same, and its rows wait for `orchestra route`.
+    broken.append(True)
+    said = dispatched(project, "B", "auditor", "b1")
+    assert context_of(said, "PostToolUse") == (
+        "Not routed to B: git cannot find the primary checkout; `orchestra route B X-F2` routes them"
+    )
+    agent = model.read_agent(state, "B")
+    assert (agent.ids, agent.status) == (("b1",), "running")
+    assert model.read_findings(state)["X-F2"].status == "OPEN"
+
+
+def test_a_writer_stopped_on_a_question_whose_worktree_stands_waits_on_its_answer(project: Path, state: Path) -> None:
+    """Its answer resumes it in its worktree, so `judge` waits for the report that answer completes."""
+    briefed(project, "W", "writer", owns="lib/a.py")
+    dispatched(project, "W", "writer", "w1")
+    git(project, "worktree", "add", "-b", "worktree-agent-w1", str(project.parent / "trees" / "agent-w1"))
+    report.path(state, "W").write_bytes(text("writer", "W", status="NEEDS-ANSWER: which queue takes it?").encode())
+    changed(state, "W", status="reported", outcome="NEEDS-ANSWER", branch="worktree-agent-w1")
+    said = context_of(hook("Stop", project, stop_hook_active=False, background_tasks=[])[1], "Stop")
+    assert "- W stopped NEEDS-ANSWER and waits on your answer by message" in said.splitlines()
+    judged = run("judge", "W", "F1=route:owner", "F2=route:owner", "--verdict", "v", cwd=project)
+    assert (judged.returncode, judged.stderr) == (
+        2,
+        "orchestra judge: W stopped NEEDS-ANSWER: which queue takes it?. Answer it by message, and judge the report"
+        " it writes\n",
+    )
 
 
 def test_notes_after_now_md_leave_it_current_and_as_many_decisions_or_other_entries_do_not(
@@ -888,6 +1202,54 @@ def test_an_idle_turn_continues_only_while_nobody_watches(project: Path, state: 
     changed(state, "A", since={"stopped": later})
     said = context_of(hook("Stop", project, stop_hook_active=False, background_tasks=[])[1], "Stop")
     assert '- nothing runs, and no `orchestra note --waiting "<what>"` names what the session waits on' in said
+
+
+def test_an_attended_turns_end_reads_no_transcript(project: Path, state: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Whether an agent works matters only while nobody watches, and each read costs the owner's turn its wait."""
+    briefed(project, "A", "auditor")
+    dispatched(project, "A", "auditor", "a1")
+
+    def refused(*_: object) -> None:
+        raise AssertionError("a transcript was read")
+
+    with monkeypatch.context() as patched:
+        patched.setattr(context, "working", refused)
+        patched.setattr(context, "transcript", refused)
+        # Quiet: a read would fault the hook, which says so on stderr.
+        code, said = hook("Stop", project, stop_hook_active=False, background_tasks=[])
+    assert code == 0
+    assert "nothing runs" not in str(said)
+    # Away, the same turn's end reads A's transcript, finds none, and names the stall as before.
+    store.write_json(state / store.AWAY, {"since": model.now(), "until": None, "log": 0, "files": []})
+    said = context_of(hook("Stop", project, stop_hook_active=False, background_tasks=[])[1], "Stop")
+    assert '- nothing runs, and no `orchestra note --waiting "<what>"` names what the session waits on' in said
+    # A background task running says something runs, so no transcript is read to ask whether an agent works.
+    with monkeypatch.context() as patched:
+        patched.setattr(context, "working", refused)
+        patched.setattr(context, "transcript", refused)
+        code, said = hook("Stop", project, stop_hook_active=False, background_tasks=[{"id": "t1"}])
+    assert code == 0
+    assert "nothing runs" not in str(said)
+
+
+def test_a_turns_end_hands_the_queue_what_it_read(project: Path, state: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The turn-end hook holds the records and the log, so the queue reading them again only adds to the wait."""
+    briefed(project, "A", "auditor")
+    model.write_queue(state, lambda _: [model.QueueItem(1, "reported", "judge the next report", "A")])
+    given: list[tuple[object, object]] = []
+    due = queue.due
+
+    def seen(where: Path, agents: object = None, entries: object = None) -> list[model.QueueItem]:
+        given.append((agents, entries))
+        return due(where, agents, entries)  # type: ignore[arg-type]
+
+    with monkeypatch.context() as patched:
+        patched.setattr(queue, "due", seen)
+        code, _ = hook("Stop", project, stop_hook_active=False, background_tasks=[])
+    assert code == 0
+    assert given
+    assert all(agents is not None for agents, _ in given)
+    assert all(entries is not None for _, entries in given)
 
 
 # --- the away mode --------------------------------------------------------------------------------
@@ -972,6 +1334,17 @@ def test_an_agents_prompt_is_refused_away_after_the_lease_moves(project: Path, s
     assert hook("PermissionRequest", project, BASH) == (0, None)
 
 
+def test_an_unreadable_lease_still_refuses_a_prompt_while_away(project: Path, state: Path) -> None:
+    """A lease that cannot be read says nothing of whose the event is, so it faults rather than read as nobody's:
+    an event read as another session's would let a prompt through to an owner who is not there.
+    """
+    assert run("mode", "away", "07:30", cwd=project).returncode == 0
+    (state / store.LEASE).write_bytes(b"{not json")
+    code, said = hook("PermissionRequest", project, BASH, quiet=False)
+    assert code == 0
+    assert prompt_refusal(said) == ("deny", events.AWAY_PROMPT)
+
+
 def test_a_hook_that_cannot_judge_logs_its_fault_and_an_away_session_still_refuses(project: Path, state: Path) -> None:
     """A fault's stderr is shown on no exit 0, and a prompt let through while the owner is away waits for nobody."""
     # A record an older or newer build wrote faults every event inside an agent, which reads them all.
@@ -1043,21 +1416,28 @@ def _judged(project: Path, name: str, kind: str, lens: str = "none") -> subproce
     return judged
 
 
-def test_a_falsely_sequenced_slice_waits_free_and_four_judged_reports_not_disclosure_only_make_the_checkpoint_due(
-    project: Path, state: Path
+def test_a_falsely_sequenced_slice_waits_free_and_judged_reports_not_disclosure_only_make_the_checkpoint_due(
+    project: Path, state: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """S2 needs nothing of S1, so the program names it free; the estimate is looked at again every four reports.
+    """S2 needs nothing of S1, so the program names it free; the estimate is looked at again every `JUDGED` reports.
 
     A researcher whose `Lens:` names disclosure alone frees no planned work, before a push or in the review, in
-    any round; a report whose brief cannot be read, or whose `Lens:` names another lens beside, counts.
+    any round; a report whose brief cannot be read, or whose `Lens:` names another lens beside, counts. The count
+    is lowered for the case, since each report it counts costs a brief, a dispatch, a stop and a judge.
     """
+    monkeypatch.setattr(events, "JUDGED", 3)
+    count = events.JUDGED
     store.write_text(state / store.PLAN, PACED_PLAN)
     briefed(project, "W", "writer", owns="lib/a.py")
     free = "waits     slice S2, which no agent took: its files are free"
     assert _due(project) == []
+    # A researcher settling the plan's premises goes out before the first estimate (start.md, step 5).
+    briefed(project, "MAP", "researcher")
+    dispatched(project, "MAP", "researcher", "map")
+    assert _due(project) == []
     dispatched(project, "W", "writer", "w1")
     assert free in run("status", "--measure", cwd=project).stdout.splitlines()
-    first = "- agents have been dispatched, and no estimate is saved, and 3 plan lines are unticked"
+    first = "- a writer has been dispatched, and no estimate is saved, and 3 plan lines are unticked"
     assert _due(project) == [f"{first}: the checkpoint in checkpoint.md is due"]
     # Once per turn: a turn the hook already continued is let end.
     assert hook("Stop", project, stop_hook_active=True, background_tasks=[]) == (0, None)
@@ -1074,15 +1454,16 @@ def test_a_falsely_sequenced_slice_waits_free_and_four_judged_reports_not_disclo
     second = run("judge", "DISCLOSE", "F1=close:MOOT:x", "F2=close:MOOT:x", "--verdict", "v", cwd=project)
     assert second.returncode == 0, second.stderr
     at = datetime.datetime.fromtimestamp(saved.stat().st_mtime).astimezone()
-    fourth = f"- 4 reports were judged since the last saved estimate ({at:%H:%M}), and 3 plan lines are unticked"
-    for k in range(1, 5):
+    last = f"- {count} reports were judged since the last saved estimate ({at:%H:%M}), and 3 plan lines are unticked"
+    # W and MAP stay at work throughout, so no wave ends: the count alone makes the checkpoint due.
+    for k in range(1, count + 1):
         # A lens beside disclosure makes the read more than a disclosure-only one, so its report counts.
-        judged = _judged(project, f"A{k}", "auditor", lens="disclosure, contract" if k == 4 else "none")
+        judged = _judged(project, f"A{k}", "auditor", lens="disclosure, contract" if k == count else "none")
         assert free in judged.stdout.splitlines()
         if k == 1:
             # A brief that cannot be read is counted, as the report of any other agent is.
             (state / "briefs" / "A1.md").unlink()
-        assert _due(project) == ([] if k < 4 else [f"{fourth}: the checkpoint in checkpoint.md is due"])
+        assert _due(project) == ([] if k < count else [f"{last}: the checkpoint in checkpoint.md is due"])
     # A landing closes on what still waits.
     tree = project.parent / "trees" / "agent-w1"
     git(project, "worktree", "add", "-b", "worktree-agent-w1", str(tree))
@@ -1092,6 +1473,36 @@ def test_a_falsely_sequenced_slice_waits_free_and_four_judged_reports_not_disclo
     landed = run("land", "W", cwd=project)
     assert landed.returncode == 0, landed.stderr
     assert free in landed.stdout.splitlines()
+
+
+def test_the_checkpoint_is_due_at_a_waves_end_once_no_agent_is_live_and_a_writer_has_landed(
+    project: Path, state: Path
+) -> None:
+    """checkpoint.md runs at each wave's end; a landing while another agent works ends none.
+
+    A brief drafted and not dispatched holds none open, since review.md drafts the review's while the last writers run.
+    """
+    store.write_text(state / store.PLAN, PACED_PLAN)
+    briefed(project, "W", "writer", owns="lib/a.py")
+    dispatched(project, "W", "writer", "w1")
+    briefed(project, "R", "auditor")
+    dispatched(project, "R", "auditor", "r1")
+    saved = state / "estimates" / "first.md"
+    saved.write_bytes(b"# Estimate\n")
+    at = datetime.datetime.fromtimestamp(saved.stat().st_mtime).astimezone()
+    assert _due(project) == []
+    changed(state, "W", status="landed")
+    assert _due(project) == []
+    changed(state, "R", status="judged")
+    briefed(project, "N", "auditor")
+    ended = f"- no agent is live, and 1 writer(s) landed since the last saved estimate ({at:%H:%M})"
+    assert _due(project) == [f"{ended}, and 3 plan lines are unticked: the checkpoint in checkpoint.md is due"]
+    # An estimate saved after the landing starts the next wave's count.
+    newer = state / "estimates" / "second.md"
+    newer.write_bytes(b"# Estimate\n")
+    later = time.time() + 2
+    os.utime(newer, (later, later))
+    assert _due(project) == []
 
 
 def test_a_compaction_or_a_resume_reads_the_state_back_from_disk(project: Path, state: Path) -> None:
@@ -1109,6 +1520,78 @@ def test_a_compaction_or_a_resume_reads_the_state_back_from_disk(project: Path, 
     assert context.endswith("\nNOW.md:\n" + (state / "NOW.md").read_bytes().decode())
     # NOW.md follows whole, so status's `now` lines would give it twice.
     assert not any(line.startswith("now ") for line in context.splitlines())
+
+
+def test_after_a_compaction_now_md_takes_the_room_first_and_every_cut_is_named(
+    project: Path, state: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Past `CONTEXT_CHARS` Claude Code keeps a preview and asks nobody to read the rest, so nothing is cut unseen.
+
+    NOW.md holds the next action and its reason, which the state does not, so the overview's rows give way to it;
+    a NOW.md longer than the room keeps its head and names the file that holds it whole.
+    """
+    rows = [f"row {k:02} " + "x" * 90 for k in range(60)]
+
+    def overview(*_: object) -> tuple[list[str], str]:
+        return rows, "status: 60 rows"
+
+    # `events` imports the status view at the call, so the module's own attribute is the one it reads.
+    monkeypatch.setattr("orchestra.status.coordinator", overview)
+    now = state / store.NOW
+
+    def started() -> str:
+        # The hook's last cut, at `CONTEXT_CHARS`, falls in its tail, which each case below reads whole.
+        return context_of(hook("SessionStart", project, source="compact")[1], "SessionStart")
+
+    whole = "".join(f"- line {k:03} of what comes next and why\n" for k in range(130))
+    now.write_bytes(whole.encode())
+    said = started()
+    assert said.endswith("\nNOW.md:\n" + whole)
+    lines = said.splitlines()
+    (count,) = [line for line in lines if line.startswith("... ")]
+    shown = [line for line in lines if line.startswith("row ")]
+    assert shown == rows[: len(shown)]
+    assert count == f"... {60 - len(shown)} more line(s): `orchestra status` lists them"
+    # The summary stays, below the count.
+    assert lines[lines.index(count) + 1] == "status: 60 rows"
+    # Rows that fit the room but not a verb's forty lines are cut where `orchestra status` cuts them.
+    rows[:] = [f"row {k:02}" for k in range(45)]
+    lines = started().splitlines()
+    assert [line for line in lines if line.startswith(("row ", "... "))] == [
+        *rows[:38],
+        "... 7 more line(s): `orchestra status` lists them",
+    ]
+    # A NOW.md past the room keeps its head, cut at a line end, and names what it left out.
+    rows[:] = [f"row {k:02} " + "x" * 90 for k in range(60)]
+    longer = whole * 3
+    now.write_bytes(longer.encode())
+    said = started()
+    held = said.split("\nNOW.md:\n", 1)[1]
+    head, _, cut = held.rpartition("\n")
+    assert longer.startswith(head + "\n")
+    assert cut == f"... {len(longer) - len(head):,} more character(s) of NOW.md left out: {now} holds it whole"
+    assert "... 60 more line(s): `orchestra status` lists them" in said.splitlines()
+
+
+def test_the_overview_after_a_compaction_leaves_out_judged_and_pruned_agents_and_keeps_what_waits(
+    project: Path, state: Path
+) -> None:
+    """Nothing after a compaction acts on a finished agent; `agents` still counts it and `status` still names it."""
+    for name, ident in (("RUN", "r1"), ("TOJUDGE", "t1"), ("ASKS", "q1"), ("DONE", "d1"), ("GONE", "g1")):
+        briefed(project, name, "auditor")
+        dispatched(project, name, "auditor", ident)
+    changed(state, "TOJUDGE", status="reported", outcome="DONE")
+    changed(state, "ASKS", status="reported", outcome="NEEDS-ANSWER")
+    changed(state, "DONE", status="judged", outcome="DONE")
+    changed(state, "GONE", status="pruned", outcome="DONE")
+    lines = context_of(hook("SessionStart", project, source="compact")[1], "SessionStart").splitlines()
+    assert "agents    1 running, 2 reported, 1 judged, 1 pruned" in lines
+    assert "suspect   RUN (auditor, round 1): running, but no transcript found for r1" in lines
+    assert "to judge  TOJUDGE (auditor, round 1, DONE)" in lines
+    assert "NEEDS-ANSWER ASKS (auditor, round 1): its report waits on you" in lines
+    assert not [line for line in lines if line.startswith(("judged ", "pruned "))]
+    shown = run("status", cwd=project).stdout.splitlines()
+    assert [line for line in shown if line.startswith(("judged ", "pruned "))] == ["judged    DONE", "pruned    GONE"]
 
 
 def test_each_prompt_carries_the_clock_and_a_gap_past_half_an_hour_names_usage(project: Path, state: Path) -> None:
@@ -1134,23 +1617,39 @@ def test_each_prompt_carries_the_clock_and_a_gap_past_half_an_hour_names_usage(p
 
 
 @pytest.mark.usefixtures("state")
-def test_a_prompt_past_the_compaction_window_tells_the_coordinator_and_the_owner(project: Path) -> None:
-    """A desktop session started from a pre-warmed process was seen skipping the window its project's settings set.
+def test_a_prompt_nearing_the_compaction_window_tells_the_coordinator_and_past_it_the_owner(project: Path) -> None:
+    """From three quarters of the window the coordinator reads that its compact tool compacts at the next seam.
 
-    The window is the one `init` wrote to the local settings; the transcript's last call decides, not its largest.
+    Past the window, which a desktop session started from a pre-warmed process was seen skipping, the owner reads
+    it too. The window is the one `init` wrote to the local settings; the transcript's last call decides, not its
+    largest.
     """
     main = project.parent / "main.jsonl"
+    seam = "`mcp__orchestra__compact`, where the session has it, or else the owner's `/compact`, compacts"
+    seam += " at the next seam."
     main.write_bytes(line("assistant", "m0", 900_000) + line("user") + line("assistant", "m1", 500_000))
     said = hook("UserPromptSubmit", project, prompt="go", transcript_path=str(main))[1]
+    # The compact tool measures against the window Claude Code applied, so past an unapplied one it may wait; the
+    # owner's `/compact` is named for a seam where the tool does not compact, the condition the owner's line holds.
     assert context_of(said, "UserPromptSubmit").endswith(
         " Your context is 500,474 tokens, past the 500,000-token compaction window, which has not applied;"
-        " only the owner can type `/compact`."
+        " `mcp__orchestra__compact` compacts only from 60% of the window Claude Code applied, which may be larger,"
+        " so the owner's `/compact` compacts at the next seam where the tool does not."
     )
+    # The tool may still compact at that seam, under a larger applied window, so the owner's order waits on it.
     assert field(said, "systemMessage") == (
         "orchestra: this session's context is 500,474 tokens, past its 500,000-token compaction window, which has not"
-        " applied: type `/compact` at the next seam."
+        " applied. Type `/compact` at the coordinator's next seam, unless its compact tool compacts there or answers"
+        " that none is needed."
     )
-    main.write_bytes(line("assistant", "m0", 900_000) + line("user") + line("assistant", "m1", 499_000))
+    # 375,000 is three quarters of the window; the line adds 474 tokens to the figure given.
+    main.write_bytes(line("assistant", "m0", 900_000) + line("user") + line("assistant", "m1", 374_526))
+    said = hook("UserPromptSubmit", project, prompt="go", transcript_path=str(main))[1]
+    assert context_of(said, "UserPromptSubmit").endswith(
+        " Your context is 375,000 tokens, at least 75% of the 500,000-token compaction window; " + seam
+    )
+    assert "systemMessage" not in cast("dict[str, object]", said)
+    main.write_bytes(line("assistant", "m0", 900_000) + line("user") + line("assistant", "m1", 374_525))
     said = hook("UserPromptSubmit", project, prompt="go", transcript_path=str(main))[1]
     assert "compaction" not in context_of(said, "UserPromptSubmit")
     assert "systemMessage" not in cast("dict[str, object]", said)
@@ -1163,6 +1662,13 @@ def test_a_prompt_past_the_compaction_window_tells_the_coordinator_and_the_owner
     said = hook("UserPromptSubmit", project, prompt="go", transcript_path=str(main))[1]
     assert "compaction" not in context_of(said, "UserPromptSubmit")
     assert "systemMessage" not in cast("dict[str, object]", said)
+    # A window set for the transcript's model alone is that session's window.
+    settings["modelSettings"] = {"claude-test": {"autoCompactWindow": 1_000_000}}
+    local.write_bytes(json.dumps(settings).encode())
+    said = hook("UserPromptSubmit", project, prompt="go", transcript_path=str(main))[1]
+    assert "900,474 tokens, at least 75% of the 1,000,000-token compaction window" in context_of(
+        said, "UserPromptSubmit"
+    )
 
 
 def test_a_hook_reads_each_agents_transcript_in_the_session_its_input_names(project: Path, state: Path) -> None:

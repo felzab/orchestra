@@ -85,11 +85,14 @@ def test_a_running_records_ended_turn_counts_only_once_silent_and_a_stopped_reco
         "its record is running, and its transcript's turn ended 2 min ago, which its stop hook may still refuse;"
         f" it counts as ended once silent past 15 min, at {at}"
     )
-    assert context.gone(running) is None
+    assert context.ended(running, datetime.datetime.now().astimezone())[1] is None
     later = written + datetime.timedelta(minutes=context.SILENT_MINUTES + 1)
     assert context.ended(running, later)[1] == "its transcript's last message ends its turn"
     assert context.working(reported) is None
-    assert context.gone(reported) == "its transcript's last message ends its turn"
+    assert (
+        context.ended(reported, datetime.datetime.now().astimezone())[1]
+        == "its transcript's last message ends its turn"
+    )
 
 
 def test_a_turn_the_last_64_kib_settle_reads_nothing_before_them(
@@ -108,7 +111,8 @@ def test_a_turn_the_last_64_kib_settle_reads_nothing_before_them(
         # Everything before the last 64 KiB is locked, so a read reaching into it fails.
         msvcrt.locking(held.fileno(), msvcrt.LK_NBLCK, path.stat().st_size - context.FIRST_BYTES)
         try:
-            assert context.gone(model.read_agent(state, "A")) == "its transcript's last message ends its turn"
+            ended = context.ended(model.read_agent(state, "A"), datetime.datetime.now().astimezone())
+            assert ended[1] == "its transcript's last message ends its turn"
         finally:
             held.seek(0)
             msvcrt.locking(held.fileno(), msvcrt.LK_UNLCK, path.stat().st_size - context.FIRST_BYTES)
@@ -136,6 +140,19 @@ def test_the_last_call_is_read_from_the_tail_alone(tmp_path: Path) -> None:
     assert context.last_call(path) is None
     path.write_bytes(line("user"))
     assert context.last_call(path) is None
+
+
+def test_the_last_call_before_a_compaction_reads_as_none_until_the_next_call(tmp_path: Path) -> None:
+    """A compaction between turns shrinks the context, so the call before it no longer measures it."""
+    # The row the harness writes where a compaction ends the conversation it summarised.
+    boundary = b'{"type": "system", "subtype": "compact_boundary", "compactMetadata": {"postTokens": 8160}}\n'
+    path = tmp_path / "main.jsonl"
+    path.write_bytes(line("assistant", "m1", 400_000) + boundary + line("user"))
+    assert context.last_call(path) is None
+    path.write_bytes(line("assistant", "m1", 400_000) + boundary + line("user") + line("assistant", "m2", 46_000))
+    last = context.last_call(path)
+    assert last is not None
+    assert last.get("id") == "m2"
 
 
 def test_a_clock_time_is_rounded_up_to_the_minute() -> None:

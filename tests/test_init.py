@@ -2,16 +2,19 @@
 
 from __future__ import annotations
 
+import argparse
 import dataclasses
 import datetime
+import io
 import json
+import subprocess
 import sys
 from pathlib import Path
 
 import pytest
 
 from conftest import MakeRepo, git, inprocess, write_agent, write_config
-from orchestra import init, model, report, store
+from orchestra import cli, config, init, model, report, store
 from test_report import text
 
 
@@ -36,12 +39,12 @@ def test_init_makes_the_state_the_pointer_and_the_two_skeletons(project: Path) -
     assert b"\r" not in (state / store.PLAN).read_bytes()
     common = Path(git(project, "rev-parse", "--path-format=absolute", "--git-common-dir"))
     assert store.state_dir(project) == state == Path(store.pointer(common, "main").read_bytes().decode().strip())
-    local = json.loads((project / init.SETTINGS_LOCAL).read_bytes())
+    local = json.loads((project / config.SETTINGS_LOCAL).read_bytes())
     assert local == {
         "permissions": {"additionalDirectories": [str(project.parent / "state" / "project")]},
         "autoCompactWindow": 500000,
     }
-    path = project / init.SETTINGS_LOCAL
+    path = project / config.SETTINGS_LOCAL
     assert f"set `autoCompactWindow` to 500000 in {path}, as no settings file sets a window\n" in done.stdout
     # What was seen in a desktop session started from a pre-warmed process, and what is expected but untested.
     user = project.parent / "claude-config" / "settings.json"
@@ -215,7 +218,7 @@ def test_two_clones_sharing_a_folder_name_never_share_a_programme_unasked(tmp_pa
         " or join that one with `--programme proj`\n"
     )
     assert sorted(path.name for path in folder.iterdir() if path.is_dir()) == ["s1", "s2", "s5"]
-    assert not (second / init.SETTINGS_LOCAL).exists()
+    assert not (second / config.SETTINGS_LOCAL).exists()
     own = inprocess("init", "s3", "--programme", "proj-b", cwd=second)
     assert own.returncode == 0, own.stderr
     assert (tmp_path / "state" / "proj-b" / "s3" / store.SESSION).is_file()
@@ -238,27 +241,27 @@ def test_a_state_root_too_wide_or_inside_the_checkout_is_refused(project: Path, 
     done = inprocess("init", "s1", cwd=project, env={"HOME": home, "USERPROFILE": home})
     assert done.returncode == 2, done.stderr
     assert said in done.stderr
-    assert not (project / init.SETTINGS_LOCAL).exists()
+    assert not (project / config.SETTINGS_LOCAL).exists()
 
 
 def test_the_settings_file_init_writes_is_one_git_ignores(project: Path) -> None:
     """It holds this machine's paths, and an untracked file would stop every landing."""
     assert inprocess("init", "s1", cwd=project).returncode == 0
-    git(project, "check-ignore", "-q", init.SETTINGS_LOCAL.as_posix())
+    git(project, "check-ignore", "-q", config.SETTINGS_LOCAL.as_posix())
     assert ".claude/settings.local.json" not in git(project, "status", "--porcelain", "--untracked-files=all")
 
 
 def test_a_tracked_settings_file_is_never_written(project: Path) -> None:
     """No ignore rule reaches a tracked file, so a change to it carries this machine's paths toward a commit."""
-    (project / init.SETTINGS_LOCAL).parent.mkdir(exist_ok=True)
-    (project / init.SETTINGS_LOCAL).write_bytes(b"{}\n")
+    (project / config.SETTINGS_LOCAL).parent.mkdir(exist_ok=True)
+    (project / config.SETTINGS_LOCAL).write_bytes(b"{}\n")
     git(project, "add", "-A")
     git(project, "commit", "-qm", "tracked local settings")
     done = inprocess("init", "s1", cwd=project)
     assert done.returncode == 1, done.stderr
     folder = project.parent / "state" / "project"
     assert (
-        f"{project / init.SETTINGS_LOCAL} is tracked, so it is left as it is: add {folder} to its"
+        f"{project / config.SETTINGS_LOCAL} is tracked, so it is left as it is: add {folder} to its"
         ' `permissions.additionalDirectories` and `"autoCompactWindow": 500000` yourself'
     ) in done.stdout
     assert git(project, "status", "--porcelain") == ""
@@ -271,30 +274,30 @@ def test_the_state_root_joins_the_owners_settings_keeping_every_other_byte(proje
         "env": {"NAME": "Zoë"},
     }
     written = json.dumps(owned, indent=2, ensure_ascii=False) + "\n"
-    (project / init.SETTINGS_LOCAL).write_bytes(written.encode())
+    (project / config.SETTINGS_LOCAL).write_bytes(written.encode())
     assert inprocess("init", "s1", cwd=project).returncode == 0
     folders.append(str(project.parent / "state" / "project"))
     owned["autoCompactWindow"] = 500000
-    held = (project / init.SETTINGS_LOCAL).read_bytes().decode()
+    held = (project / config.SETTINGS_LOCAL).read_bytes().decode()
     assert held == json.dumps(owned, indent=2, ensure_ascii=False) + "\n"
     assert held.startswith(written.split('"../docs/"')[0] + '"../docs/",\n')
 
 
 def test_settings_formatted_by_hand_are_left_alone_and_doctor_names_the_folder(project: Path) -> None:
     hand = b'{"permissions": {"allow": []}}\n'
-    (project / init.SETTINGS_LOCAL).write_bytes(hand)
+    (project / config.SETTINGS_LOCAL).write_bytes(hand)
     done = inprocess("init", "s1", cwd=project)
     assert done.returncode == 1, done.stderr
-    assert (project / init.SETTINGS_LOCAL).read_bytes() == hand
+    assert (project / config.SETTINGS_LOCAL).read_bytes() == hand
     assert "is not in the shape orchestra rewrites, so it is left as it is" in done.stdout
     assert f"MISSING  {project.parent / 'state' / 'project'} as a working directory" in done.stdout
     # Left as it is, it is still kept out of git: an untracked file stops every landing.
-    git(project, "check-ignore", "-q", init.SETTINGS_LOCAL.as_posix())
+    git(project, "check-ignore", "-q", config.SETTINGS_LOCAL.as_posix())
 
 
 def _settings(project: Path, where: str) -> Path:
     return {
-        "local": project / init.SETTINGS_LOCAL,
+        "local": project / config.SETTINGS_LOCAL,
         "project": project / ".claude" / "settings.json",
         "user": project.parent / "claude-config" / "settings.json",
     }[where]
@@ -316,7 +319,7 @@ def test_a_window_any_settings_file_sets_is_left_as_it_is_and_named(
     done = inprocess("init", "s1", cwd=project)
     assert done.returncode == 0, done.stdout + done.stderr
     assert f"`autoCompactWindow` is {settings['autoCompactWindow']} in {path}, so init sets no window" in done.stdout
-    local = json.loads((project / init.SETTINGS_LOCAL).read_bytes())
+    local = json.loads((project / config.SETTINGS_LOCAL).read_bytes())
     assert local.get("autoCompactWindow") == (300000 if where == "local" else None)
 
 
@@ -332,13 +335,13 @@ def test_the_local_settings_file_is_excluded_before_it_is_written_and_a_failed_e
     done = inprocess("init", "s1", cwd=project)
     # Whether the failure is refused or faults is not this case's matter: only that nothing was written.
     assert done.returncode != 0, done.stdout + done.stderr
-    assert not (project / init.SETTINGS_LOCAL).exists()
+    assert not (project / config.SETTINGS_LOCAL).exists()
     # Once the exclusion can be written, `init` runs again rather than finding a session.
     exclude.rmdir()
     exclude.write_bytes(held)
     again = inprocess("init", "s1", cwd=project)
     assert again.returncode == 0, again.stdout + again.stderr
-    git(project, "check-ignore", "-q", init.SETTINGS_LOCAL.as_posix())
+    git(project, "check-ignore", "-q", config.SETTINGS_LOCAL.as_posix())
 
 
 def test_a_window_for_one_model_or_from_the_environment_is_left_as_it_is_and_named_for_what_it_binds(
@@ -355,14 +358,14 @@ def test_a_window_for_one_model_or_from_the_environment_is_left_as_it_is_and_nam
         " a session on another model runs at Claude Code's default window, and init sets no window that would"
         " override it"
     ) in done.stdout
-    assert "autoCompactWindow" not in json.loads((project / init.SETTINGS_LOCAL).read_bytes())
+    assert "autoCompactWindow" not in json.loads((project / config.SETTINGS_LOCAL).read_bytes())
     user.write_bytes(b'{"worktree": {"baseRef": "head"}}\n')
     git(project, "switch", "-q", "-c", "next")
     done = inprocess("init", "s2", cwd=project, env={"CLAUDE_CODE_AUTO_COMPACT_WINDOW": "400000"})
     assert done.returncode == 0, done.stdout + done.stderr
     said = "`CLAUDE_CODE_AUTO_COMPACT_WINDOW` is 400000 in the environment, which outranks every settings key"
     assert f"{said}, so init sets no window" in done.stdout
-    assert "autoCompactWindow" not in json.loads((project / init.SETTINGS_LOCAL).read_bytes())
+    assert "autoCompactWindow" not in json.loads((project / config.SETTINGS_LOCAL).read_bytes())
 
 
 def test_the_window_in_force_is_the_variables_else_the_first_files_for_the_model_or_every_model(
@@ -372,26 +375,26 @@ def test_the_window_in_force_is_the_variables_else_the_first_files_for_the_model
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(project.parent / "claude-config"))
     model = "claude-opus-5-5"
     # With nothing set the session runs at Claude Code's default window, which no file names.
-    assert init.window(project, model) is None
+    assert config.window(project, model) is None
     models = {"modelSettings": {model: {"autoCompactWindow": 300000}}}
     _settings(project, "user").write_bytes(json.dumps({"autoCompactWindow": 900000, **models}).encode())
     # In one file a model's own window outranks the window for every model, and binds that model alone.
-    assert (init.window(project, model), init.window(project, "claude-other"), init.window(project, None)) == (
+    assert (config.window(project, model), config.window(project, "claude-other"), config.window(project, None)) == (
         300000,
         900000,
         900000,
     )
     # A higher-ranked file's window for every model outranks a lower one's for the model.
     _settings(project, "local").write_bytes(b'{"autoCompactWindow": 700000}')
-    assert init.window(project, model) == 700000
+    assert config.window(project, model) == 700000
     # `auto` is the model's tuned window, a figure no file holds.
     tuned = {"modelSettings": {model: {"autoCompactWindow": "auto"}}}
     _settings(project, "local").write_bytes(json.dumps(tuned).encode())
-    assert init.window(project, model) is None
+    assert config.window(project, model) is None
     monkeypatch.setenv("CLAUDE_CODE_AUTO_COMPACT_WINDOW", "400k")
-    assert init.window(project, model) == 400_000
+    assert config.window(project, model) == 400_000
     monkeypatch.setenv("CLAUDE_CODE_AUTO_COMPACT_WINDOW", "1M")
-    assert init.window(project, model) == 1_000_000
+    assert config.window(project, model) == 1_000_000
 
 
 def test_init_refuses_a_session_that_exists_and_a_branch_that_holds_one(project: Path) -> None:
@@ -458,6 +461,25 @@ def test_a_verb_changing_the_record_is_refused_in_an_agents_worktree_and_one_rea
     for args in READING:
         done = inprocess(*args, cwd=agent)
         assert done.returncode == 0, (args, done.stderr)
+
+
+def test_a_command_finds_its_checkout_once_however_many_of_its_parts_ask(
+    project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The guard, the verb and `init`'s doctor each ask, and each answer would cost two git runs."""
+    listed: list[tuple[str, ...]] = []
+    run_git = config.run_git
+
+    def counted(cwd: Path, *args: str) -> subprocess.CompletedProcess[bytes]:
+        if args[:2] == ("worktree", "list"):
+            listed.append(args)
+        return run_git(cwd, *args)
+
+    monkeypatch.setattr(config, "run_git", counted)
+    for args in [("init", "s1"), ("note", "a line")]:
+        listed.clear()
+        done = inprocess(*args, cwd=project)
+        assert (done.returncode, len(listed)) == (0, 1), (args, done.stderr)
 
 
 def test_doctor_names_each_thing_a_session_rests_on_that_fails(project: Path) -> None:
@@ -561,8 +583,25 @@ def test_the_log_prints_its_last_lines_and_says_how_many_are_cut(project: Path) 
         store.append_jsonl(
             _state(project) / store.LOG, {"time": "2026-11-17T10:00:00+01:00", "kind": "note", "text": f"n{k}"}
         )
-    lines = inprocess("log", cwd=project).stdout.splitlines()
-    assert len(lines) == 40
-    assert lines[0].startswith("... 8 earlier line(s)")
+    shown = inprocess("log", cwd=project)
+    lines = shown.stdout.splitlines()
+    # The notice of the cut stands on standard error, so `orchestra log | grep` never drops it unseen.
+    assert shown.stderr == "... 8 earlier line(s): --all prints every one\n"
+    assert len(lines) == 39
+    assert lines[0].endswith("n7")
     assert lines[-2].endswith("n44")
     assert len(inprocess("log", "--all", cwd=project).stdout.splitlines()) == 47
+
+
+def test_the_cut_notice_keeps_its_place_where_the_two_streams_merge(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The Bash tool and a skill's injection merge standard error into standard output, which a pipe buffers."""
+    monkeypatch.setattr(cli, "LINES", 4)
+    for tail, order in ((True, ["notice", "l2", "l3", "sum"]), (False, ["l0", "l1", "notice", "sum"])):
+        merged = io.BytesIO()
+        # Two streams over one sink, as `2>&1` makes them: standard output buffered as a pipe's is.
+        monkeypatch.setattr(sys, "stdout", io.TextIOWrapper(merged, encoding="utf-8"))
+        monkeypatch.setattr(sys, "stderr", io.TextIOWrapper(merged, encoding="utf-8", line_buffering=True))
+        cli.emit(argparse.Namespace(all=False), ["l0", "l1", "l2", "l3"], "sum", tail=tail)
+        sys.stdout.flush()
+        said = merged.getvalue().decode().splitlines()
+        assert ["notice" if line.startswith("... 2 ") else line for line in said] == order

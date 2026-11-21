@@ -7,8 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from conftest import inprocess, orchestra, write_agent
-from orchestra import FAULT, model, store
+from conftest import MakeSession, inprocess, orchestra, write_agent
+from orchestra import FAULT, log, model, store
 from orchestra import queue as items
 from orchestra.status import paced
 
@@ -16,10 +16,13 @@ EARLY = "2026-11-17T10:00:00+01:00"
 LATER = "2026-11-17T11:00:00+01:00"
 
 
-@pytest.fixture
-def state(project: Path) -> Path:
+def _session(project: Path) -> None:
     assert inprocess("init", "s1", cwd=project).returncode == 0
-    held = store.state_dir(project)
+
+
+@pytest.fixture
+def state(make_session: MakeSession) -> Path:
+    held = make_session("queue", _session)
     write_agent(held, model.Agent("A", "writer", "running"))
     return held
 
@@ -60,8 +63,50 @@ def test_a_landed_item_never_falls_due_when_its_agent_is_discarded(project: Path
     assert inprocess("prune", "--discard", "B", cwd=project).returncode == 0
     assert model.read_agent(state, "B").status == "pruned"
     assert numbers(state) == []
-    said = "which was discarded and never lands: `orchestra queue done 1` ends it"
+    said = "which settled with nothing landed and never lands: `orchestra queue done 1` ends it"
     assert any(said in line for line in paced(state))
+
+
+@pytest.mark.parametrize(
+    ("outcome", "since", "due"),
+    [
+        # Stopped by a limit before its first commit, then settled by a plain prune: nothing of it landed.
+        (None, {}, []),
+        # A DONE report whose branch was lost before it landed: its report alone lands nothing.
+        ("DONE", {}, []),
+        # `land` stamps the landing, the session branch holding its branch already or not.
+        ("DONE", {"landed": EARLY}, [1]),
+    ],
+)
+def test_a_landed_item_falls_due_for_a_pruned_agent_only_where_its_work_landed(
+    state: Path, outcome: str | None, since: dict[str, str], due: list[int]
+) -> None:
+    held = model.Agent("B", "writer", "pruned", outcome=outcome, reason="You've hit your limit", since=since)
+    write_agent(state, held)
+    queued(state, model.QueueItem(1, "landed", "tell X the contract landed", "B", time=EARLY))
+    assert numbers(state) == due
+    if not due:
+        said = "which settled with nothing landed and never lands: `orchestra queue done 1` ends it"
+        assert any(said in line for line in paced(state))
+
+
+def test_due_given_the_records_and_the_log_reads_neither_again(monkeypatch: pytest.MonkeyPatch, state: Path) -> None:
+    """The turn-end hook holds both already, and each read costs it a pass over the state."""
+    store.append_jsonl(state / store.LOG, {"time": LATER, "kind": items.CI_READ, "text": "run 1 concluded"})
+    queued(
+        state,
+        model.QueueItem(1, "ci", "push the fix", time=EARLY),
+        model.QueueItem(2, "landed", "dispatch B", "A", time=EARLY),
+    )
+    status(state, "A", "landed")
+    agents, entries = model.agents(state), log.entries(state)
+
+    def unread(_state: Path) -> list[object]:
+        raise AssertionError("read again")
+
+    monkeypatch.setattr(model, "agents", unread)
+    monkeypatch.setattr(log, "entries", unread)
+    assert [item.number for item in items.due(state, agents, entries)] == [1, 2]
 
 
 def reported(state: Path, at: str) -> None:
@@ -105,7 +150,10 @@ def test_add_and_done_number_the_items_and_log_the_end(project: Path, state: Pat
 @pytest.mark.parametrize(
     ("args", "said"),
     [
-        (["add", "--when", "landed:NOBODY", "x"], "no agent NOBODY in this session"),
+        (
+            ["add", "--when", "landed:NOBODY", "x"],
+            "no agent NOBODY in this session and no slice of PLAN.md: `orchestra status` lists both",
+        ),
         (["add", "--when", "merged:A", "x"], "`merged:A` is none of ci, landed:NAME and reported:NAME"),
     ],
 )
@@ -114,6 +162,43 @@ def test_an_event_naming_no_agent_or_no_kind_is_refused(project: Path, state: Pa
     assert done.returncode == 2
     assert said in done.stderr
     assert model.read_queue(state) == {}
+
+
+def test_a_name_with_no_record_is_refused_by_the_missing_plan_that_could_name_its_slice(
+    project: Path, state: Path
+) -> None:
+    """With no PLAN.md the name may still be a slice's, so the refusal names the plan that is gone."""
+    (state / store.PLAN).unlink()
+    done = inprocess("queue", "add", "--when", "landed:NOBODY", "x", cwd=project)
+    assert done.returncode == 2
+    assert done.stderr.strip() == (
+        f"orchestra queue: {state / store.PLAN} is missing: write it again under the headings `orchestra init` gives it"
+    )
+    assert model.read_queue(state) == {}
+
+
+def test_an_item_may_wait_on_a_planned_slice_no_agent_took_yet(project: Path, state: Path) -> None:
+    """Its writer is briefed later under a name of its own, as brief.md's example names one: due once it lands."""
+    store.write_text(state / store.PLAN, "# Plan\n\n## Slices and their files\n\n- [ ] LATER `b.txt`\n")
+    # A report is an agent's, so a planned slice no agent took yet is no `reported:` event's: it would never fall due.
+    refused = inprocess("queue", "add", "--when", "reported:LATER", "x", cwd=project)
+    assert refused.returncode == 2
+    assert "no agent LATER in this session: `reported:` names an agent" in refused.stderr
+    assert model.read_queue(state) == {}
+    added = inprocess("queue", "add", "--when", "landed:LATER", "dispatch", "C", cwd=project)
+    assert added.returncode == 0, added.stderr
+    assert added.stdout.splitlines() == ["  1  waits  landed:LATER              dispatch C"]
+    assert numbers(state) == []
+    body = project.parent / "body.md"
+    body.write_bytes(b"Rows: none\nWrites: none\nLens: none\n\nGOAL      x\nWORK      x\nPREMISES  x\nTRAPS     x\n")
+    # Its check refuses beside A, which the fixture records with no brief; the header written is what is read.
+    inprocess("brief", "API-RETRY", "--type", "writer", "--slice", "LATER", "--body", str(body), cwd=project)
+    assert "Slice: LATER" in (state / "briefs" / "API-RETRY.md").read_bytes().decode()
+    status(state, "API-RETRY", "running")
+    assert numbers(state) == []
+    assert "waits     #1 (when landed:LATER) dispatch C: waits on slice LATER, which has not landed" in paced(state)
+    status(state, "API-RETRY", "landed")
+    assert numbers(state) == [1]
 
 
 def test_a_fault_exits_with_a_code_of_its_own_and_prints_its_trace(project: Path, state: Path) -> None:

@@ -11,8 +11,11 @@ from pathlib import Path
 
 import pytest
 
-from conftest import claude_stub, git, inprocess, line, transcript, usage_answer, write_agent, write_config
-from orchestra import ci, model, override, status, store
+from conftest import MakeSession, claude_stub, git, inprocess, line, transcript, usage_answer, write_agent, write_config
+from orchestra import brief, ci, log, model, override, report, status, store
+from test_hooks import _session as hooks_session  # pyright: ignore[reportPrivateUsage]
+from test_hooks import briefed, changed, dispatched, run
+from test_report import text
 
 PLAN = """# Plan
 
@@ -68,11 +71,14 @@ def _ran(project: Path, ident: str, *, minutes: float, ended: bool = False, read
     transcript(folder, ident, line("assistant", "m1", read, calls=not ended), session="session-1", minutes=minutes)
 
 
-@pytest.fixture
-def built(project: Path) -> Path:
-    """A session with an agent in every state status reads, its findings, queue, plan and a drifted file."""
+def _session(project: Path) -> None:
     assert inprocess("init", "s1", cwd=project).returncode == 0
-    state = _state(project)
+
+
+@pytest.fixture
+def built(project: Path, make_session: MakeSession) -> Path:
+    """A session with an agent in every state status reads, its findings, queue, plan and a drifted file."""
+    state = make_session("status", _session)
     store.write_text(state / store.PLAN, PLAN)
     # Queued before the agents' records, so DONE's report, stamped as its record is written, comes after it.
     model.write_queue(
@@ -194,6 +200,19 @@ def test_the_drift_names_five_pairs_of_slices_and_counts_the_rest(project: Path,
     assert len(lines) == 6
     more = "1 more pair(s) of slices share files likewise: each is named here once those above are ordered"
     assert lines[-1] == f"drift     {more}"
+
+
+def test_a_path_the_session_deleted_or_moved_on_a_line_still_to_do_drifts(project: Path, built: Path) -> None:
+    """`waits` and the overlaps read a line's paths as written, so a path a landing moved misses a real overlap."""
+    plan = PLAN.replace("- [ ] S3 tests/\n", "- [ ] S3 tests/\n- [ ] S5 `README`, `notes/a.md`\n- [x] S6 `README`\n")
+    store.write_text(built / store.PLAN, plan)
+    git(project, "rm", "-q", "README")
+    git(project, "commit", "-m", "moved")
+    lines = _lines(inprocess("status", cwd=project))
+    # The ticked slice is done, so its line names nothing still to do.
+    assert [line for line in lines if "deleted or moved" in line] == [
+        "drift     slice S5 names `README`, which the session deleted or moved since its base"
+    ]
 
 
 def test_a_row_is_marked_for_a_re_plan_once_routed_to_three_agents_and_never_for_its_queues(
@@ -328,8 +347,8 @@ def test_measure_gives_the_figures_an_estimate_starts_from(project: Path, built:
     # QUIET's dispatch has no line in the log, so its minutes are not guessed from its record.
     assert any(line.startswith("running   QUIET (writer): minutes unknown, context ") for line in lines)
     assert [line for line in lines if line.startswith("unticked")] == [
-        "unticked  S2 docs/guide.md",
-        "unticked  S3 tests/",
+        "unticked  S2, 0 file(s)",
+        "unticked  S3, 0 file(s)",
         "unticked  S2 before S3",
         "unticked  the ending's checklist",
     ]
@@ -363,6 +382,79 @@ def test_measure_sums_a_resumed_agents_rounds_and_counts_no_wait_between_them(pr
     assert any(line.startswith("running   FRESH (writer): 7 min since its dispatch or resume,") for line in lines)
 
 
+def test_measure_names_an_unticked_slice_by_its_id_its_count_of_files_and_its_edges(project: Path, built: Path) -> None:
+    """PLAN.md holds every path, and a wide slice's line repeated whole ran a reading to kilobytes."""
+    files = ", ".join(f"`docs/part{k}.md`" for k in range(30))
+    wide = f"- [ ] S7 the parts {files} after: S2, S3\n"
+    store.write_text(built / store.PLAN, PLAN.replace("- [ ] S3 tests/\n", f"- [ ] S3 tests/\n{wide}"))
+    lines = _lines(inprocess("status", "--measure", cwd=project))
+    assert [line for line in lines if line.startswith("unticked")] == [
+        "unticked  S2, 0 file(s)",
+        "unticked  S3, 0 file(s)",
+        "unticked  S7, 30 file(s), after S2, S3",
+        "unticked  S2 before S3",
+        "unticked  the ending's checklist",
+    ]
+    # A slice landed and not ticked is said to be done.
+    _agent(built, model.Agent("W7", "writer", "landed", reports={1: "r"}), slice_="S7", owns="docs/**")
+    lines = _lines(inprocess("status", "--measure", cwd=project))
+    assert "unticked  S7, 30 file(s), after S2, S3: landed, so done; tick its line" in lines
+
+
+def test_measure_names_the_longest_chain_of_slices_still_to_do_and_each_tied_with_it(
+    project: Path, built: Path
+) -> None:
+    """The estimate's critical path starts from it, which coordinators counted by hand and missed."""
+    added = "- [ ] S5 `a.md`\n- [ ] S6 `b.md` after: S5\n- [ ] S7 `c.md` after: S5, S1\n- [ ] S8 `d.md` after: S6, S7\n"
+    store.write_text(built / store.PLAN, PLAN.replace("- [ ] S3 tests/\n", f"- [ ] S3 tests/\n{added}"))
+
+    def chain() -> list[str]:
+        return [line for line in _lines(inprocess("status", "--measure", cwd=project)) if line.startswith("chain")]
+
+    # S1 is ticked, so the edge to it holds nothing back.
+    assert chain() == ["chain     3 slice(s) deep, 2 chains tied, each first to last: S5, S6, S8; S5, S7, S8"]
+    more = PLAN.replace("- [ ] S3 tests/\n", f"- [ ] S3 tests/\n{added}- [ ] S9 `e.md` after: S6, S7\n")
+    store.write_text(built / store.PLAN, more)
+    tied = "S5, S6, S8; S5, S7, S8; S5, S6, S9; and 1 more"
+    assert chain() == [f"chain     3 slice(s) deep, 4 chains tied, each first to last: {tied}"]
+    # A slice landed ends the chain as a ticked one does.
+    _agent(built, model.Agent("W5", "writer", "landed", reports={1: "r"}), slice_="S5", owns="a.md")
+    tied = "S6, S8; S7, S8; S6, S9; and 1 more"
+    assert chain() == [f"chain     2 slice(s) deep, 4 chains tied, each first to last: {tied}"]
+    store.write_text(built / store.PLAN, "# Plan\n\n## Slices and their files\n\n- [ ] S5 `a.md`\n- [x] S2 `b.md`\n")
+    assert chain() == ["chain     no unfinished slice"]
+    store.write_text(built / store.PLAN, "# Plan\n\n## Slices and their files\n\n- [ ] S2 `b.md`\n")
+    assert chain() == ["chain     1 slice(s) deep, first to last: S2"]
+    # A plan whose edges close a cycle still gets its row, the edge closing it not followed.
+    cycle = "# Plan\n\n## Slices and their files\n\n- [ ] S2 `b.md` after: S3\n- [ ] S3 `c.md` after: S2\n"
+    store.write_text(built / store.PLAN, cycle)
+    assert chain() == ["chain     2 slice(s) deep, first to last: S3, S2"]
+
+
+def test_measure_gives_the_minutes_from_each_landing_to_the_next_writers_dispatch(project: Path, built: Path) -> None:
+    def hop() -> list[str]:
+        return [line for line in _lines(inprocess("status", "--measure", cwd=project)) if line.startswith("hop")]
+
+    for name in ("W0", "W1", "W2", "W3", "W4"):
+        write_agent(built, model.Agent(name, "writer", "running"))
+    write_agent(built, model.Agent("READ", "auditor", "running"))
+    write_agent(built, model.Agent("PROBE", "driver", "running"))
+    assert hop() == ["hop       no landing has been followed by a writer's dispatch yet"]
+    # A dispatch with no landing before it is no hop, and a landing with no dispatch after it is none yet.
+    _dispatch(built, "W0", 60)
+    _logged(built, "land", "W1 landed as abc1234", 50)
+    # A reader or a driver sent after a landing moves no slice on, so the hop runs on to the next writer.
+    _dispatch(built, "READ", 48)
+    _dispatch(built, "W2", 46)
+    _dispatch(built, "W3", 40)
+    _logged(built, "land", "W2 landed as def5678", 30)
+    _dispatch(built, "PROBE", 25)
+    _dispatch(built, "W4", 20)
+    _logged(built, "land", "W4 landed as 0123456", 5)
+    _dispatch(built, "READ", 2)
+    assert hop() == ["hop       2 hop(s) from a landing to the next writer's dispatch, median 7 min, longest 10 min"]
+
+
 def test_measure_lists_what_waits_and_the_context_of_each_agent_holding_rows(project: Path, built: Path) -> None:
     """A slice no agent took reads free unless a running writer's brief owns one of its files."""
     plan = PLAN.replace("- [ ] S3 tests/\n", "- [ ] S3 tests/\n- [ ] S7 `docs/`\n")
@@ -392,6 +484,99 @@ def test_a_slice_after_another_waits_until_that_one_is_ticked(project: Path, bui
     ]
 
 
+def test_a_landed_slice_is_done_before_its_line_is_ticked(project: Path, built: Path) -> None:
+    """`land` writes no tick, so what is after a slice just landed reads free at once, and the end asks for the tick."""
+    added = "- [ ] S5 `notes/a.md`\n- [ ] S6 `notes/c.md` after: S5\n- [ ] S7 `notes/a.md`\n"
+    store.write_text(built / store.PLAN, PLAN.replace("- [ ] S3 tests/\n", f"- [ ] S3 tests/\n{added}"))
+    _agent(built, model.Agent("W5", "writer", "landed", reports={1: "r"}), slice_="S5", owns="notes/a.md")
+    measured = _lines(inprocess("status", "--measure", cwd=project))
+    assert "waits     slice S6, which no agent took: its files are free" in measured
+    # A landed slice shares no file with what is still planned.
+    assert not any("slices S5 and S7" in line for line in _lines(inprocess("status", cwd=project)))
+    ticked = "S5: its agents landed; tick its line in PLAN.md"
+    assert f"NOT held  no landed slice unticked: {ticked}" in _lines(inprocess("status", "--end", cwd=project))
+    # A second agent on the slice still at work keeps it open.
+    _agent(built, model.Agent("W5B", "writer", "briefed"), slice_="S5", owns="notes/a.md")
+    measured = _lines(inprocess("status", "--measure", cwd=project))
+    assert "waits     slice S6, which no agent took: it is after S5, which is unticked" in measured
+    assert any(line.startswith("drift     slices S5 and S7 share") for line in _lines(inprocess("status", cwd=project)))
+    assert "held      no landed slice unticked" in _lines(inprocess("status", "--end", cwd=project))
+
+
+CHAINED = (
+    "# Plan\n\n## Slices and their files\n\n- [ ] S1 `lib/a.py`\n- [ ] S2 `lib/b.py` after: S1\n\n"
+    "## Ending\n\n- [ ] the checklist\n"
+)
+S1_DONE = "unticked  S1, 1 file(s): landed, so done; tick its line"
+S2_FREE = "waits     slice S2, which no agent took: its files are free"
+S2_HELD = "waits     slice S2, which no agent took: it is after S1, which is unticked"
+
+
+@pytest.fixture
+def chained(project: Path, make_session: MakeSession) -> Path:
+    """A session whose writer W, dispatched as `w1`, is on S1, the slice S2 is after."""
+    # The session test_hooks.py's `state` makes.
+    state = make_session("hooks", hooks_session)
+    store.write_text(state / store.PLAN, CHAINED)
+    briefed(project, "W", "writer")
+    dispatched(project, "W", "writer", "w1")
+    return state
+
+
+def test_a_writer_pruned_before_its_first_commit_leaves_its_slice_to_do(project: Path, chained: Path) -> None:
+    """A usage limit stops it with nothing committed, and the checkpoint's plain `prune` settles it.
+
+    Its tree goes with its branch, here by the prune, which makes the slice no more landed than Claude Code's own
+    cleanup would; test_prune.py holds the prune of a record whose tree and branch are gone already.
+    """
+    worktree = project.parent / "trees" / "agent-w1"
+    git(project, "worktree", "add", "-b", "worktree-agent-w1", str(worktree))
+    changed(chained, "W", status="stopped", reason="You've hit your limit", branch="worktree-agent-w1")
+    assert run("prune", cwd=project).returncode == 0
+    assert model.read_agent(chained, "W").status == "pruned"
+    measured = _lines(run("status", "--measure", cwd=project))
+    assert S1_DONE not in measured
+    assert "waits     slice S1, which no agent took: its files are free" in measured
+    assert S2_HELD in measured
+    ended = _lines(run("status", "--end", cwd=project))
+    assert "held      no landed slice unticked" in ended
+    assert "NOT held  no planned slice untaken: S1, S2" in " ".join(ended)
+
+
+@pytest.mark.parametrize(
+    ("outcome", "delivered"),
+    [("DONE", True), ("NEEDS-ANSWER: keep the old endpoint?", False)],
+    ids=["a DONE report", "a question no answer reached"],
+)
+def test_a_writer_whose_branch_the_session_already_holds_lands_its_slice_only_where_it_delivered(
+    project: Path, chained: Path, outcome: str, *, delivered: bool
+) -> None:
+    """`land` finds nothing to land, the branch holding no commit of its own, and stamps the landing only where
+    the report calls its work done; a question judged as it stands delivered nothing, so its slice is still to do."""
+    git(project, "branch", "worktree-agent-w1")
+    report.path(chained, "W").write_bytes(text("writer", "W", status=outcome).encode())
+    changed(chained, "W", status="judged", outcome=outcome.partition(":")[0], branch="worktree-agent-w1")
+    landed = run("land", "W", cwd=project)
+    assert "nothing to land" in landed.stdout, landed.stderr
+    agent = model.read_agent(chained, "W")
+    assert (agent.status, "landed" in agent.since) == ("pruned", delivered)
+    measured = _lines(run("status", "--measure", cwd=project))
+    assert (S1_DONE in measured, S2_FREE in measured, S2_HELD in measured) == (delivered, delivered, not delivered)
+
+
+def test_a_discarded_agents_slice_reads_planned_and_its_owns_excuses_no_drift(project: Path, built: Path) -> None:
+    """`prune --discard` settles an agent with nothing landed, so its slice is still to do and its files unowned."""
+    gone = model.Agent("GONE", "writer", "pruned", reports={1: "r"}, reason=model.DISCARDED)
+    _agent(built, gone, slice_="S3", owns="docs/stray.md")
+    lines = _lines(inprocess("status", cwd=project))
+    assert "planned   S3" in lines
+    assert "drift     docs/stray.md: changed since the base, and no landed brief or ticked slice owns it" in lines
+    untaken = "S3: no agent took it; dispatch it, tick it if you did it, or remove its line"
+    assert f"NOT held  no planned slice untaken: {untaken}" in _lines(inprocess("status", "--end", cwd=project))
+    measured = _lines(inprocess("status", "--measure", cwd=project))
+    assert "waits     slice S3, which no agent took: its files are free" in measured
+
+
 def test_a_wide_slice_names_each_holding_writer_once_with_a_count(project: Path, built: Path) -> None:
     """A clause a path ran a judge and a land to kilobytes a line; `--measure` alone lists the paths."""
     _brief(built, "FRESH", "writer", "S2", "docs/**")
@@ -403,6 +588,47 @@ def test_a_wide_slice_names_each_holding_writer_once_with_a_count(project: Path,
     assert said in status.paced(built)
     measured = _lines(inprocess("status", "--measure", cwd=project))
     assert said + ": " + ", ".join(f"`{path}`" for path in files) in measured
+
+
+def test_the_waits_lines_read_each_brief_once_while_an_item_waits_on_a_slice(
+    built: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An item naming a slice asks which slices landed, which reads every brief; the view's own read serves it."""
+    model.write_queue(built, lambda held: [*held.values(), model.QueueItem(3, "landed", "push", agent="S2")])
+    read: list[str] = []
+    header = brief.header
+
+    def counted(state: Path, name: str) -> brief.Header:
+        read.append(name)
+        return header(state, name)
+
+    monkeypatch.setattr(brief, "header", counted)
+    assert "waits     #3 (when landed:S2) push: waits on slice S2, which has not landed" in status.paced(built)
+    assert sorted(read) == sorted(agent.name for agent in model.agents(built))
+
+
+def test_the_end_reads_the_log_once_and_each_brief_once(
+    project: Path, built: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Every section of the view reads what the view read first, since no view writes the log or a brief."""
+    entries: list[Path] = []
+    headers: list[str] = []
+    logged, header = log.entries, brief.header
+
+    def counted_log(state: Path) -> list[log.Entry]:
+        entries.append(state)
+        return logged(state)
+
+    def counted_header(state: Path, name: str) -> brief.Header:
+        headers.append(name)
+        return header(state, name)
+
+    monkeypatch.setattr(log, "entries", counted_log)
+    monkeypatch.setattr(brief, "header", counted_header)
+    done = inprocess("status", "--end", cwd=project)
+    assert done.returncode in {0, 1}, done.stderr
+    assert len(entries) == 1
+    assert sorted(headers) == sorted(agent.name for agent in model.agents(built))
 
 
 def test_a_verb_closes_on_five_waits_lines_and_a_count_of_the_rest(built: Path) -> None:
@@ -446,7 +672,7 @@ def test_end_holds_each_machine_checkable_line_or_names_what_breaks_it(project: 
     untaken = "S3: no agent took it; dispatch it, tick it if you did it, or remove its line"
     assert f"NOT held  no planned slice untaken: {untaken}" in lines
     assert "held      no frozen tree left" in lines
-    assert lines[-1] == "end: 2 of 10 lines held"
+    assert lines[-1] == "end: 3 of 11 lines held"
 
 
 def test_an_override_waiting_is_listed_and_holds_the_end_open_until_dropped(project: Path, built: Path) -> None:

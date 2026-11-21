@@ -2,14 +2,15 @@
 
 from __future__ import annotations
 
+import json
 import sys
 from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
-from conftest import MakeRepo, git
-from orchestra import land, model
+from conftest import MakeSession, git
+from orchestra import land, log, model, prune
 from orchestra.config import Step
 from test_prune import TRASH, Fleet, add_agent, commit, make_fleet, ran, route, wait_gone, write
 from test_report import text
@@ -50,9 +51,13 @@ STEPS = [
 
 
 @pytest.fixture
-def fleet(tmp_path: Path, make_repo: MakeRepo) -> Fleet:
-    made = make_fleet(make_repo(tmp_path / "project"), {"land": {"steps": STEPS}})
-    hooks = tmp_path / "hooks"
+def fleet(project: Path, make_session: MakeSession) -> Fleet:
+    return Fleet(project, make_session("land", _landing))
+
+
+def _landing(root: Path) -> None:
+    made = make_fleet(root, {"land": {"steps": STEPS}})
+    hooks = root.parent / "hooks"
     # Git runs a hook only where its executable bit is set, which a Windows checkout does not need.
     write(hooks, "commit-msg", COMMIT_MSG_HOOK).chmod(0o755)
     write(hooks, "prepare-commit-msg", PREPARE_HOOK).chmod(0o755)
@@ -74,7 +79,6 @@ def fleet(tmp_path: Path, make_repo: MakeRepo) -> Fleet:
     # The install's output is ignored, as an install folder is.
     with (made.root / ".git" / "info" / "exclude").open("ab") as excluded:
         excluded.write(b"installed.txt\n")
-    return made
 
 
 def agent(fleet: Fleet, name: str = "WORKER", ident: str = "a1") -> Path:
@@ -178,9 +182,8 @@ def test_a_row_routed_back_after_a_landing_is_closed_by_the_latest_report_alone(
     ("status", "turn", "after"),
     [
         ("judged", "ended", "pruned"),
-        ("running", "mid-turn", "running"),
-        ("running", "silent", "running"),
         ("running", "unseen", "running"),
+        ("judged", "mid-turn", "judged"),
         ("reported", "ended", "reported"),
         ("stopped", "ended", "stopped"),
     ],
@@ -194,10 +197,10 @@ def test_a_landing_credits_every_agent_whose_branch_it_brought_in(
     """
     fixer = agent(fleet, "FIXER", "b1")
     model.update_agent(fleet.state, "FIXER", lambda held: replace(held, status=status))
-    # A `running` record whose turn ended long ago is a stop hook that never ran: its report is still unjudged.
-    # One with no transcript found is still running all the same, which only its record says.
+    # A `running` record is kept by its status alone, whatever its transcript shows; one with none found is too.
+    # A judged one whose transcript is mid-turn may still be working, though no report of it waits.
     if turn != "unseen":
-        ran(fleet, "b1", ended=turn != "mid-turn", minutes=20 if turn == "silent" else None)
+        ran(fleet, "b1", ended=turn != "mid-turn")
     write(fleet.state, "reports/FIXER.md", text("writer", "FIXER", fixed="A-F1."))
     commit(fixer, "Docs: A note", {"notes.txt": "second\n"})
     merger = agent(fleet, "MERGER", "b2")
@@ -241,9 +244,38 @@ def test_a_landing_credits_no_agent_whose_branch_had_landed_before_it(fleet: Fle
     assert "A-F2 is named fixed and is ROUTED FIRST, so it stands as it is" in out
 
 
+def test_a_landing_carries_no_settled_agent_and_looks_up_none_of_their_branches(
+    fleet: Fleet, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A pruned agent's branch outlives its record where its prune could not delete it, as a merge agent may carry it.
+    Its work was credited when it settled, so a later landing neither credits it again nor asks git for its branch.
+    """
+    fixer = agent(fleet, "FIXER", "d1")
+    write(fleet.state, "reports/FIXER.md", text("writer", "FIXER", fixed="A-F1."))
+    commit(fixer, "Docs: A note", {"notes.txt": "second\n"})
+    merger = agent(fleet, "MERGER", "d2")
+    git(merger, "merge", "-q", "--no-ff", "worktree-agent-d1", "-m", "Merge the fixer")
+    commit(merger, "Docs: Another file", {"other.txt": "new\n"})
+    model.update_agent(fleet.state, "FIXER", lambda held: replace(held, status="pruned"))
+    route(fleet, "A-F1", "FIXER")
+    asked: list[str] = []
+    real = prune.branch_exists
+
+    def counted(root: Path, branch: str) -> bool:
+        asked.append(branch)
+        return real(root, branch)
+
+    monkeypatch.setattr(prune, "branch_exists", counted)
+    code, out, err = fleet.run("land", "MERGER")
+    assert code == 0, err
+    assert out.splitlines()[-1].startswith("landed MERGER as "), out
+    assert "worktree-agent-d1" not in asked
+    assert model.read_findings(fleet.state)["A-F1"].status == "ROUTED"
+
+
 def test_a_branch_merged_before_its_bookkeeping_is_settled_by_landing_it_again(fleet: Fleet) -> None:
-    """A landing stopped after its merge commit, or a merge or fast-forward by hand, leaves rows routed and its
-    agent unlanded; landing it ends both. A branch with no commit of its own, behind them, is credited nothing."""
+    """A landing stopped after its merge commit, or a merge by hand, leaves rows routed and its agent unlanded;
+    landing it ends both. A branch with no commit of its own, behind them, is credited nothing."""
     agent(fleet, "EMPTY", "e1")
     route(fleet, "A-F3", "EMPTY")
     tree = agent(fleet)
@@ -264,15 +296,90 @@ def test_a_branch_merged_before_its_bookkeeping_is_settled_by_landing_it_again(f
     assert code == 0, err
     assert out.splitlines()[-1] == "nothing to land: the session branch already holds worktree-agent-e1"
     assert model.read_findings(fleet.state)["A-F3"].status == "ROUTED"
-    fast = agent(fleet, "FAST", "f1")
-    write(fleet.state, "reports/FAST.md", text("writer", "FAST", fixed="A-F2."))
-    tip = git(fleet.root, "rev-parse", "--short", commit(fast, "Docs: B", {"other.txt": "b\n"}))
-    route(fleet, "A-F2", "FAST")
-    git(fleet.root, "merge", "-q", "--ff-only", "worktree-agent-f1")
-    code, out, err = fleet.run("land", "FAST")
+
+
+def test_a_branch_fast_forwarded_onto_another_agents_landing_has_nothing_to_land(fleet: Fleet) -> None:
+    """A branch with no commit of its own that took in the session branch, as an agent merges it into its own,
+    fast-forwards onto another agent's merge: that merge is no landing of its, so its claim closes nothing."""
+    late = agent(fleet, "LATE", "g1")
+    tree = agent(fleet)
+    commit(tree, "Docs: A note", {"notes.txt": "second\n"})
+    assert fleet.run("land", "WORKER")[0] == 0
+    git(late, "merge", "-q", "main")
+    assert git(late, "rev-parse", "HEAD") == head(fleet)
+    write(fleet.state, "reports/LATE.md", text("writer", "LATE", fixed="A-F1."))
+    route(fleet, "A-F1", "LATE")
+    code, out, err = fleet.run("land", "LATE")
     assert code == 0, err
-    assert out.splitlines()[0] == f"worktree-agent-f1 was merged already, as {tip}: its bookkeeping is done now"
-    assert model.read_findings(fleet.state)["A-F2"].evidence == tip
+    assert out.splitlines()[-1] == "nothing to land: the session branch already holds worktree-agent-g1", out
+    assert model.read_findings(fleet.state)["A-F1"].status == "ROUTED"
+
+
+def test_a_round_stopped_before_its_report_with_nothing_to_land_is_not_stamped_by_the_round_before(
+    fleet: Fleet,
+) -> None:
+    """A resume and a limit's stop each keep the outcome the round before reported, so only a judged record's
+    outcome is its latest round's word, and a stopped round that delivered nothing frees no slice."""
+    agent(fleet)
+    write(fleet.state, "reports/WORKER.md", text("writer", "WORKER"))
+    resumed = {1: "2026-11-21T08:00:00+00:00", 2: "2026-11-21T09:00:00+00:00"}
+    model.update_agent(
+        fleet.state,
+        "WORKER",
+        lambda held: replace(held, status="stopped", outcome="DONE", reports=resumed, reason="You've hit your limit"),
+    )
+    code, out, err = fleet.run("land", "WORKER")
+    assert code == 0, err
+    assert out.splitlines()[-1] == "nothing to land: the session branch already holds worktree-agent-a1", out
+    assert "landed" not in model.read_agent(fleet.state, "WORKER").since
+    assert not [entry for entry in log.entries(fleet.state) if entry.kind == "land"]
+
+
+def test_a_round_judged_from_a_record_no_report_hook_moved_is_stamped_by_its_own_word(fleet: Fleet) -> None:
+    """Only the stop hook writes `outcome`, and `judge` takes a report from a record that hook never moved to
+    `reported`, a limit's stop among them, so the judged round's own status is what the record keeps."""
+    agent(fleet)
+    resumed = {1: "2026-11-21T08:00:00+00:00", 2: "2026-11-21T09:00:00+00:00"}
+    # Round 1 stopped BLOCKED; round 2 wrote a DONE report and then hit a limit, which keeps that outcome.
+    model.update_agent(
+        fleet.state,
+        "WORKER",
+        lambda held: replace(held, status="stopped", outcome="BLOCKED", reports=resumed, reason="limit"),
+    )
+    write(fleet.state, "reports/WORKER.md", text("writer", "WORKER", status="BLOCKED"))
+    write(fleet.state, "reports/WORKER.2.md", text("writer", "WORKER", round_=2))
+    # The dispositions go before the option: Python 3.11 refuses positional arguments after it.
+    code, out, err = fleet.run("judge", "WORKER", "F1=close:MOOT:x", "F2=close:MOOT:x", "--verdict", "done")
+    assert code == 0, out + err
+    code, out, err = fleet.run("land", "WORKER")
+    assert code == 0, err
+    assert out.splitlines()[-1] == "nothing to land: the session branch already holds worktree-agent-a1", out
+    assert "landed" in model.read_agent(fleet.state, "WORKER").since
+    landed = [entry.text for entry in log.entries(fleet.state) if entry.kind == "land"]
+    assert landed == ["WORKER landed: the session branch already holds worktree-agent-a1"]
+
+
+def test_a_record_a_hook_changes_while_the_landing_runs_its_git_keeps_what_the_hook_wrote(
+    fleet: Fleet, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The stamp is decided on the record read before the preflight's git commands, as a resume may land meanwhile."""
+    agent(fleet)
+    write(fleet.state, "reports/WORKER.md", text("writer", "WORKER"))
+    model.update_agent(fleet.state, "WORKER", lambda held: replace(held, outcome="DONE"))
+    checked = land.preflight
+
+    def resumed(root: Path, branch: str) -> None:
+        model.update_agent(fleet.state, "WORKER", lambda held: replace(held, status="running"))
+        checked(root, branch)
+
+    monkeypatch.setattr(land, "preflight", resumed)
+    code, out, err = fleet.run("land", "WORKER")
+    assert code == 0, err
+    assert out.splitlines()[-1] == "nothing to land: the session branch already holds worktree-agent-a1", out
+    held = model.read_agent(fleet.state, "WORKER")
+    assert (held.status, "landed" in held.since) == ("running", False)
+    # Nor does the log record a landing the record was kept from.
+    assert not [entry for entry in log.entries(fleet.state) if entry.kind == "land"]
 
 
 def test_a_merge_touching_a_steps_paths_installs_regenerates_and_checks(fleet: Fleet) -> None:
@@ -296,6 +403,22 @@ def test_a_conflict_in_a_regenerated_file_is_answered_by_regenerating_it(fleet: 
     assert git(fleet.root, "show", "HEAD:doc.json") == '{"a": 2, "b": 2}'
     # The conflict's lines git adds to the merge's message are left out of the commit.
     assert git(fleet.root, "log", "-1", "--format=%B") == "Merge WORKER into main"
+
+
+def test_a_conflict_under_a_folder_a_regeneration_writes_is_answered_by_regenerating_it(fleet: Fleet) -> None:
+    """A step's `writes` may name a folder, and every file under it is then that step's to regenerate."""
+    path = fleet.root / ".claude" / "orchestra.json"
+    settings = json.loads(path.read_bytes())
+    generator = GENERATOR.replace("Path('doc.json')", "Path('docs/doc.json')")
+    settings["land"]["steps"] = [_step("regenerate", ["src/"], "tools/generate.py", writes=["docs/"])]
+    files = {".claude/orchestra.json": json.dumps(settings), "tools/generate.py": generator, "docs/doc.json": "{}\n"}
+    commit(fleet.root, "Repo: The document moves into a folder", files)
+    tree = agent(fleet)
+    commit(tree, "Docs: b grows", {"src/b.txt": '"b": 2', "docs/doc.json": '{"a": 1, "b": 2}\n'})
+    commit(fleet.root, "Docs: a grows", {"src/a.txt": '"a": 2', "docs/doc.json": '{"a": 2, "b": 1}\n'})
+    code, _, err = fleet.run("land", "WORKER")
+    assert code == 0, err
+    assert git(fleet.root, "show", "HEAD:docs/doc.json") == '{"a": 2, "b": 2}'
 
 
 def test_a_conflict_no_regeneration_answers_aborts_naming_who_else_changes_the_path(fleet: Fleet) -> None:
@@ -384,6 +507,13 @@ def _refused(fleet: Fleet, name: str = "WORKER") -> str:
     assert code == 2, err
     assert head(fleet) == before, "a refused landing committed something"
     return err
+
+
+def test_another_agents_record_that_does_not_read_refuses_the_landing_before_its_merge(fleet: Fleet) -> None:
+    """The bookkeeping reads every record, so one that does not read would stop it after the merge commit."""
+    commit(agent(fleet), "Docs: A note", {"notes.txt": "second\n"})
+    write(fleet.state, "agents/BROKEN.json", "{")
+    assert "BROKEN.json" in _refused(fleet)
 
 
 def test_a_checkout_holding_changes_is_refused(fleet: Fleet) -> None:

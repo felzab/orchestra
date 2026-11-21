@@ -27,21 +27,16 @@ FOREGROUND = "CLAUDE_CODE_DISABLE_BACKGROUND_TASKS"
 # Set, an Agent call carrying a `name` and no `isolation` launches a teammate rather than a sub-agent
 # (sub-agents.md, "Subagent names"), whose turn ends on `TeammateIdle`, which the plugin does not answer.
 TEAMS = "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS"
-# The checkout's own settings, which Claude Code keeps out of commits, and the key naming a working directory.
-SETTINGS_LOCAL = Path(".claude", "settings.local.json")
+# The settings key naming a working directory.
 DIRECTORIES = "additionalDirectories"
 # The auto-compact window `init` sets where none is set: each call sends the whole conversation again, and on
-# long coordinator sessions of a model with a 1M context this window cost about 0.7 of the default there,
-# which compacts near 1M. The variable outranks every settings key (model-config.md).
-WINDOW = "autoCompactWindow"
+# one long coordinator day of a model with a 1M context, replayed request by request, this window cost about 0.67
+# of the default there, which compacts near 967,000 tokens, and 600,000 about 1.1 of this one.
 WINDOW_TOKENS = 500_000
-WINDOW_ENV = "CLAUDE_CODE_AUTO_COMPACT_WINDOW"
 
-# The heading whose task lines are the slices, which `status` reads.
-SLICES = "## Slices and their files"
 # The request first, in the owner's words verbatim, so a session resumed after a crash or a `/clear` reads
-# what was asked rather than a paraphrase.
-PLAN_HEADINGS = ("## The request", SLICES, "## Landing order", "## Ending")
+# what was asked rather than a paraphrase. The slices' heading is `model`'s, where the plan's readers find it.
+PLAN_HEADINGS = ("## The request", model.SLICES, "## Landing order", "## Ending")
 # Only what the state cannot give: where the session waits, the newest estimate and the last gate run
 # are in the log and the state's folders, and `status` prints them.
 NOW_LABELS = ("Next action:", "Why it is next:")
@@ -230,34 +225,9 @@ def _state_root(folder: Path, root: Path, session: Path) -> Path:
     return folder / session
 
 
-def _settings_files(root: Path) -> list[Path]:
-    """The settings files a session in this checkout reads, the one that wins a key first (settings.md).
-
-    Managed settings and `--settings`, which settings.md ranks above the local file, are not read: the
-    first sits in a system folder of each platform's own, and the second is known to the session alone.
-    """
-    return [root / SETTINGS_LOCAL, root / ".claude" / "settings.json", config.claude_dir() / "settings.json"]
-
-
-def _setting(path: Path, *keys: str) -> object:
-    """The value under `keys` in a settings file; None where the file holds none or cannot be read."""
-    try:
-        held: object = json.loads(path.read_bytes().decode("utf-8"))
-    except (OSError, ValueError):
-        return None
-    return _setting_in(held, *keys)
-
-
-def _setting_in(held: object, *keys: str) -> object:
-    """The value under `keys` in parsed settings; None where they hold none."""
-    for key in keys:
-        held = typing.cast("dict[str, object]", held).get(key) if isinstance(held, dict) else None
-    return held
-
-
 def granted(root: Path, folder: Path) -> bool:
     """Whether a settings file makes the folder, or one holding it, a working directory of the session."""
-    listed = [_setting(path, "permissions", DIRECTORIES) for path in _settings_files(root)]
+    listed = [config.setting(path, "permissions", DIRECTORIES) for path in config.settings_files(root)]
     return any(
         isinstance(entry, str) and config.within(folder, root / Path(entry).expanduser())
         for held in listed
@@ -268,8 +238,8 @@ def granted(root: Path, folder: Path) -> bool:
 
 def _base_ref(root: Path) -> tuple[object, Path | None]:
     """`worktree.baseRef` as the session reads it, from the first settings file that sets it, and that file."""
-    for path in _settings_files(root):
-        if (held := _setting(path, "worktree", "baseRef")) is not None:
+    for path in config.settings_files(root):
+        if (held := config.setting(path, "worktree", "baseRef")) is not None:
             return held, path
     return None, None
 
@@ -277,57 +247,34 @@ def _base_ref(root: Path) -> tuple[object, Path | None]:
 def _window(root: Path) -> str | None:
     """Why `init` sets no auto-compact window: the one in force, or one set for a model alone; None where none is set.
 
-    `WINDOW_ENV` in this process's environment outranks every settings key, so a key written then would do
-    nothing. A settings file's `env` reaches that environment only where Claude Code started the process, so
+    `config.WINDOW_ENV` in this process's environment outranks every settings key, so a key written then would
+    do nothing. A settings file's `env` reaches that environment only where Claude Code started the process, so
     run from a plain terminal, `init` does not see a window set there. A window `/autocompact` saved for one
     model under `modelSettings` binds that model alone, and a top-level key in the local file would override
     it, so that leaves `init` writing none too, saying a session on another model runs at Claude Code's
     default.
     """
-    if held := os.environ.get(WINDOW_ENV):
-        return f"`{WINDOW_ENV}` is {held} in the environment, which outranks every settings key, so init sets no window"
-    for path in _settings_files(root):
-        if (found := _setting(path, WINDOW)) is not None:
-            return f"`{WINDOW}` is {json.dumps(found)} in {path}, so init sets no window"
-        models = _setting(path, "modelSettings")
+    if held := os.environ.get(config.WINDOW_ENV):
+        return (
+            f"`{config.WINDOW_ENV}` is {held} in the environment, which outranks every settings key, so init sets"
+            " no window"
+        )
+    for path in config.settings_files(root):
+        # Parsed once for both keys.
+        parsed = config.setting(path)
+        if (found := config.setting_in(parsed, config.WINDOW)) is not None:
+            return f"`{config.WINDOW}` is {json.dumps(found)} in {path}, so init sets no window"
+        models = config.setting_in(parsed, "modelSettings")
         if not isinstance(models, dict):
             continue
         for name, entry in typing.cast("dict[str, object]", models).items():
-            if (found := _setting_in(entry, WINDOW)) is not None:
+            if (found := config.setting_in(entry, config.WINDOW)) is not None:
                 return (
-                    f"`modelSettings.{name}.{WINDOW}` is {json.dumps(found)} in {path}, which binds {name} alone:"
-                    " a session on another model runs at Claude Code's default window, and init sets no window"
-                    " that would override it"
+                    f"`modelSettings.{name}.{config.WINDOW}` is {json.dumps(found)} in {path}, which binds {name}"
+                    " alone: a session on another model runs at Claude Code's default window, and init sets no"
+                    " window that would override it"
                 )
     return None
-
-
-def window(root: Path, model: str | None) -> int | None:
-    """The auto-compact window a session of `model` in this checkout is set to; None where it runs at the model's own.
-
-    `WINDOW_ENV` outranks every settings key; else the first settings file that sets a window for the model
-    or for every model decides, its window for the model first (settings-reference.md, "modelSettings"),
-    where Claude Code writes each entry under the model's canonical name, the name a transcript records.
-    None where nothing sets one, as `_window` says such a session runs at Claude Code's default window, a
-    figure no file holds; `"auto"`, the model's tuned window, is None too. A window given by `--autocompact`
-    for one launch is the session's alone, and not read.
-    """
-    if held := _tokens(os.environ.get(WINDOW_ENV, "")):
-        return held
-    for path in _settings_files(root):
-        found = _setting(path, "modelSettings", model, WINDOW) if model else None
-        found = found if found is not None else _setting(path, WINDOW)
-        if found is not None:
-            return found if isinstance(found, int) and not isinstance(found, bool) else None
-    return None
-
-
-def _tokens(value: str) -> int | None:
-    """A token count as `WINDOW_ENV` takes one, `500000`, `500k` or `1M` (model-config.md); None for any other."""
-    held = re.fullmatch(r"\s*([0-9]+)\s*([kKmM]?)\s*", value)
-    if held is None:
-        return None
-    return int(held[1]) * {"": 1, "k": 1_000, "m": 1_000_000}[held[2].lower()]
 
 
 def _on(name: str) -> bool:
@@ -338,7 +285,7 @@ def _on(name: str) -> bool:
 def tracked_local(root: Path) -> bool:
     """Whether the checkout's own settings file is tracked, which no ignore rule then reaches (gitignore(5))."""
     try:
-        config.git(root, "ls-files", "--error-unmatch", "--", SETTINGS_LOCAL.as_posix())
+        config.git(root, "ls-files", "--error-unmatch", "--", config.SETTINGS_LOCAL.as_posix())
     except Refused:
         return False
     return True
@@ -350,7 +297,7 @@ def exclude_local(root: Path) -> str | None:
     Claude Code adds it to the global excludes only when it writes the file first (settings.md), and an
     untracked file holding this machine's paths stops every landing and is one `git add` from a commit.
     """
-    path = SETTINGS_LOCAL.as_posix()
+    path = config.SETTINGS_LOCAL.as_posix()
     try:
         config.git(root, "check-ignore", "-q", "--", path)
     except Refused:
@@ -372,13 +319,15 @@ def grant(root: Path, folder: Path) -> str:
     formats JSON, so no key of the owner's changes; any other shape is left for the owner to edit.
     Whoever wrote it, an untracked file is kept out of git, since it stops every landing either way.
     """
+    # Asked once: the exclusion between here and the write cannot change whether the file is tracked.
+    tracked = tracked_local(root)
     # Before the write, so this machine's paths are never one `git add` from a commit.
-    excluded = None if tracked_local(root) else exclude_local(root)
-    said = _grant(root, folder)
+    excluded = None if tracked else exclude_local(root)
+    said = _grant(root, folder, tracked=tracked)
     return "\n".join(said if excluded is None else [excluded, *said])
 
 
-def _grant(root: Path, folder: Path) -> list[str]:
+def _grant(root: Path, folder: Path, *, tracked: bool) -> list[str]:
     said: list[str] = []
     wanted: list[str] = []
     needs_grant = not granted(root, folder)
@@ -388,22 +337,25 @@ def _grant(root: Path, folder: Path) -> list[str]:
         said.append(f"{folder} is a working directory already")
     window = _window(root)
     if window is None:
-        wanted.append(f'`"{WINDOW}": {WINDOW_TOKENS}`')
+        wanted.append(f'`"{config.WINDOW}": {WINDOW_TOKENS}`')
     else:
         said.append(window)
     if not wanted:
         return said
     yourself = f"add {' and '.join(wanted)} yourself"
-    return [*said, *_rewrite(root, folder if needs_grant else None, yourself, set_window=window is None)]
+    return [
+        *said,
+        *_rewrite(root, folder if needs_grant else None, yourself, set_window=window is None, tracked=tracked),
+    ]
 
 
-def _rewrite(root: Path, folder: Path | None, yourself: str, *, set_window: bool) -> list[str]:
+def _rewrite(root: Path, folder: Path | None, yourself: str, *, set_window: bool, tracked: bool) -> list[str]:
     """The folder granted where given and the window set where asked, in one write of the local file; what was done.
 
-    `yourself` says what to add by hand where the file is left as it is.
+    `yourself` says what to add by hand where the file is left as it is; `tracked`, whether git tracks the file.
     """
-    path = root / SETTINGS_LOCAL
-    if tracked_local(root):
+    path = root / config.SETTINGS_LOCAL
+    if tracked:
         # Its every change would be one `git add` from a commit carrying this machine's paths.
         return [f"{path} is tracked, so it is left as it is: {yourself}"]
     try:
@@ -434,18 +386,18 @@ def _rewrite(root: Path, folder: Path | None, yourself: str, *, set_window: bool
         typing.cast("list[object]", listed).append(str(folder))
         said.append(f"added {folder} to `permissions.{DIRECTORIES}` in {path}")
     if set_window:
-        settings[WINDOW] = WINDOW_TOKENS
+        settings[config.WINDOW] = WINDOW_TOKENS
         # Claude Code applies most edits to a running session, and its page names this key nowhere among those read
         # only at the start (settings.md, "When edits take effect"); but a desktop session started from a pre-warmed
         # process did not apply the window the project's file or this one sets (anthropics/claude-code issue 105316),
         # so the owner is told what was seen to reach one, and what is expected to but untested. The user's settings
         # reach every project, so writing there is the owner's call.
-        said.append(f"set `{WINDOW}` to {WINDOW_TOKENS} in {path}, as no settings file sets a window")
+        said.append(f"set `{config.WINDOW}` to {WINDOW_TOKENS} in {path}, as no settings file sets a window")
         said.append(
             "a desktop session started from a pre-warmed process did not apply the window the project's or the local"
             " settings file sets (anthropics/claude-code issue 105316); `/autocompact 500k` typed inside such a"
             f" session was seen to apply, saving a window for its model in {config.claude_dir() / 'settings.json'},"
-            f' and `"{WINDOW}": {WINDOW_TOKENS}` at the top level of that file is expected to reach it, untested'
+            f' and `"{config.WINDOW}": {WINDOW_TOKENS}` at the top level of that file is expected to reach it, untested'
         )
     store.replace_bytes(path, dumped(settings, text).encode("utf-8"))
     return said
@@ -524,7 +476,7 @@ def _harness(here: config.Checkout, settings: config.Config) -> list[str]:
     elif folder is not None:
         lines.append(
             f"MISSING  {folder} as a working directory, so an agent's report write prompts:"
-            f" add it to `permissions.{DIRECTORIES}` in {SETTINGS_LOCAL.as_posix()}"
+            f" add it to `permissions.{DIRECTORIES}` in {config.SETTINGS_LOCAL.as_posix()}"
         )
     # The pointer finds this session from anywhere, but the next `init` reads `stateRoot`: a root changed since,
     # or one a packaged app such as Claude's Windows app redirects, puts that session elsewhere.

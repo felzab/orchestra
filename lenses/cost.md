@@ -7,7 +7,7 @@
 **Checklist.**
 
 1. Which changed code runs per request, per event, per file or per tool call, and how often in a session?
-2. Its cost at the baseline and at the tip, the two run alternately in one window, each with its spread and what else ran.
+2. Its cost at the baseline and at the tip, with what else ran.
 3. Does it do on every event work that only a rare case needs?
 4. Does its work grow faster than its input: a loop inside a loop, a read per item?
 5. Does it start a process, load a module or read a file on each event that it could hold once?

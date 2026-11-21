@@ -8,7 +8,10 @@ the same keys for an editor, and a test holds the two equal.
 
 from __future__ import annotations
 
+import contextlib
+import contextvars
 import dataclasses
+import functools
 import json
 import os
 import re
@@ -17,6 +20,7 @@ import subprocess
 import sys
 import types
 import typing
+from collections.abc import Callable, Generator
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal, NamedTuple, TypeVar
@@ -35,6 +39,11 @@ POSITIVE = "positive"
 LITERAL = "literal"
 # The longest value a refusal quotes; a longer one is named by its JSON kind.
 SHOWN = 40
+# The checkout's own settings file, which Claude Code keeps out of commits.
+SETTINGS_LOCAL = Path(".claude", "settings.local.json")
+# The auto-compact window's settings key, and the variable that outranks every settings key (model-config.md).
+WINDOW = "autoCompactWindow"
+WINDOW_ENV = "CLAUDE_CODE_AUTO_COMPACT_WINDOW"
 
 StepKind = Literal["install", "regenerate", "check"]
 # An Agent call's `model` takes an alias alone, never a full model id (sub-agents.md, "Choose a model").
@@ -185,6 +194,61 @@ def claude_dir() -> Path:
     return Path(os.environ.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude")
 
 
+def settings_files(root: Path) -> list[Path]:
+    """The settings files a session in this checkout reads, the one that wins a key first (settings.md).
+
+    Managed settings and `--settings`, which settings.md ranks above the local file, are not read: the
+    first sits in a system folder of each platform's own, and the second is known to the session alone.
+    """
+    return [root / SETTINGS_LOCAL, root / ".claude" / "settings.json", claude_dir() / "settings.json"]
+
+
+def setting(path: Path, *keys: str) -> object:
+    """The value under `keys` in a settings file, the whole file for no key; None where none is or it cannot be read."""
+    try:
+        held: object = json.loads(path.read_bytes().decode("utf-8"))
+    except (OSError, ValueError):
+        return None
+    return setting_in(held, *keys)
+
+
+def setting_in(held: object, *keys: str) -> object:
+    """The value under `keys` in parsed settings; None where they hold none."""
+    for key in keys:
+        held = typing.cast("dict[str, object]", held).get(key) if isinstance(held, dict) else None
+    return held
+
+
+def window(root: Path, model: str | None) -> int | None:
+    """The auto-compact window a session of `model` in this checkout is set to; None where it runs at the model's own.
+
+    `WINDOW_ENV` outranks every settings key; else the first settings file that sets a window for the model
+    or for every model decides, its window for the model first (settings-reference.md, "modelSettings"),
+    where Claude Code writes each entry under the model's canonical name, the name a transcript records.
+    None where nothing sets one, as `init` says such a session runs at Claude Code's default window, a
+    figure no file holds; `"auto"`, the model's tuned window, is None too. A window given by `--autocompact`
+    for one launch is the session's alone, and not read.
+    """
+    if held := _tokens(os.environ.get(WINDOW_ENV, "")):
+        return held
+    for path in settings_files(root):
+        # Parsed once for both keys.
+        parsed = setting(path)
+        found = setting_in(parsed, "modelSettings", model, WINDOW) if model else None
+        found = found if found is not None else setting_in(parsed, WINDOW)
+        if found is not None:
+            return found if isinstance(found, int) and not isinstance(found, bool) else None
+    return None
+
+
+def _tokens(value: str) -> int | None:
+    """A token count as `WINDOW_ENV` takes one, `500000`, `500k` or `1M` (model-config.md); None for any other."""
+    held = re.fullmatch(r"\s*([0-9]+)\s*([kKmM]?)\s*", value)
+    if held is None:
+        return None
+    return int(held[1]) * {"": 1, "k": 1_000, "m": 1_000_000}[held[2].lower()]
+
+
 class Checkout(NamedTuple):
     """Where a command runs: the primary checkout, its branch and the clone's shared git folder."""
 
@@ -194,6 +258,11 @@ class Checkout(NamedTuple):
     branch: str | None
     # Whether the command runs in the primary checkout rather than in a linked worktree.
     primary: bool
+
+
+# The running command's checkout of its working directory, found at the first `checkout()` that asks; None
+# outside `once`, as in a hook, which finds each folder's checkout afresh.
+_ONCE: contextvars.ContextVar[Callable[[], Checkout] | None] = contextvars.ContextVar("checkout", default=None)
 
 
 def run_git(cwd: Path, *args: str) -> subprocess.CompletedProcess[bytes]:
@@ -234,20 +303,16 @@ def within(path: Path, folder: Path) -> bool:
     is compared by its volume and file number, and the parts below the folder's nearest existing one,
     which no file holds yet, in the file system's case.
     """
-    return under(path, folder) is not None
+    return _under(path, folder) is not None
 
 
 def identical(path: Path, other: Path) -> bool:
     """Whether two paths name one file or folder, as `within` judges a folder: by identity, not spelling."""
-    return under(path, other) == []
+    return _under(path, other) == []
 
 
-def under(path: Path, folder: Path) -> list[str] | None:
-    """The path's parts below the folder, in the file system's case, as `within` judges it; None outside it.
-
-    The folder itself has none, so a pattern written below a folder can be matched against what is
-    left once the folder is found by its identity.
-    """
+def _under(path: Path, folder: Path) -> list[str] | None:
+    """The path's parts below the folder, in the file system's case, none for the folder itself; None outside it."""
     outer, below = _anchor(folder.resolve())
     inner = path.resolve()
     for depth, held in enumerate((inner, *inner.parents)):
@@ -296,9 +361,29 @@ def worktrees(cwd: Path) -> list[dict[str, str]]:
     return found
 
 
+@contextlib.contextmanager
+def once() -> Generator[None, None, None]:
+    """Inside the block, `checkout()` with no `cwd` asks git the first time alone: a command's whole run.
+
+    Nothing a command runs changes its working directory or the primary checkout's branch, so the first
+    answer holds to its end, and each verb's own call costs no second pair of git runs. A refusal is not
+    kept, so a later call asks again.
+    """
+    token = _ONCE.set(functools.cache(lambda: _checkout(Path.cwd())))
+    try:
+        yield
+    finally:
+        _ONCE.reset(token)
+
+
 def checkout(cwd: Path | None = None) -> Checkout:
     """The checkout the directory belongs to, from git; refused outside a repository or in a bare one."""
-    here = Path.cwd() if cwd is None else cwd
+    if cwd is None and (held := _ONCE.get()) is not None:
+        return held()
+    return _checkout(Path.cwd() if cwd is None else cwd)
+
+
+def _checkout(here: Path) -> Checkout:
     found = run_git(here, "rev-parse", "--path-format=absolute", "--git-common-dir", "--show-toplevel")
     if found.returncode != 0:
         said = found.stderr.decode("utf-8", "replace").strip()

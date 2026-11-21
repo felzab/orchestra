@@ -30,10 +30,11 @@ A handoff tells the next session what this one believed and how much of it was v
 - the branch and its commit subjects
 - the gate: its exit code and the commit it ran at
 - each count, with who measured it and when
+- the measured minutes from the review's first reader to the end, the slice count and the weekly window's points per agent, each with the log lines it was read from, which the next estimate scales from
 - what could not be established, and why
 ```
 
-Leave out a figure nobody measured again in the state the next session inherits, a file name a pending fix will change, a question the owner has ruled, and anything the project's CLAUDE.md files and `.claude/rules/`, its addenda, the plan or these pages already say.
+Leave out a figure nobody measured again in the state the next session inherits, a file name a pending fix will change, a question the owner has ruled, and anything the project's CLAUDE.md files and `.claude/rules/`, its addenda, the plan or these pages already say. Write the next session's work list, one line an item with its evidence's address, into the programme's plan where `/orchestra:plan` wrote one, in the part the starter names, and otherwise into the handoff.
 
 ## The audit
 

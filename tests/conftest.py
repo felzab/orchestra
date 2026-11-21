@@ -141,7 +141,7 @@ def repo_template(tmp_path_factory: pytest.TempPathFactory) -> Path:
     """A repository on `main` holding one commit, made once per run.
 
     A repository `git init` made names no path outside its own folder, so each copy of it is a
-    repository of its own. A session `init` made is never copied: it writes absolute paths.
+    repository of its own. A session `init` made writes absolute paths, so `make_session` rewrites them in each copy.
     """
     root = tmp_path_factory.mktemp("template") / "repo"
     root.mkdir()
@@ -326,3 +326,95 @@ def inprocess(
             stream.flush()
         said = out.getvalue().decode("utf-8"), err.getvalue().decode("utf-8")
     return subprocess.CompletedProcess(("orchestra", *args), code, *said)
+
+
+def _overlay(source: Path, target: Path) -> None:
+    """`source` copied over `target`, each file written now; a git object both hold is the same bytes, and read-only."""
+
+    def copied(src: str, dst: str) -> object:
+        if "objects" in Path(dst).parts and Path(dst).exists():
+            return dst
+        # Not `copy2`: a state's last write is when its takeover may succeed, and `init` leaves one written now.
+        return shutil.copy(src, dst)
+
+    shutil.copytree(source, target, copy_function=copied, dirs_exist_ok=True)
+
+
+def _moved(case: Path, made: Path) -> None:
+    """Every path into `made` that a file under `case` holds, written as the same path into `case`."""
+    spellings = [(json.dumps(str(path))[1:-1], str(path), path.as_posix()) for path in (made, case)]
+    pairs = [(old.encode(), new.encode()) for old, new in zip(*spellings, strict=True)]
+    for path in case.rglob("*"):
+        if not path.is_file() or "objects" in path.parts:
+            continue
+        held = path.read_bytes()
+        moved = held
+        for old, new in pairs:
+            moved = moved.replace(old, new)
+        if moved != held:
+            path.write_bytes(moved)
+        # A spelling none of the three catches would leave the copy reading the first case's session.
+        assert made.name.encode() not in moved, f"{path} names {made} in a spelling `_moved` does not rewrite"
+
+
+# What `make_session` gives a case: a call taking a key and the steps that make the session, which end in `init`.
+MakeSession = Callable[[str, Callable[[Path], None]], Path]
+# How long a worker waits for another to make a session it needs, which takes seconds.
+MADE_SECONDS = 120
+
+
+def _made(folder: Path, build: Callable[[Path], None], make_repo: MakeRepo) -> Path:
+    """The session's state below `folder`, relative to it, made there by the first worker to claim the folder."""
+    done, failed = folder / "made", folder / "failed"
+    try:
+        # One `mkdir` succeeds, so one worker builds and the others wait for its mark.
+        folder.mkdir()
+    except FileExistsError:
+        deadline = time.monotonic() + MADE_SECONDS
+        while not done.exists():
+            # A build that failed fails each case waiting on it at once, naming the builder's error.
+            if failed.exists():
+                raise AssertionError(f"making {folder} failed: {failed.read_bytes().decode()}") from None
+            assert time.monotonic() < deadline, f"no worker finished making {folder}"
+            time.sleep(0.05)
+        return Path(done.read_bytes().decode())
+    try:
+        root = make_repo(folder / "project")
+        write_config(root, {"stateRoot": "../state"})
+        build(root)
+        state = store.state_dir(root).relative_to(folder)
+    except BaseException as error:
+        # BaseException, since `pytest.fail` and a keyboard interrupt are no `Exception`.
+        _mark(folder / "failed.part", failed, f"{type(error).__name__}: {error}")
+        raise
+    _mark(folder / "made.part", done, str(state))
+    return state
+
+
+def _mark(part: Path, mark: Path, text: str) -> None:
+    """`text` written to `mark` whole before its name appears, so a waiting worker never reads it half written."""
+    part.write_bytes(text.encode())
+    part.replace(mark)
+
+
+@pytest.fixture
+def make_session(project: Path, make_repo: MakeRepo, tmp_path_factory: pytest.TempPathFactory) -> MakeSession:
+    """The case's project with a session in it, made by `build` once a run for each key and copied after.
+
+    `init` runs 14 git processes, and the copy none. Each path `init` wrote into the first folder is
+    rewritten to the case's own, and the state's files are written now. The configuration names the
+    state root relative to the checkout, so a build committing it commits the same bytes for every case.
+    """
+    base = tmp_path_factory.getbasetemp()
+    # Every worker of one run shares its base's parent (pytest-xdist's docs, "session-scoped fixtures").
+    shared = base.parent if "PYTEST_XDIST_WORKER" in os.environ else base
+
+    def made(key: str, build: Callable[[Path], None]) -> Path:
+        folder = shared / f"made-session-{key}"
+        state = _made(folder, build, make_repo)
+        _overlay(folder, project.parent)
+        (project.parent / "made").unlink()
+        _moved(project.parent, folder)
+        return project.parent / state
+
+    return made

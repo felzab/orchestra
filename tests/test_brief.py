@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from conftest import git, inprocess, line, transcript, write_config
+from conftest import MakeSession, git, inprocess, line, transcript, write_config
 from orchestra import brief, config, context, model, store
 
 BODY = (
@@ -20,16 +20,19 @@ BODY = (
 )
 
 
-@pytest.fixture
-def state(project: Path) -> Path:
-    """A session on `main`, whose branch holds `lib/a.py` and `docs/[id]/page.md`."""
+def _session(project: Path) -> None:
     for path in ("lib/a.py", "docs/[id]/page.md"):
         (project / path).parent.mkdir(parents=True, exist_ok=True)
         (project / path).write_bytes(b"x\n")
     git(project, "add", ".")
     git(project, "commit", "-m", "files")
     assert inprocess("init", "s1", cwd=project).returncode == 0
-    return store.state_dir(project)
+
+
+@pytest.fixture
+def state(make_session: MakeSession) -> Path:
+    """A session on `main`, whose branch holds `lib/a.py` and `docs/[id]/page.md`."""
+    return make_session("brief", _session)
 
 
 def briefed(project: Path, name: str, *, kind: str = "writer", **values: str) -> Path:
@@ -107,6 +110,50 @@ def test_a_writers_owns_is_filled_from_its_slices_line_in_the_plan(project: Path
     assert brief.header(state, "E").labels["Owns"] == ""
 
 
+def test_a_body_file_is_written_below_the_header_and_the_brief_checked_in_the_same_call(
+    project: Path, state: Path, tmp_path: Path
+) -> None:
+    """Otherwise a brief costs the header verb, the body's write and the check: three calls where two serve."""
+    store.write_text(state / store.PLAN, "# Plan\n\n## Slices and their files\n\n- [ ] S1 `lib/a.py`\n")
+    body = tmp_path / "body.md"
+    body.write_bytes(f"Rows: none\nWrites: none\nLens: none\n\n{BODY}".encode())
+    done = inprocess("brief", "A", "--type", "writer", "--slice", "S1", "--body", str(body), cwd=project)
+    assert done.returncode == 0, done.stdout + done.stderr
+    path = state / "briefs" / "A.md"
+    assert done.stdout.splitlines() == [str(path), f"A's brief is checked: {path}"]
+    short = git(project, "rev-parse", "--short", "main")
+    head = f"Agent: A    Type: writer    Slice: S1\nBase: main at {short}\nReport: {state / 'reports' / 'A.md'}\n"
+    assert path.read_bytes().decode() == f"{head}Owns: lib/a.py\nRows: none\nWrites: none\nLens: none\n\n{BODY}"
+    assert brief.stamped(state, model.read_agent(state, "A"))
+    # A check given a body would check the brief written and drop the body unread, so it is refused.
+    done = inprocess("brief", "A", "--check", "--body", str(body), cwd=project)
+    assert (done.returncode, done.stderr) == (
+        2,
+        "orchestra brief: --check takes the name alone: the header already names the type and the slice\n",
+    )
+    # A body naming its own `Owns:` keeps it, and one with a fault is written and refused as a check refuses it.
+    body.write_bytes(f"Owns: lib/b.py (new)\nRows: none\nWrites: none\nLens:\n\n{BODY}".encode())
+    done = inprocess("brief", "B", "--type", "writer", "--slice", "S1", "--body", str(body), cwd=project)
+    assert done.returncode == 2
+    assert done.stdout.splitlines()[1:] == [
+        "`Lens:` has no value: name what it holds, or write `none`",
+        # The same call again is refused, since the brief exists, so the refusal says how to go on.
+        f"B's brief is not checked: 1 fault(s), {state / 'briefs' / 'B.md'}; it is written there, so edit it and"
+        " run `orchestra brief B --check`, or settle it with `orchestra prune --discard B`",
+    ]
+    assert brief.header(state, "B").owns == ("lib/b.py",)
+    settled = inprocess("prune", "--discard", "B", cwd=project)
+    assert settled.returncode == 0, settled.stdout + settled.stderr
+    assert model.read_agent(state, "B").status == "pruned"
+    # A body typing a line of the header the verb writes is refused before anything is written.
+    body.write_bytes(f"Base: main at 1234567\nRows: none\n\n{BODY}".encode())
+    done = inprocess("brief", "C", "--type", "writer", "--slice", "S1", "--body", str(body), cwd=project)
+    assert done.returncode == 2
+    assert "holds `Base: main at 1234567`: leave the header's first three lines to the verb" in done.stderr
+    assert not (state / "briefs" / "C.md").exists()
+    assert not model.agent_path(state, "C").exists()
+
+
 def test_a_reader_or_a_driver_is_briefed_outside_the_plan_with_no_slice_and_a_writer_on_none_is_drift(
     project: Path, state: Path
 ) -> None:
@@ -140,6 +187,18 @@ def test_a_whole_brief_is_stamped_and_an_edit_unstamps_it(project: Path, state: 
     assert brief.stamped(state, record)
     path.write_bytes(path.read_bytes() + b"one more line\n")
     assert not brief.stamped(state, model.read_agent(state, "A"))
+
+
+@pytest.mark.usefixtures("state")
+def test_a_check_of_a_record_whose_brief_is_gone_names_the_command_that_writes_one(project: Path) -> None:
+    path = briefed(project, "A")
+    path.unlink()
+    done = inprocess("brief", "A", "--check", cwd=project)
+    assert done.returncode == 2
+    assert done.stderr.strip() == (
+        f"orchestra brief: A has no brief at {path}: `orchestra brief A --type T --body FILE`, with `--slice S` for"
+        " a writer, writes one from a file holding its lists and its four sections, and checks it"
+    )
 
 
 def test_each_fault_of_the_text_is_named_and_an_old_stamp_cleared(project: Path, state: Path) -> None:
@@ -396,6 +455,22 @@ def test_a_running_record_whose_transcript_ended_holds_no_path_and_no_row(projec
         ("lib/ab.py", "lib/a", False),
         ("lib/x/a.py", "lib/*.py", False),
         ("docs/i/page.md", "docs/[id]/*.md", False),
+        # `owned` skips its walk for a path outside a pattern's literal start, which must change no answer.
+        ("lib/x/a.py", "**/a.py", True),
+        ("a.py", "**/a.py", True),
+        ("src/a.py", "lib/**", False),
+        ("lib/a.pyc", "lib/*.py", False),
+        ("./lib/a.py", "lib/a.py", True),
+        ("lib/a.py", "./lib/**", True),
+        ("lib\\x\\a.py", "lib/x/*.py", True),
+        ("lib/a.py", "lib\\*.py", True),
+        ("lib/a", "lib/a/", True),
+        ("lib/ab.py", "lib/a/", False),
+        # `Writes:` patterns reach `owned` absolute and case-folded, the path spelled the same way.
+        ("c:/users/me/state/reports/a.md", "c:/users/me/state/**", True),
+        ("c:/users/me/state", "c:/users/me/state", True),
+        ("c:/users/me/stated/a.md", "c:/users/me/state", False),
+        ("c:/users/me/other/a.md", "c:/users/me/state/**", False),
     ],
 )
 def test_a_star_matches_within_a_folder_and_two_across_folders(path: str, pattern: str, *, owned: bool) -> None:

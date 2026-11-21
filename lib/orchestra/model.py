@@ -51,6 +51,12 @@ NAME_RE = re.compile(r"[A-Z][A-Z0-9-]*")
 DEVICES = frozenset({"CON", "PRN", "AUX", "NUL", *(f"{port}{n}" for port in ("COM", "LPT") for n in range(1, 10))})
 # A task line of PLAN.md: a list item opening on its tick box.
 TASK_RE = re.compile(r"\s*[-*+] \[(?P<tick>[ xX])\] (?P<text>.*)")
+# The heading of PLAN.md whose task lines are the slices.
+SLICES = "## Slices and their files"
+# A path a ticked slice's line names, in backticks.
+CODE_RE = re.compile(r"`([^`\s]+)`")
+# What a slice line ends with to name the slices whose contract it needs, none of whose files it writes.
+AFTER = " after:"
 ROW_RE = re.compile(r"(?P<agent>[A-Z][A-Z0-9-]*)(?:\.(?P<round>[2-9]|[1-9][0-9]+))?-F(?P<n>[1-9][0-9]*)")
 
 T = TypeVar("T")
@@ -106,6 +112,9 @@ class FindingEvent:
     owner: str | None = None
     evidence: str | None = None
     time: str = field(default_factory=now)
+    # A bank line's finding anchor, so `judge` compares a new finding with a banked row without reading its
+    # report; None on every other line, and on a bank line written before the field existed.
+    anchor: str | None = None
 
     def __post_init__(self) -> None:
         # Every writer goes through here, so a row can never be ROUTED to nobody or closed on nothing.
@@ -149,7 +158,8 @@ class Ruling:
     number: int | None = None
     words: str | None = None
     date: str | None = None
-    # The question asked in its place, where it was asked again: it is then neither open nor ruled on.
+    # The question asked in its place, where it was asked again: an open one is then closed unruled, and a
+    # ruled one's ruling is replaced by that question's.
     superseded_by: int | None = None
 
     @property
@@ -186,8 +196,13 @@ def from_record(cls: type[T], record: Record, source: Path) -> T:
 
 
 def _fold(records: list[Record], cls: type[T], key: str, source: Path) -> dict[Any, T]:
-    """Each item's state as its last line, in the order items first appear."""
-    return {record[key]: from_record(cls, record, source) for record in records if key in record}
+    """Each item's state as its last line, in the order items first appear.
+
+    Only each item's last line is built: every writer goes through `_write`, which builds an item before
+    it appends its line, so a line no later one replaced is the only one a read must check.
+    """
+    last = {record[key]: record for record in records if key in record}
+    return {held: from_record(cls, record, source) for held, record in last.items()}
 
 
 def _read(path: Path, cls: type[T], key: str) -> dict[Any, T]:
@@ -225,6 +240,23 @@ def plan_lines(state: Path) -> list[tuple[str, bool, str]]:
         elif task := TASK_RE.fullmatch(line):
             found.append((section, task["tick"] != " ", task["text"].strip()))
     return found
+
+
+def slice_line(text: str) -> tuple[str, list[str], list[str]]:
+    """A slice line's id, its backticked files as the drift reads them, and the slices its `after:` names."""
+    head, _, after = text.partition(AFTER)
+    name, _, rest = head.partition(" ")
+    return name, CODE_RE.findall(rest), [other for word in after.split() if (other := word.strip("`,"))]
+
+
+def slice_lines(lines: list[tuple[str, bool, str]]) -> list[tuple[str, list[str], list[str]]]:
+    """Each slice line of the plan's lines, as `slice_line` reads it, in the plan's order."""
+    return [slice_line(text) for section, _, text in lines if section == SLICES and text]
+
+
+def slices(lines: list[tuple[str, bool, str]]) -> dict[str, bool]:
+    """Each slice of the plan's lines by its id, the first word of its task line, and whether it is ticked."""
+    return {text.split()[0]: ticked for section, ticked, text in lines if section == SLICES and text}
 
 
 # --- the session ----------------------------------------------------------------------------------
@@ -290,8 +322,10 @@ def update_agent(state: Path, name: str, edit: Callable[[Agent], Agent]) -> Agen
 # --- findings -------------------------------------------------------------------------------------
 
 
-def read_findings(state: Path) -> dict[str, FindingEvent]:
-    return _read(state / store.FINDINGS, FindingEvent, "row")
+def read_findings(state: Path, records: list[Record] | None = None) -> dict[str, FindingEvent]:
+    """Each row's state; `records` are the file's lines where the caller has read them already."""
+    path = state / store.FINDINGS
+    return _fold(store.read_jsonl(path) if records is None else records, FindingEvent, "row", path)
 
 
 def write_findings(state: Path, edit: Callable[[dict[str, FindingEvent]], list[FindingEvent]]) -> list[FindingEvent]:

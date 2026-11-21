@@ -41,12 +41,52 @@ defaults adds [a configuration file](#the-configuration-file) and
 [addenda](#the-projects-addenda).
 
 **Compact at 500,000 tokens.** Each call sends the whole conversation again, so a long session's
-cost is mostly that re-reading: on the maintainer's seven long coordinator sessions of a model with
-a 1M context, a 500,000-token window cost about 0.7 of Claude Code's default there, which compacts
-near 1M. Claude Code caps the window at the model's context, so on a model with a smaller context
-the window changes nothing. A compaction replaces the conversation with a summary, and the
-session-start hook gives the state back from its files; what it can lose is detail still in flight,
-so where you can, run `/compact` yourself at a natural break, such as after a wave lands.
+cost is mostly that re-reading. Replayed request by request on one long coordinator day of a model
+with a 1M context (2,729 requests over 15.6 hours, with 13 compactions), and priced at the cache
+reads of Opus 5.5 and Sonnet 5.5, 0.05 of the input price, a 500,000-token window cost about 0.67 of
+Claude Code's default there, which compacts near 967,000 tokens. 600,000 would have cost 1.10 of
+500,000 and saved 3 of the 13 compactions, and 400,000 would have cost 0.91 with 6 more. 500,000 is
+kept over 400,000 because each compaction blocks the coordinator for about a minute and can lose
+detail still in flight, while the saving came to about 1.4% of the whole session's cost, its agents
+included. One compaction cost about as much as 250,000 input tokens: the summary call, about 59,000
+tokens of instructions, skills and summary written again, and about 35,000 tokens read again in the
+following half hour. Claude Code caps the window at the model's context, so on a model with a
+smaller context the window changes nothing. Since the coordinator compacts itself at seams from 60%
+of the window (below), the window decides only the compactions that fall at no seam. At a seam the
+minute's pause is accepted, since a compaction there loses nothing in flight, and on the same replay
+compacting near 300,000 and 400,000 tokens cost 0.85 and 0.91 of compacting near 500,000.
+
+A compaction replaces the conversation with a summary, and the session-start hook gives the state
+back from its files; what it can lose is detail still in flight. So the coordinator compacts itself
+at natural seams, where the state holds all in flight: a wave has landed or a checkpoint has
+rewritten `NOW.md`, and no report waits to be judged. At each seam, attended or away, it calls
+`mcp__orchestra__compact`, a tool the plugin's mod (`hooks/compact.js`) adds. The tool refuses an
+agent and a checkout whose branch holds no session, and below 60% of the compaction window it
+answers that compacting is not needed yet. After a compaction it scheduled was vetoed or failed,
+it refuses every call until your next prompt or, where Claude Code's built-in guard does not load
+(below), a compaction that runs, so a compaction that fails each time cannot repeat while you are
+away. Otherwise the conversation compacts once the coordinator's turn ends, and a one-line prompt
+from the plugin then starts its next turn, so a coordinator with no agent left to report carries
+on; a turn that ends interrupted or in an error drops the compaction. Scheduling, compacting and the resume prompt have been driven in headless
+`claude -p` sessions only, not yet in an interactive terminal or the desktop app; the 60% gate and
+the refusal after a failed compaction have run only in the mod's tests. Where the tool is absent or
+fails, the coordinator tells you at a seam to type `/compact`, attended or away, once the hook on
+your prompts has told it that its context nears the window (below).
+
+Mods are on by default in the terminal and the desktop app
+([mods overview](https://code.claude.com/docs/en/plugins/mods/overview), "Turn mods on or off"). An
+organization's `allowManagedModsOnly` stops the mod alone, and the rest of the plugin runs without
+the tool. `--safe-mode` loads no plugin at all, and `"disableAllHooks": true` stops plugin hooks as
+well as mods ([settings reference](https://code.claude.com/docs/en/settings-reference),
+`disableAllHooks`), so orchestra cannot run under either. With managed settings, a
+`managed-mcp.json` file or a Team or Enterprise `/login` as the session's credential, "the built-in
+guard loads by default" ([permissions page](https://code.claude.com/docs/en/permissions),
+"Precedence among rules, hooks, and mods"), and where it loads, "a hook that a user's mod registers
+on one of these events never runs", `session.compact` among them
+([managing mods](https://code.claude.com/docs/en/plugins/mods/admin), "Know which hooks of a user's
+mod don't run"). The mod then cannot see a compaction's outcome: it takes a compaction as run where
+the context has no size reading after it, and otherwise refuses the tool as after a failed one until
+your next prompt.
 
 `init` sets the window for you. Where the environment sets no `CLAUDE_CODE_AUTO_COMPACT_WINDOW`, in
 the shell or a settings file's `env`, which outranks every settings key, and none of the checkout's
@@ -71,11 +111,18 @@ tested it:
 { "autoCompactWindow": 500000 }
 ```
 
+The `Setting sources` line of `/status` names each settings file a session loaded, though not which
+file supplied each key ([settings page](https://code.claude.com/docs/en/settings), "Confirm what
+loaded"), so it shows whether such a session read the project's and the local file.
+
 Your user settings reach every project on the machine, which is why `init` writes none there. Each
 agent definition also sets 500,000, which lowers a larger window an agent would inherit. Where the
 window still does not apply, the hook on each of your prompts tells you and the coordinator once its
-context has passed the window, since only you can type `/compact`: Claude Code lets no model run it
-(the [skills page](https://code.claude.com/docs/en/skills), "Restrict Claude's skill access").
+context has passed the window. Between three quarters of a window that a settings file or the
+environment sets and the window itself, it tells the coordinator alone that the compact tool
+compacts at the next seam; where no window is set, it says nothing of one. Claude Code lets no
+model run `/compact` itself (the [skills page](https://code.claude.com/docs/en/skills), "Restrict
+Claude's skill access"), so where the compact tool is absent, only you can.
 
 ## Starting a session
 
@@ -250,8 +297,13 @@ give any last order, which the coordinator records as a ruling and, where it is 
 session's end, as a line of the plan's ending; [the away mode](#the-away-mode) says what that
 command changes.
 
-The coordinator asks you a question the moment it arises. While you are away it holds the question
-instead, and records your answer later in your own words:
+The coordinator asks you a question the moment it arises. In the terminal,
+`askUserQuestionTimeout` in your user settings, off until you set it to `60s`, `5m` or `10m`,
+closes a question you leave unanswered while the terminal's window is not focused, and the
+coordinator goes on without you
+([tools reference](https://code.claude.com/docs/en/tools-reference), "Question auto-continue
+timeout"); it has no effect in the desktop app's Code tab or while Remote Control is connected. While you are away it holds the question instead, and records your answer
+later in your own words:
 
 ```sh
 orchestra ask "Keep the old endpoint for a release?" --option "Keep: clients move over a release" --option "Remove: one breaking release" --recommend 1
@@ -260,7 +312,7 @@ orchestra rule 1 "Keep it for one release."
 
 `orchestra ask` alone lists the open questions. Each carries the number the state gives it, which
 the coordinator shows you, so answer by that number; a question asked again with `--supersedes`
-closes the one it replaces.
+closes the one it replaces, or, where that one has a ruling already, marks the ruling replaced.
 
 ## The configuration file
 
@@ -275,7 +327,7 @@ does not know is refused, naming its path in the file.
   "base": "main",
   "models": {
     "default": { "model": "opus", "effort": "high" },
-    "mechanical": { "model": "sonnet", "effort": "medium" }
+    "mechanical": { "model": "sonnet", "effort": "high" }
   },
   "queues": ["review"],
   "preflight": [{ "run": ["docker", "info"], "why": "the integration tests start a database container" }],
@@ -326,8 +378,12 @@ does not know is refused, naming its path in the file.
   line; a name the configuration does not hold is refused. With no `default`, the dispatch sets no
   model and Claude Code chooses.
 - **`contextCeiling`** is the context, in tokens, past which a hook refuses the coordinator's message
-  that would resume an agent, except the answer to an agent stopped on a question and still waiting
-  on it, since a resume sends the agent's whole context again. The default is 200,000.
+  that would resume an agent once the agent's prompt cache has lapsed, since such a resume writes the
+  agent's whole context to the cache again. A resume within five minutes of the agent's transcript
+  last being written, a subagent's cache lifetime by default
+  ([prompt caching](https://code.claude.com/docs/en/prompt-caching), "Which TTL each request gets"),
+  reads that context from the cache and goes ahead, as does the answer to an agent stopped on a
+  question and still waiting on it. The default is 200,000.
 - **`queues`** adds owners a row can be routed to besides an agent, beyond the built-in `owner`,
   `ending` and `handoff`.
 - **`preflight`** lists commands that must exit 0 before a session can work, each with `run`, the
@@ -419,6 +475,7 @@ the state from any worktree. Two sessions on two branches of one clone keep two 
 | `ci.json`, `gate/`                     | `ci`: its readings, and each gate run's output                                                                                                                                            |
 | `usage.json`                           | `status --measure`: the usage reading it prints again for five minutes                                                                                                                    |
 | `override.json`, `prompt.json`         | `override` and the hooks, which keep each caller's latest refusal no override served; the hook on each of your prompts                                                                    |
+| `listed.json`                          | the turn-end hook: the undone lines it last listed, so that it lists a set once                                                                                                           |
 | `estimates/`                           | the checkpoint and `/orchestra:estimate`                                                                                                                                                  |
 | `diffs/`, `trees/`                     | `diff`: the review's capture and its frozen trees                                                                                                                                         |
 | `../rulings.jsonl`                     | `ask` and `rule`, one file for the programme                                                                                                                                              |

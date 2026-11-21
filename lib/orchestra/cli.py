@@ -3,8 +3,9 @@
 A verb's module is imported only when that verb runs, and exposes the `Verbs` contract below. A verb
 exits 0 when done, 1 when done with something remaining and 2 when refused, `land` adding codes of
 its own that its `--help` lists, and 70 on a fault, whose trace it prints; it prints at most forty
-lines unless given `--all`, ending on one summary line; `hook` alone answers the harness in its own
-format. A verb that changes the session's record is refused outside the primary checkout (`READS`).
+lines unless given `--all`, ending on one summary line. A verb that changes the session's record is
+refused outside the primary checkout (`READS`). `orchestra hook <event>` is no verb here: `__main__`
+hands it to `hooks` before this module loads.
 """
 
 from __future__ import annotations
@@ -41,7 +42,6 @@ VERBS: dict[str, tuple[str, str]] = {
     "diff": ("diff", "capture the session's change into one file for a lens round"),
     "log": ("log", "print the session's log"),
     "override": ("override", "let the next refused call through once, logging the reason"),
-    "hook": ("hooks", "answer a harness hook event"),
 }
 # The most lines a verb prints without `--all`, its summary line included.
 LINES = 40
@@ -86,16 +86,26 @@ def emit(
 ) -> None:
     """The lines and the summary line, forty in all unless `--all`; `tail` keeps the last lines, not the first.
 
-    `rest` says where the lines cut are printed whole.
+    `rest` says where the lines cut are printed whole. The notice of a cut goes to standard error, so a
+    pipe filtering the lines never drops it unseen, and in its place among them where the two streams merge.
     """
     room = LINES - 2
     if getattr(args, "all", False) or len(lines) <= room + 1:
         shown, cut = list(lines), 0
     else:
         shown, cut = (list(lines[-room:]) if tail else list(lines[:room])), len(lines) - room
-    said = f"... {cut} {'earlier' if tail else 'more'} line(s): {rest}"
-    for line in [said, *shown] if cut and tail else [*shown, said] if cut else shown:
+
+    def notice() -> None:
+        # A pipe buffers standard output, so the lines before the notice are flushed first to keep its place.
+        sys.stdout.flush()
+        print(f"... {cut} {'earlier' if tail else 'more'} line(s): {rest}", file=sys.stderr, flush=True)
+
+    if cut and tail:
+        notice()
+    for line in shown:
         print(line)
+    if cut and not tail:
+        notice()
     print(summary)
 
 
@@ -120,8 +130,7 @@ def parser(chosen: str | None = None) -> tuple[argparse.ArgumentParser, Verbs | 
         sub = verbs.add_parser(verb, help=summary, description=summary)
         if verb == chosen:
             found = module(verb)
-            if verb != "hook":
-                sub.add_argument("--all", action="store_true", help=f"print every line rather than {LINES} at most")
+            sub.add_argument("--all", action="store_true", help=f"print every line rather than {LINES} at most")
             found.add(verb, sub)
     return top, found
 
@@ -139,10 +148,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         top, found = parser(chosen)
         args = top.parse_args(words)
-        if not READS.get(args.verb, lambda _: False)(args):
-            config.primary_checkout(args.verb)
-        # parse_args exits on any verb but `chosen`, which alone has a module.
-        return cast("Verbs", found).run(args)
+        # One checkout for the whole command: the guard's, which the verb's own call reads again.
+        with config.once():
+            if not READS.get(args.verb, lambda _: False)(args):
+                config.primary_checkout(args.verb)
+            # parse_args exits on any verb but `chosen`, which alone has a module.
+            return cast("Verbs", found).run(args)
     except Refused as refused:
         print(f"orchestra {chosen}: {refused}" if chosen else f"orchestra: {refused}", file=sys.stderr)
         return REFUSED

@@ -36,10 +36,11 @@ uv run ruff format --check
 uv run pyright
 uv run pytest -n auto
 claude plugin validate --strict .
+claude plugin test .
 ```
 
 CI runs the first four on Linux and Windows, at Python 3.11 and the latest Python release, and
-validates the plugin.
+validates the plugin and runs its mod's tests.
 
 ## Evaluations
 

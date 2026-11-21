@@ -48,7 +48,7 @@
       }
     },
     "contextCeiling": {
-      "description": "The context, in tokens, past which the dispatch hook refuses to resume an agent, since a resume sends the whole context again. The default is the 200K window a session compacts at where a model holds no 1M context.",
+      "description": "The context, in tokens, past which the dispatch hook refuses to resume an agent once its prompt cache has lapsed, five minutes after its transcript was last written, since such a resume writes the whole context to the cache again. The default is the 200K window a session compacts at where a model holds no 1M context.",
       "type": "integer",
       "default": 200000,
       "exclusiveMinimum": 0

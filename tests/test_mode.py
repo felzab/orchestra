@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime
+import json
 import os
 import subprocess
 import time
@@ -10,8 +11,8 @@ from pathlib import Path
 
 import pytest
 
-from conftest import git, inprocess, orchestra, write_agent
-from orchestra import init, model, store
+from conftest import MakeSession, git, inprocess, orchestra, write_agent
+from orchestra import config, log, model, store
 
 OWNER = {store.SESSION_ID: "session-owner"}
 OTHER = {store.SESSION_ID: "session-other"}
@@ -21,11 +22,14 @@ def _run(*args: str, cwd: Path, env: dict[str, str] = OWNER) -> subprocess.Compl
     return inprocess(*args, cwd=cwd, env=env)
 
 
-@pytest.fixture
-def session(project: Path) -> Path:
-    """A session made by the owner; its state."""
+def _session(project: Path) -> None:
     assert _run("init", "s1", cwd=project).returncode == 0
-    return project.parent / "state" / "project" / "s1"
+
+
+@pytest.fixture
+def session(make_session: MakeSession) -> Path:
+    """A session made by the owner; its state."""
+    return make_session("mode", _session)
 
 
 def _user(project: Path) -> Path:
@@ -34,7 +38,7 @@ def _user(project: Path) -> Path:
 
 
 def _files(project: Path) -> dict[Path, bytes | None]:
-    paths = [project / init.SETTINGS_LOCAL, _user(project)]
+    paths = [project / config.SETTINGS_LOCAL, _user(project)]
     return {path: path.read_bytes() if path.exists() else None for path in paths}
 
 
@@ -86,9 +90,9 @@ def test_a_long_away_keeps_its_latest_lines_and_names_the_log_for_the_rest(proje
     assert _run("mode", "away", cwd=project).returncode == 0
     stamp = model.now()
     store.append_jsonl(session / store.LOG, *({"time": stamp, "kind": "note", "text": f"n{k}"} for k in range(45)))
-    lines = _run("mode", "attended", cwd=project).stdout.splitlines()
-    assert lines[0].endswith(" earlier line(s): `orchestra log --all` prints every one")
-    assert lines[-2].endswith("n44")
+    back = _run("mode", "attended", cwd=project)
+    assert back.stderr.endswith(" earlier line(s): `orchestra log --all` prints every one\n")
+    assert back.stdout.splitlines()[-2].endswith("n44")
 
 
 def test_the_lease_refuses_another_session_and_hands_over_only_after_a_stop(project: Path, session: Path) -> None:
@@ -127,15 +131,44 @@ def test_the_lease_refuses_another_session_and_hands_over_only_after_a_stop(proj
     assert model.read_agent(session, "OWN").status == "running"
 
 
+def test_a_stop_from_a_process_with_no_session_id_stops_the_holder(project: Path, session: Path) -> None:
+    """An owner may stop a session from a plain shell, which carries no Claude Code session id."""
+    stopped = _run("mode", "stop", cwd=project, env={})
+    assert stopped.returncode == 0, stopped.stderr
+    assert stopped.stdout.startswith("stopped: no session writes this state")
+    assert store.lease(session)["stopped"] is True
+    assert log.entries(session)[-1].text == "stopped by session with no id"
+
+
+def test_a_stop_whose_lease_another_session_took_meanwhile_is_refused_naming_the_holder(
+    project: Path, session: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The lease can move between the stop's log line and its write, and the stop then claims nothing it did not do."""
+    recorded = log.record
+
+    def raced(state: Path, kind: str, text: str) -> log.Entry:
+        done = recorded(state, kind, text)
+        taken = {"owner": OTHER[store.SESSION_ID], "since": model.now(), "stopped": False}
+        (state / store.LEASE).write_bytes(json.dumps(taken).encode())
+        return done
+
+    monkeypatch.setattr(log, "record", raced)
+    stopped = _run("mode", "stop", cwd=project)
+    assert stopped.returncode == 2, stopped.stdout
+    said = "session session-other holds this session's state, so only it stops it; this is session session-owner"
+    assert said in stopped.stderr
+    assert store.lease(session)["stopped"] is False
+
+
 def test_a_waiting_takeover_takes_the_state_once_its_holder_falls_quiet(project: Path, session: Path) -> None:
     """A resume runs it once in the background, so its exit code says whether the state was taken."""
-    # The holder's last write is set to fall quiet twenty seconds from now, so the takeover without a wait is
-    # still refused on a loaded runner.
-    stamp = time.time() - store.QUIET_SECONDS + 20
+    # `init` has just written the state, so its holder falls quiet ten minutes on, however loaded the runner.
+    assert _run("mode", "takeover", "a limit", cwd=project, env=OTHER).returncode == 2
+    # The holder's last write is set to fall quiet three seconds from now, so the wait sleeps once.
+    stamp = time.time() - store.QUIET_SECONDS + 3
     for path in session.rglob("*"):
         if path.is_file():
             os.utime(path, (stamp, stamp))
-    assert _run("mode", "takeover", "a limit", cwd=project, env=OTHER).returncode == 2
     # The flag after the reason: Python 3.11's argparse leaves a positional list empty before a flag.
     taken = _run("mode", "takeover", "a limit", "--wait", cwd=project, env=OTHER)
     assert taken.returncode == 0, taken.stderr
