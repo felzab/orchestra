@@ -1056,7 +1056,7 @@ def _lenses(snap: Snapshot) -> str | None:
     excused: list[str] = []
     for held in diff.due(snap.root, config.load(snap.root), changed):
         lens = held.lens
-        if not (held.due or held.undeclared) or lens.run_by in read.get(lens.name, ()):
+        if lens.run_by in read.get(lens.name, ()):
             continue
         if lens.name in declined:
             excused.append(f"{lens.name} ({declined[lens.name]})")
@@ -1064,7 +1064,7 @@ def _lenses(snap: Snapshot) -> str | None:
             types = " and ".join(report.article(kind) for kind in sorted(read[lens.name]))
             missing.append(f"{lens.name} (read by {types}; its Run by line names {report.article(lens.run_by)})")
         else:
-            missing.append(f"{lens.name} (undeclared)" if held.undeclared and not held.due else lens.name)
+            missing.append(lens.name if held.due else f"{lens.name} (undeclared)")
     if missing:
         return f"no judged report and no `Lens declined: <name>, <reason>` note for {', '.join(missing)}"
     return _Held(f"declined {'; '.join(excused)}") if excused else None

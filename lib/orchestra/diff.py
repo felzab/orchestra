@@ -69,8 +69,6 @@ class Due:
     # The changed paths that made it due; empty where every change makes it due, or where it is undeclared.
     files: tuple[str, ...] = ()
     every: bool = False
-    # Whether its `declared` trigger is missing from the configuration.
-    undeclared: bool = False
 
     @property
     def due(self) -> bool:
@@ -156,7 +154,7 @@ def weighed(lens: Lens, declared: tuple[str, ...] | None, changed: list[str]) ->
     if files:
         return Due(lens, tuple(files))
     if declared is None and lens.applies == DECLARED:
-        return Due(lens, undeclared=True)
+        return Due(lens)
     return None
 
 
