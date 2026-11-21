@@ -93,6 +93,9 @@ FINISHED_ROWS = frozenset({"judged", "pruned"})
 NEAR_WINDOW = 0.75
 # The tool `hooks/compact.js` registers, which compacts the coordinator once its turn ends.
 COMPACT_TOOL = "mcp__orchestra__compact"
+# The share of the window Claude Code applied from which that tool compacts, its `THRESHOLD`. Past a set window
+# that did not apply, the applied one may be larger, so the tool may answer that no compaction is needed yet.
+COMPACTS_FROM = 0.6
 # The reason of a `SessionEnd` that `/clear` caused, whose session id never writes again, and the source
 # of the `SessionStart` that follows it.
 CLEARED = "clear"
@@ -1186,8 +1189,9 @@ def user_prompt_submit(where: Where) -> str | None:
 
     From `NEAR_WINDOW` of the window the coordinator reads that the compact tool compacts at its next seam. Past
     the window, which an applied window never lets the context reach, the owner reads it too, in a `systemMessage`:
-    the window has not applied, and where mods do not load only the owner can type `/compact` (skills.md: the model
-    cannot run it). A `Stop` hook would carry it at a model call each time it fired.
+    the window has not applied, and the compact tool measures against the one Claude Code applied, so only the
+    owner's `/compact` is sure to compact (skills.md: the model cannot run it). A `Stop` hook would carry it at a
+    model call each time it fired.
     """
     state = where.state
     if not where.coordinator or state is None:
@@ -1213,16 +1217,18 @@ def user_prompt_submit(where: Where) -> str | None:
         return _context("UserPromptSubmit", said)
     size, window = f"{near[0]:,}", f"{near[1]:,}"
     # Facts, not an order: an imperative in added context can read as an injection (hooks.md, "Add context for Claude").
-    tool = f"`{COMPACT_TOOL}`, where the session has it, or else the owner's `/compact`, compacts at the next seam"
     if near[0] <= near[1]:
+        tool = f"`{COMPACT_TOOL}`, where the session has it, or else the owner's `/compact`, compacts at the next seam"
         said += f" Your context is {size} tokens, at least {NEAR_WINDOW:.0%} of the {window}-token compaction"
         said += f" window; {tool}."
         return _context("UserPromptSubmit", said)
-    said += f" Your context is {size} tokens, past the {window}-token compaction window, which has not applied; {tool}."
+    # The tool's threshold is of the window Claude Code applied, which this one is not, so it promises nothing here.
+    waits = f"compacts only from {COMPACTS_FROM:.0%} of the window Claude Code applied, which may be larger"
+    said += f" Your context is {size} tokens, past the {window}-token compaction window, which has not applied;"
+    said += f" `{COMPACT_TOOL}` {waits}, so the owner's `/compact` compacts at the next seam."
     shown = (
         f"orchestra: this session's context is {size} tokens, past its {window}-token compaction window, which"
-        " has not applied: the coordinator compacts at its next seam where its compact tool loads, or type"
-        " `/compact` then."
+        f" has not applied. The coordinator's compact tool {waits}, so type `/compact` at its next seam."
     )
     return _json(
         {
