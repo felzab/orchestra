@@ -198,14 +198,18 @@ def _merge(root: Path, message: str, branch: str, steps: tuple[Step, ...], writt
 
 
 def _others(state: Path, name: str, root: Path) -> list[tuple[model.Agent, str]]:
+    """Each unsettled agent but `name` whose branch exists, with it: a landed one's branch is on the session
+    branch already, and a pruned one's is deleted, so neither can bring anything in."""
     found: list[tuple[model.Agent, str]] = []
     for agent in model.agents(state):
-        if agent.name != name and (branch := prune.branch_of(agent)) and prune.branch_exists(root, branch):
+        if agent.name == name or agent.status in model.SETTLED:
+            continue
+        if (branch := prune.branch_of(agent)) and prune.branch_exists(root, branch):
             found.append((agent, branch))
     return found
 
 
-def _abort(root: Path, branch: str, stop: Stop, written: list[str], others: list[tuple[model.Agent, str]]) -> Stop:
+def _abort(state: Path, name: str, root: Path, branch: str, stop: Stop, written: list[str]) -> Stop:
     """The merge aborted and this run's writes put back; the stop, its lines completed."""
     if stop.code == REFUSED:
         stop.code = GIT_FAILED
@@ -229,7 +233,8 @@ def _abort(root: Path, branch: str, stop: Stop, written: list[str], others: list
         stop.lines = (head, "route the red at HEAD to its owner and land again once it clears", *stop.lines)
     if stop.code == CONFLICT:
         conflicted = {line.removeprefix("CONFLICT in ") for line in stop.lines if line.startswith("CONFLICT in ")}
-        for agent, other in others:
+        # Read here alone, since only a conflict names who else changes its paths.
+        for agent, other in _others(state, name, root):
             if _ok(root, "merge-base", "--is-ancestor", other, "HEAD"):
                 continue
             shared = sorted(conflicted & set(_names(root, "diff", "--name-only", f"HEAD...{other}", code=7)))
@@ -319,8 +324,7 @@ def _settle(
     carried = [
         agent.name
         for agent, other in _others(state, name, root)
-        if agent.status not in model.SETTLED
-        and not _ok(root, "merge-base", "--is-ancestor", other, before)
+        if not _ok(root, "merge-base", "--is-ancestor", other, before)
         and _ok(root, "merge-base", "--is-ancestor", other, after)
     ]
     names = [name, *carried]
@@ -406,7 +410,6 @@ def land(here: Checkout, state: Path, name: str, args: argparse.Namespace) -> in
             *strays,
             "add each to the brief's `Owns:` if it is the agent's, or have the agent revert it",
         )
-    others = _others(state, name, root)
     steps = config.load(root).land.steps
     written: list[str] = []
     try:
@@ -414,9 +417,9 @@ def land(here: Checkout, state: Path, name: str, args: argparse.Namespace) -> in
         message = f"Merge {name} into {model.read_session(state).branch}"
         did = _merge(root, message, branch, steps, written)
     except Stop as stop:
-        raise _abort(root, branch, stop, written, others) from None
+        raise _abort(state, name, root, branch, stop, written) from None
     except Refused as refused:
-        raise _abort(root, branch, Stop(7, str(refused)), written, others) from None
+        raise _abort(state, name, root, branch, Stop(7, str(refused)), written) from None
     merge = _git(root, "rev-parse", "HEAD", code=10).strip()
     said = f": {'; '.join(did)}" if did else ""
     lines, summary = _finish(
