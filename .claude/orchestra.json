@@ -6,6 +6,7 @@
       { "name": "cost", "when": ["hooks/", "bin/orchestra", "lib/orchestra/events.py", "lib/orchestra/hooks.py"] },
       { "name": "prompt", "when": ["lenses/", "evals/**/*.md"] },
       { "name": "data", "when": ["lib/"] },
+      { "name": "practice", "when": ["hooks/", "agents/", "skills/"] },
       { "name": "accessibility", "when": [] }
     ]
   }

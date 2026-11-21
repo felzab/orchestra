@@ -294,8 +294,11 @@ give any last order, which the coordinator records as a ruling and, where it is 
 session's end, as a line of the plan's ending; [the away mode](#the-away-mode) says what that
 command changes.
 
-The coordinator asks you a question the moment it arises. While you are away it holds the question
-instead, and records your answer later in your own words:
+The coordinator asks you a question the moment it arises. In the terminal,
+`askUserQuestionTimeout` in your user settings closes a question you leave unanswered, and the
+coordinator goes on without you; it has no effect in the desktop app's Code tab or while Remote
+Control is connected. While you are away it holds the question instead, and records your answer
+later in your own words:
 
 ```sh
 orchestra ask "Keep the old endpoint for a release?" --option "Keep: clients move over a release" --option "Remove: one breaking release" --recommend 1
