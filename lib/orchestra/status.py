@@ -157,7 +157,8 @@ class Reads:
         except Refused:
             # Left to `due`, which reads the log only where an item waits, as it does called alone.
             entries = None
-        return queue.due(self.state, self.agents, entries)
+        # Every view reading this reads the brief headers too, so passing them costs no read.
+        return queue.due(self.state, self.agents, entries, self.heads)
 
 
 @dataclasses.dataclass(frozen=True)
