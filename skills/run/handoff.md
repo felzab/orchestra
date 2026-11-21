@@ -34,7 +34,7 @@ A handoff tells the next session what this one believed and how much of it was v
 - what could not be established, and why
 ```
 
-Leave out a figure nobody measured again in the state the next session inherits, a file name a pending fix will change, a question the owner has ruled, and anything the project's CLAUDE.md files and `.claude/rules/`, its addenda, the plan or these pages already say. The next session's work list is the plan's part the starter names, one line an item with its evidence's address.
+Leave out a figure nobody measured again in the state the next session inherits, a file name a pending fix will change, a question the owner has ruled, and anything the project's CLAUDE.md files and `.claude/rules/`, its addenda, the plan or these pages already say. Write the next session's work list, one line an item with its evidence's address, into the programme's plan where `/orchestra:plan` wrote one, in the part the starter names, and otherwise into the handoff.
 
 ## The audit
 
