@@ -335,6 +335,29 @@ def test_a_round_stopped_before_its_report_with_nothing_to_land_is_not_stamped_b
     assert not [entry for entry in log.entries(fleet.state) if entry.kind == "land"]
 
 
+def test_a_round_judged_from_a_record_no_report_hook_moved_is_stamped_by_its_own_word(fleet: Fleet) -> None:
+    """Only the stop hook writes `outcome`, and `judge` takes a report from a record that hook never moved to
+    `reported`, a limit's stop among them, so the judged round's own status is what the record keeps."""
+    agent(fleet)
+    resumed = {1: "2026-11-21T08:00:00+00:00", 2: "2026-11-21T09:00:00+00:00"}
+    # Round 1 stopped BLOCKED; round 2 wrote a DONE report and then hit a limit, which keeps that outcome.
+    model.update_agent(
+        fleet.state,
+        "WORKER",
+        lambda held: replace(held, status="stopped", outcome="BLOCKED", reports=resumed, reason="limit"),
+    )
+    write(fleet.state, "reports/WORKER.md", text("writer", "WORKER", status="BLOCKED"))
+    write(fleet.state, "reports/WORKER.2.md", text("writer", "WORKER", round_=2))
+    code, out, err = fleet.run("judge", "WORKER", "--verdict", "done", "F1=close:MOOT:x", "F2=close:MOOT:x")
+    assert code == 0, out + err
+    code, out, err = fleet.run("land", "WORKER")
+    assert code == 0, err
+    assert out.splitlines()[-1] == "nothing to land: the session branch already holds worktree-agent-a1", out
+    assert "landed" in model.read_agent(fleet.state, "WORKER").since
+    landed = [entry.text for entry in log.entries(fleet.state) if entry.kind == "land"]
+    assert landed == ["WORKER landed: the session branch already holds worktree-agent-a1"]
+
+
 def test_a_record_a_hook_changes_while_the_landing_runs_its_git_keeps_what_the_hook_wrote(
     fleet: Fleet, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -354,6 +377,8 @@ def test_a_record_a_hook_changes_while_the_landing_runs_its_git_keeps_what_the_h
     assert out.splitlines()[-1] == "nothing to land: the session branch already holds worktree-agent-a1", out
     held = model.read_agent(fleet.state, "WORKER")
     assert (held.status, "landed" in held.since) == ("running", False)
+    # Nor does the log record a landing the record was kept from.
+    assert not [entry for entry in log.entries(fleet.state) if entry.kind == "land"]
 
 
 def test_a_merge_touching_a_steps_paths_installs_regenerates_and_checks(fleet: Fleet) -> None:

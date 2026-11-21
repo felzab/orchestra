@@ -448,7 +448,13 @@ def judge(args: argparse.Namespace, state: Path, owner: Callable[[str], str], ro
     else:
         texts = {f"F{finding.number}": (row, finding.body) for row, finding in new.items()}
         events = _apply(state, lambda now: _bank(agent.name, held.findings, round_, given, now))
-    model.update_agent(state, agent.name, lambda before: dataclasses.replace(before, status="judged", verdict=verdict))
+    # The judged round's own status, since only the stop hook writes `outcome` and a record it never moved to
+    # `reported`, a limit's stop or a dead run, still holds the round before's: the landing's stamp reads it.
+    model.update_agent(
+        state,
+        agent.name,
+        lambda before: dataclasses.replace(before, status="judged", verdict=verdict, outcome=held.status),
+    )
     routed = sum(event.status == "ROUTED" for event in events)
     closed = sum(event.status in model.CLOSED for event in events)
     log.record(state, log.JUDGE, f"{report.stem(agent.name, round_)}: {routed} routed, {closed} closed; {verdict}")

@@ -1585,10 +1585,11 @@ def test_a_prompt_nearing_the_compaction_window_tells_the_coordinator_and_past_i
         " `mcp__orchestra__compact` compacts only from 60% of the window Claude Code applied, which may be larger,"
         " so the owner's `/compact` compacts at the next seam."
     )
+    # The tool may still compact at that seam, under a larger applied window, so the owner's order waits on it.
     assert field(said, "systemMessage") == (
         "orchestra: this session's context is 500,474 tokens, past its 500,000-token compaction window, which has not"
-        " applied. The coordinator's compact tool compacts only from 60% of the window Claude Code applied, which may"
-        " be larger, so type `/compact` at its next seam."
+        " applied. Type `/compact` at the coordinator's next seam, unless its compact tool compacts there or answers"
+        " that none is needed."
     )
     # 375,000 is three quarters of the window; the line adds 474 tokens to the figure given.
     main.write_bytes(line("assistant", "m0", 900_000) + line("user") + line("assistant", "m1", 374_526))

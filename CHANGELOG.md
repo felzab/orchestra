@@ -27,13 +27,18 @@ The fixes from the third project session that ran on the plugin.
   `claude plugin test .` runs its tests, in CI too.
 - The prompt hook tells the coordinator, from 75% of a compaction window that a settings file or the
   environment sets, that the compact tool compacts at the next seam. Past the window, which has then
-  not applied, it tells the owner as well, and both read that the tool compacts only from 60% of the
-  window Claude Code applied, which may be larger, so the owner's `/compact` compacts at the next seam.
+  not applied, the coordinator reads that the tool compacts only from 60% of the window Claude Code
+  applied, which may be larger, so the owner's `/compact` compacts at the next seam; the owner is told
+  to type `/compact` at the coordinator's next seam, unless the tool compacts there or answers that
+  none is needed.
 - `orchestra brief NAME --type writer --slice S --body FILE` writes the brief's header above a file
-  holding its lists and sections and checks it in the same call.
+  holding its lists and sections and checks it in the same call. Where the check refuses, the brief
+  stays written, and the refusal says to edit it and run `orchestra brief NAME --check`, or to settle
+  it with `orchestra prune --discard NAME`.
 - `orchestra status --measure` prints the longest chain of slices still to do by their `after:` edges,
   with up to three of the chains tied for it and a count of the rest, and the median and longest
-  minutes from a landing to the next dispatch.
+  minutes from a landing to the next writer's dispatch; a reader or a driver sent meanwhile does not
+  end the wait.
 - `orchestra status` names a path on a slice still to do that the session deleted or moved.
 - `orchestra status --end` names a slice whose agents landed while its line is unticked.
 - `orchestra queue add --when landed:NAME <what>` accepts a slice `PLAN.md` lists, taken or not, and
@@ -122,7 +127,8 @@ The fixes from the third project session that ran on the plugin.
   verifier's report, and finds a new finding's repeat from the anchor a row's bank line in
   `findings.jsonl` now records, rather than by reading every report holding a banked row. A row
   banked by an earlier version records none, so its report is still read, and a verifier's report,
-  which banks no finding, reads none.
+  which banks no finding, reads none. A version before 0.4.0 cannot read a `findings.jsonl` this one
+  has banked into: it refuses the file, and with it every verb that reads the findings.
 - `orchestra status`, its `--measure` and `--end` views, the overview a compaction or a resume
   gives the coordinator and the `waits` lines `judge` and `land` close on read each brief, the plan
   and the log once a view, where they read each brief up to five times and the plan up to seven,
@@ -147,7 +153,9 @@ The fixes from the third project session that ran on the plugin.
 - `orchestra land NAME` on a branch the session branch already holds stamps the agent landed where
   its judged report says its work is done, and not where it stopped on a question or where a round
   after that report stopped before its own; a writer whose `DONE` branch was lost before it landed
-  no longer reads as landed, and its slice stays to do.
+  no longer reads as landed, and its slice stays to do. The judged report's own status decides, also
+  where a usage limit ended its round, which left the record holding the round before's, and the log
+  records such a landing only where the record was stamped.
 - `orchestra land NAME` on a branch with no commit of its own that took in the session branch by a
   fast-forward, as an agent merges the session branch into its own, reads nothing to land, where it
   closed every row the agent's report names fixed with another agent's landing as the evidence. A

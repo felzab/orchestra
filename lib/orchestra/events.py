@@ -62,10 +62,11 @@ STALE_MINUTES = 30
 # A subagent's prompt cache lifetime, five minutes unless a setting lengthens it (Claude Code's prompt-caching.md,
 # "Which TTL each request gets"). A resume within it reads the agent's context from the cache, so the ceiling,
 # which spares the cost of writing that context again, waits until it has lapsed.
-# A lengthened lifetime is knowingly not read: `subagentPromptCacheTtl`, `CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL`
-# and `ENABLE_PROMPT_CACHING_1H` ("Choose the TTL yourself"). No agent of the plugin sets one. Where the owner
-# does, a resume past `contextCeiling` within the longer lifetime is refused naming this figure, which an override
-# waives, so the harm is unlikely and shows: a successor briefed where a resume would have read a warm cache.
+# A lengthened lifetime is knowingly not read: `subagentPromptCacheTtl`, `CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL`,
+# an agent definition's `experimental` frontmatter field's `cacheTtl` and `ENABLE_PROMPT_CACHING_1H` ("Choose the
+# TTL yourself"). No agent of the plugin sets one; one given `cacheTtl` needs this figure changed with it. Where
+# the owner does, a resume past `contextCeiling` within the longer lifetime is refused naming this figure, which an
+# override waives, so the harm is unlikely and shows: a successor briefed where a resume would have read a warm cache.
 CACHE_MINUTES = 5
 # Log entries newer than NOW.md past which it no longer says where the session stands.
 NOW_EVENTS = 5
@@ -1237,9 +1238,11 @@ def user_prompt_submit(where: Where) -> str | None:
     waits = f"compacts only from {COMPACTS_FROM:.0%} of the window Claude Code applied, which may be larger"
     said += f" Your context is {size} tokens, past the {window}-token compaction window, which has not applied;"
     said += f" `{COMPACT_TOOL}` {waits}, so the owner's `/compact` compacts at the next seam."
+    # Under a larger applied window the tool may still compact at that seam, so the owner's order waits on it.
     shown = (
         f"orchestra: this session's context is {size} tokens, past its {window}-token compaction window, which"
-        f" has not applied. The coordinator's compact tool {waits}, so type `/compact` at its next seam."
+        " has not applied. Type `/compact` at the coordinator's next seam, unless its compact tool compacts there"
+        " or answers that none is needed."
     )
     return _json(
         {

@@ -135,8 +135,16 @@ def test_a_body_file_is_written_below_the_header_and_the_brief_checked_in_the_sa
     body.write_bytes(f"Owns: lib/b.py (new)\nRows: none\nWrites: none\nLens:\n\n{BODY}".encode())
     done = inprocess("brief", "B", "--type", "writer", "--slice", "S1", "--body", str(body), cwd=project)
     assert done.returncode == 2
-    assert done.stdout.splitlines()[1:-1] == ["`Lens:` has no value: name what it holds, or write `none`"]
+    assert done.stdout.splitlines()[1:] == [
+        "`Lens:` has no value: name what it holds, or write `none`",
+        # The same call again is refused, since the brief exists, so the refusal says how to go on.
+        f"B's brief is not checked: 1 fault(s), {state / 'briefs' / 'B.md'}; it is written there, so edit it and"
+        " run `orchestra brief B --check`, or settle it with `orchestra prune --discard B`",
+    ]
     assert brief.header(state, "B").owns == ("lib/b.py",)
+    settled = inprocess("prune", "--discard", "B", cwd=project)
+    assert settled.returncode == 0, settled.stdout + settled.stderr
+    assert model.read_agent(state, "B").status == "pruned"
     # A body typing a line of the header the verb writes is refused before anything is written.
     body.write_bytes(f"Base: main at 1234567\nRows: none\n\n{BODY}".encode())
     done = inprocess("brief", "C", "--type", "writer", "--slice", "S1", "--body", str(body), cwd=project)

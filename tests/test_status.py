@@ -431,20 +431,28 @@ def test_measure_names_the_longest_chain_of_slices_still_to_do_and_each_tied_wit
     assert chain() == ["chain     2 slice(s) deep, first to last: S3, S2"]
 
 
-def test_measure_gives_the_minutes_from_each_landing_to_the_next_dispatch(project: Path, built: Path) -> None:
+def test_measure_gives_the_minutes_from_each_landing_to_the_next_writers_dispatch(project: Path, built: Path) -> None:
     def hop() -> list[str]:
         return [line for line in _lines(inprocess("status", "--measure", cwd=project)) if line.startswith("hop")]
 
-    assert hop() == ["hop       no landing has been followed by a dispatch yet"]
+    for name in ("W0", "W1", "W2", "W3", "W4"):
+        write_agent(built, model.Agent(name, "writer", "running"))
+    write_agent(built, model.Agent("READ", "auditor", "running"))
+    write_agent(built, model.Agent("PROBE", "driver", "running"))
+    assert hop() == ["hop       no landing has been followed by a writer's dispatch yet"]
     # A dispatch with no landing before it is no hop, and a landing with no dispatch after it is none yet.
     _dispatch(built, "W0", 60)
     _logged(built, "land", "W1 landed as abc1234", 50)
+    # A reader or a driver sent after a landing moves no slice on, so the hop runs on to the next writer.
+    _dispatch(built, "READ", 48)
     _dispatch(built, "W2", 46)
     _dispatch(built, "W3", 40)
     _logged(built, "land", "W2 landed as def5678", 30)
+    _dispatch(built, "PROBE", 25)
     _dispatch(built, "W4", 20)
     _logged(built, "land", "W4 landed as 0123456", 5)
-    assert hop() == ["hop       2 hop(s) from a landing to the next dispatch, median 7 min, longest 10 min"]
+    _dispatch(built, "READ", 2)
+    assert hop() == ["hop       2 hop(s) from a landing to the next writer's dispatch, median 7 min, longest 10 min"]
 
 
 def test_measure_lists_what_waits_and_the_context_of_each_agent_holding_rows(project: Path, built: Path) -> None:

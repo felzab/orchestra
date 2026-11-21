@@ -312,10 +312,11 @@ def run(args: argparse.Namespace) -> int:
     slice_ = args.slice if args.slice is not None or args.type == SLICED else NONE
     if not args.type or not slice_ or not slice_.strip():
         raise Refused("a new brief needs --type, and --slice for a writer; `--check` checks one written")
-    # Read before anything is written, so a body refused leaves no record and no brief behind.
+    # Read before anything is written, so a body that cannot be read leaves no record and no brief behind;
+    # one the check refuses leaves both, and the refusal says so.
     body = None if args.body is None else _body(args.body)
     made = write(state, here.root, args, cli.one_line(slice_), body)
-    return made if body is None else check(args, state, here.root, args.name)
+    return made if body is None else check(args, state, here.root, args.name, written=True)
 
 
 def _body(path: Path) -> list[str]:
@@ -658,7 +659,11 @@ def _read(state: Path, name: str) -> bytes:
         ) from None
 
 
-def check(args: argparse.Namespace, state: Path, root: Path, name: str) -> int:
+def check(args: argparse.Namespace, state: Path, root: Path, name: str, *, written: bool = False) -> int:
+    """The brief checked and stamped, or each fault named; `written` where this call wrote it from a body.
+
+    A second `--body` call is refused, since the brief exists, so a refused one says how to go on.
+    """
     agent = model.read_agent(state, name)
     data = _read(state, name)
     text = data.decode("utf-8", "replace")
@@ -672,7 +677,13 @@ def check(args: argparse.Namespace, state: Path, root: Path, name: str) -> int:
     model.update_agent(state, name, lambda held: dataclasses.replace(held, checked=stamp))
     path = brief_path(state, name)
     if faults:
-        cli.emit(args, faults, f"{name}'s brief is not checked: {len(faults)} fault(s), {path}")
+        summary = f"{name}'s brief is not checked: {len(faults)} fault(s), {path}"
+        if written:
+            summary += (
+                f"; it is written there, so edit it and run `orchestra brief {name} --check`,"
+                f" or settle it with `orchestra prune --discard {name}`"
+            )
+        cli.emit(args, faults, summary)
         return REFUSED
     cli.emit(args, [], f"{name}'s brief is checked: {path}")
     return DONE
