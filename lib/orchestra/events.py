@@ -66,6 +66,10 @@ WRITERS = {"Edit": "file_path", "Write": "file_path", "NotebookEdit": "notebook_
 REF_RE = re.compile(r"\s*\[[^\]]*\]$")
 # Past this many minutes since the previous prompt, a usage figure read before it is stale.
 STALE_MINUTES = 30
+# A subagent's prompt cache lifetime, five minutes unless a setting lengthens it (Claude Code's prompt-caching.md,
+# "Which TTL each request gets"). A resume within it reads the agent's context from the cache, so the ceiling,
+# which spares the cost of writing that context again, waits until it has lapsed.
+CACHE_MINUTES = 5
 # Log entries newer than NOW.md past which it no longer says where the session stands.
 NOW_EVENTS = 5
 # The most an `additionalContext` carries before Claude Code moves it to a file.
@@ -566,7 +570,8 @@ def _addressee(state: Path, to: object) -> model.Agent | None:
 def _resume(where: Where, given: Record) -> str | None:
     """A resume refused where its worktree is gone, its report unjudged or its context too large; else its next report.
 
-    The context's ceiling spares the answer to a report stopped on a question, which closes that round.
+    The context's ceiling spares the answer to a report stopped on a question, which closes that round, and a
+    resume while the agent's cache is warm, which reads its context rather than writing it again.
 
     A message to an agent mid-turn resumes nothing: it reads it at its next turn. A `running` record whose
     turn ended is resumed, since the send that wrote it may never have landed.
@@ -594,10 +599,12 @@ def _resume(where: Where, given: Record) -> str | None:
         # `running` lets a resend through whose first send failed; a usage stop keeps the old outcome but waits
         # on no answer, so the ceiling applies again.
         size, ceiling = context.size(agent, where.session), config.load(root).context_ceiling
-        if size is not None and size > ceiling:
+        # Read last, so a resume under the ceiling globs no transcript twice.
+        if size is not None and size > ceiling and (cold := _cold(agent, where.session)) is not None:
             why = (
-                f"{name}'s context is {size:,} tokens, over the configuration's contextCeiling of {ceiling:,}:"
-                " a resume sends it all again, so dispatch a successor briefed with what is left"
+                f"{name}'s context is {size:,} tokens, over the configuration's contextCeiling of {ceiling:,}, and"
+                f" {cold}: a resume writes it all to the cache again, so dispatch a successor briefed with what is"
+                " left"
             )
     if why is not None and not _waived(where, f"the resume of {name}"):
         return _deny(why)
@@ -614,6 +621,25 @@ def _resume(where: Where, given: Record) -> str | None:
     else:
         told = f"This is round {following}: write its report to {path}, titled `round {following}`."
     return _allow({**given, "message": f"{message.rstrip()}\n\n{told}"})
+
+
+def _cold(agent: model.Agent, session: str | None) -> str | None:
+    """Why the agent's prompt cache may have lapsed; None while its transcript was written within `CACHE_MINUTES`.
+
+    Read from the file's mtime, as `context.ended` reads it. A transcript that cannot be read counts as cold,
+    so the ceiling holds wherever the cache cannot be shown warm.
+    """
+    path = context.transcript(agent, session)
+    if path is None:
+        return "no transcript shows when it last ran"
+    try:
+        written = path.stat().st_mtime
+    except OSError as error:
+        return f"its transcript cannot be read: {error}"
+    seconds = datetime.datetime.now().timestamp() - written
+    if seconds < CACHE_MINUTES * 60:
+        return None
+    return f"its transcript was last written {int(seconds // 60)} min ago, past the {CACHE_MINUTES}-min cache"
 
 
 def _settle(state: Path, agent: model.Agent) -> str:

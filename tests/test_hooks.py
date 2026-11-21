@@ -643,16 +643,29 @@ def test_a_resume_of_a_writer_whose_worktree_is_gone_is_refused(project: Path, s
     )
 
 
-def test_a_resume_past_the_context_ceiling_is_refused_naming_the_figure(project: Path, state: Path) -> None:
+def test_a_resume_past_the_context_ceiling_is_refused_naming_the_figure_once_its_cache_has_lapsed(
+    project: Path, state: Path
+) -> None:
+    """A resume within a subagent's five-minute cache reads its context, which costs about what a successor does."""
     write_config(project, {"stateRoot": (project.parent / "state").as_posix(), "contextCeiling": 100_000})
     briefed(project, "A", "auditor")
     dispatched(project, "A", "auditor", "a1")
     changed(state, "A", status="judged")
-    transcript(project.parent / "claude-config", "a1", line("assistant", "m1", 150_000))
+    config_dir = project.parent / "claude-config"
+    transcript(config_dir, "a1", line("assistant", "m1", 150_000), minutes=events.CACHE_MINUTES + 1)
     said = hook("PreToolUse", project, tool_name="SendMessage", tool_input={"to": "A", "message": "fix F1"})[1]
-    assert str(decision(said)[1]).startswith(
-        "A's context is 150,474 tokens, over the configuration's contextCeiling of 100,000"
+    assert decision(said) == (
+        "deny",
+        "A's context is 150,474 tokens, over the configuration's contextCeiling of 100,000, and its transcript was"
+        " last written 6 min ago, past the 5-min cache: a resume writes it all to the cache again, so dispatch a"
+        " successor briefed with what is left",
     )
+    # Written a moment inside the cache's lifetime, the same resume goes ahead.
+    transcript(config_dir, "a1", line("assistant", "m1", 150_000), minutes=events.CACHE_MINUTES - 0.5)
+    said = hook("PreToolUse", project, tool_name="SendMessage", tool_input={"to": "A", "message": "fix F1"})[1]
+    assert decision(said)[0] == "allow"
+    changed(state, "A", status="judged")
+    transcript(config_dir, "a1", line("assistant", "m1", 150_000), minutes=events.CACHE_MINUTES + 1)
     # Under the ceiling, the same resume goes ahead.
     write_config(project, {"stateRoot": (project.parent / "state").as_posix(), "contextCeiling": 200_000})
     said = hook("PreToolUse", project, tool_name="SendMessage", tool_input={"to": "A", "message": "fix F1"})[1]
@@ -667,7 +680,8 @@ def test_a_writer_stopped_on_a_question_past_the_ceiling_is_answered_and_a_finis
     briefed(project, "W", "writer", owns="lib/a.py")
     dispatched(project, "W", "writer", "w1")
     git(project, "worktree", "add", "-b", "worktree-agent-w1", str(project.parent / "trees" / "agent-w1"))
-    transcript(project.parent / "claude-config", "w1", line("assistant", "m1", 150_000))
+    stale = events.CACHE_MINUTES + 1
+    transcript(project.parent / "claude-config", "w1", line("assistant", "m1", 150_000), minutes=stale)
     sent = {"to": "W", "message": "Keep the old name."}
     changed(state, "W", status="judged", outcome="DONE", branch="worktree-agent-w1")
     said = hook("PreToolUse", project, tool_name="SendMessage", tool_input=sent)[1]
