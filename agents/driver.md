@@ -25,7 +25,7 @@ When your context opens with a summary of earlier work, re-read `${CLAUDE_PLUGIN
 ## Git
 
 - Run `git rev-parse --show-toplevel` first. A top level other than your own worktree is a wrong premise: stop and message the coordinator, because a plant there lands in someone else's work.
-- You commit, push and stash nothing. Where the shared page says to stop on a question, put each arm still blocked at your end under `## Not verified` in a `DONE-WITH-CONCERNS` report.
+- You commit, push and stash nothing.
 - What landed after your fork is on the branch your brief's `Base:` names, read with `git show <branch>:<path>`.
 - Install what your drives need inside your worktree, by the commands the project's addendum gives. A dependency folder linked in from another tree breaks both.
 

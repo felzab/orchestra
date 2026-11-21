@@ -18,9 +18,11 @@ from typing import IO
 
 # Elsewhere the flag does not exist, and a process starts no window.
 NO_WINDOW = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
-# A detached process has no console at all, which Windows' flags rule out beside `CREATE_NO_WINDOW`;
-# its own process group keeps a Ctrl+C meant for the caller from reaching it.
-DETACHED = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP if sys.platform == "win32" else 0
+# A process that outlives its caller gets a console of its own with no window, not `DETACHED_PROCESS`'s
+# none at all: a program it starts would then get a new console, and its window, since a launcher such
+# as a virtual environment's python.exe starts the real interpreter as its child. The new console and
+# its own process group keep a Ctrl+C meant for the caller from reaching it.
+DETACHED = NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP if sys.platform == "win32" else 0
 
 
 def run(

@@ -39,8 +39,11 @@ def test_a_program_started_from_a_process_with_no_console_opens_no_window() -> N
     # A skip inside the case, so the type checker reads the Windows-only flag below as Windows code.
     if sys.platform != "win32":
         pytest.skip("only Windows gives a console program a window of its own")
+    # The interpreter itself, not a virtual environment's python.exe: that launcher starts the interpreter as its
+    # child, which, under a parent with no console, would open the very window this case rules out.
+    base = Path(sys.base_exec_prefix) / "python.exe"
     done = subprocess.run(
-        (sys.executable, "-c", PARENT, REPORT),
+        (str(base), "-c", PARENT, REPORT),
         capture_output=True,
         env={**os.environ, "PYTHONPATH": str(LIB)},
         check=True,
@@ -74,3 +77,28 @@ def test_a_timed_out_program_ends_the_wait_though_its_child_holds_the_output(tmp
         assert took < 20, took
     finally:
         os.kill(int(noted.read_bytes()), signal.SIGTERM)
+
+
+# REPORT's two answers written to a file, whole once it appears, since a detached program's output reaches no one.
+WRITTEN = (
+    "import ctypes, os, sys\n"
+    "kernel = ctypes.windll.kernel32\n"
+    "said = f'{kernel.GetConsoleCP() != 0} {kernel.GetConsoleWindow() != 0}'\n"
+    "open(sys.argv[1] + '.part', 'w').write(said)\n"
+    "os.replace(sys.argv[1] + '.part', sys.argv[1])\n"
+)
+
+
+def test_a_detached_program_started_through_a_launcher_opens_no_window(tmp_path: Path) -> None:
+    """The background deleter, started through a launcher, holds a console with no window."""
+    if sys.platform != "win32":
+        pytest.skip("only Windows gives a console program a window of its own")
+    said = tmp_path / "said"
+    # sys.executable under the suite is a virtual environment's python.exe, a launcher that starts the interpreter as
+    # its child, as a launcher or shim on a user's PATH may.
+    process.detach((sys.executable, "-c", WRITTEN, str(said)), cwd=tmp_path, env=dict(os.environ))
+    deadline = time.monotonic() + 30
+    while not said.exists() and time.monotonic() < deadline:
+        time.sleep(0.1)
+    # The console the interpreter holds, and whether it has a window: one with none, as `process.run`'s children.
+    assert said.read_bytes() == b"True False"

@@ -56,8 +56,9 @@ The fixes from the third project session that ran on the plugin.
   - the review's steps start as soon as their inputs exist, its briefs drafted while the last writers
     run, with a fresh reader over a landing whose defect could reach later work;
   - an agent's report reads `IN-PROGRESS` until it is final; a writer commits what is done before it
-    stops, and a driver, or a writer with nothing yet to commit, asks by `SendMessage` and writes all
-    a successor needs into its report, since no answer can resume it;
+    stops, and a driver, or a writer with nothing yet to commit, asks by `SendMessage`, writes all a
+    successor needs into its report and stops with `DONE-WITH-CONCERNS`, since no answer can resume
+    it;
   - a checked brief that will not go out is settled with `orchestra prune --discard NAME`, and a brief
     names the parts of an earlier report its agent needs;
   - the disclosure lens passes the plugin's two merge subjects while still reading their agent names;

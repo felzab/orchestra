@@ -19,11 +19,10 @@ import argparse
 import dataclasses
 import functools
 import hashlib
-import importlib
 import itertools
 import re
 import typing
-from collections.abc import Callable, Iterable
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -337,20 +336,14 @@ def _body(path: Path) -> list[str]:
 
 def _planned(state: Path, slice_: str) -> list[str]:
     """The files the plan's line for the slice names in backticks, as `status` reads that line; none without one."""
-    # Imported here: the hooks import this module and none of them reads the status view, which imports this one.
-    view = importlib.import_module("orchestra.status")
-    read = typing.cast("Callable[[str], tuple[str, list[str], list[str]]]", view._slice)
-    heading = typing.cast("str", importlib.import_module("orchestra.init").SLICES)
     try:
         lines = model.plan_lines(state)
     except Refused:
         # No plan names the slice's files, so the label is left to be filled, as for a line naming none.
         return []
-    for section, _, text in lines:
-        if section == heading and text:
-            held, files, _ = read(text)
-            if held == slice_:
-                return files
+    for held, files, _ in model.slice_lines(lines):
+        if held == slice_:
+            return files
     return []
 
 
