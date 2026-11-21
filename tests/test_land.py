@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sys
 from dataclasses import replace
 from pathlib import Path
@@ -373,6 +374,22 @@ def test_a_conflict_in_a_regenerated_file_is_answered_by_regenerating_it(fleet: 
     assert git(fleet.root, "show", "HEAD:doc.json") == '{"a": 2, "b": 2}'
     # The conflict's lines git adds to the merge's message are left out of the commit.
     assert git(fleet.root, "log", "-1", "--format=%B") == "Merge WORKER into main"
+
+
+def test_a_conflict_under_a_folder_a_regeneration_writes_is_answered_by_regenerating_it(fleet: Fleet) -> None:
+    """A step's `writes` may name a folder, and every file under it is then that step's to regenerate."""
+    path = fleet.root / ".claude" / "orchestra.json"
+    settings = json.loads(path.read_bytes())
+    generator = GENERATOR.replace("Path('doc.json')", "Path('docs/doc.json')")
+    settings["land"]["steps"] = [_step("regenerate", ["src/"], "tools/generate.py", writes=["docs/"])]
+    files = {".claude/orchestra.json": json.dumps(settings), "tools/generate.py": generator, "docs/doc.json": "{}\n"}
+    commit(fleet.root, "Repo: The document moves into a folder", files)
+    tree = agent(fleet)
+    commit(tree, "Docs: b grows", {"src/b.txt": '"b": 2', "docs/doc.json": '{"a": 1, "b": 2}\n'})
+    commit(fleet.root, "Docs: a grows", {"src/a.txt": '"a": 2', "docs/doc.json": '{"a": 2, "b": 1}\n'})
+    code, _, err = fleet.run("land", "WORKER")
+    assert code == 0, err
+    assert git(fleet.root, "show", "HEAD:docs/doc.json") == '{"a": 2, "b": 2}'
 
 
 def test_a_conflict_no_regeneration_answers_aborts_naming_who_else_changes_the_path(fleet: Fleet) -> None:
