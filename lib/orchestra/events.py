@@ -373,7 +373,10 @@ def _dispatch(where: Where, given: Record) -> str | None:
         why = "an orchestra dispatch's prompt is the agent's name alone, as `orchestra brief NAME` wrote its brief"
     elif not model.has_agent(state, name):
         sliced = " --slice S" if kind == brief.SLICED else ""
-        why = f"no agent {name} in this session: `orchestra brief {name} --type {kind}{sliced}` writes its brief"
+        why = (
+            f"no agent {name} in this session: `orchestra brief {name} --type {kind}{sliced} --body FILE` writes its"
+            " brief from a file holding its lists and its four sections, and checks it"
+        )
     else:
         return _start(where, given, model.read_agent(state, name), root)
     return None if _waived(where, call) else _deny(why)

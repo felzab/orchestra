@@ -655,8 +655,8 @@ def _read(state: Path, name: str) -> bytes:
         return store.read_bytes(path)
     except FileNotFoundError:
         raise Refused(
-            f"{name} has no brief at {path}: `orchestra brief {name} --type T`, with `--slice S` for a writer,"
-            " writes one"
+            f"{name} has no brief at {path}: `orchestra brief {name} --type T --body FILE`, with `--slice S` for a"
+            " writer, writes one from a file holding its lists and its four sections, and checks it"
         ) from None
 
 
