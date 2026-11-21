@@ -64,7 +64,7 @@ Harm: <the concrete harm>. Likelihood: <how likely, and on what evidence>.
 - `STATUS` reads `IN-PROGRESS` until the report is final, then `DONE`, `DONE-WITH-CONCERNS` or `NEEDS-ANSWER`. A researcher, an auditor and a verifier write `Commits: none`.
 - Copy each finding's heading line, after its `### `, into `## Summary` unchanged, since the stop hook compares the two. The summary's other lines hold at most 1,500 bytes together, in words a reader who saw none of your work understands. Your final message is that section followed by the report's path.
 - Record every finding and classify it; the coordinator filters. `defect` affects correctness or the stated requirements and `optional` is anything else; `silent` means nothing fails or shows when it bites. Another report's finding is `<NAME>-F<n>`.
-- `## Done` holds what you read or ran, with exit codes. A section with nothing to say holds `nothing`, and `## Findings` holds `none`. `## Outside the scope` describes what you found beyond your brief and leaves it unfixed.
+- `## Done` holds what you read or ran, with exit codes. A section with nothing to say holds `nothing`, and `## Findings` holds `none`. `## Outside the scope` describes what you found beyond your brief and leaves it unfixed; a defect there is also a finding at its own file, since judging banks findings alone, save in a verifier's report.
 
 ## Scratch
 

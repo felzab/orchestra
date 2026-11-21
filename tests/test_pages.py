@@ -35,7 +35,7 @@ BUDGETS = {
     "skills/end/SKILL.md": 500,
     "skills/resume/SKILL.md": 500,
     "skills/plan/SKILL.md": 1913,
-    "skills/agent/SKILL.md": 7015,
+    "skills/agent/SKILL.md": 7130,
     "agents/writer.md": 6763,
     "agents/driver.md": 4311,
     "agents/researcher.md": 3844,
