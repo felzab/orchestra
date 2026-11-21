@@ -28,10 +28,11 @@ const POINTERS = 'orchestra'
 let pending = false
 // While the queued `/compact` runs: the main conversation's compaction result, once one settles.
 let running
-// Set once a compaction the tool scheduled is known not to have run, a veto or a rejected `/compact`, until the
-// owner's next prompt or a main compaction that runs: the resume prompt starts a turn, so a compaction that fails
-// each time would repeat for as long as the model calls the tool again (plugins/mods/api.md, "A `claude -p` run with
-// your mod never exits").
+// Set once a compaction the tool scheduled is not seen to have run, a veto, a rejected `/compact` or an unknown
+// outcome, until the owner's next prompt or a main compaction the `session.compact` hook sees run; where the
+// built-in guard loads that hook never runs, so only the prompt clears it. The resume prompt starts a turn, so a
+// compaction that fails each time would repeat for as long as the model calls the tool again (plugins/mods/api.md,
+// "A `claude -p` run with your mod never exits").
 let failed = false
 // The origins of a prompt that is the owner's own input (PromptOrigin): Enter at the terminal, the Remote Control
 // bridge, the SDK host's own turn, and a ping from Slack.
@@ -93,8 +94,12 @@ async function compactThenResume($) {
       // response of the live window: a fresh session, or one just compacted" (SessionContextUsage).
       said = 'The compaction scheduled with the compact tool has run.'
     } else {
-      // A reading may come from a turn something else started since, so it is no evidence the compaction failed.
+      // Where the guard loads, a veto ends here: no hook of this mod reports it, and `$.command.run` "Rejects an
+      // unknown name, inside a hook the turn or the session's start waits on, past a Stop or a host's limit". A
+      // reading from a turn started since would stop the tool after a compaction that ran, which costs only the seams
+      // until the owner's next prompt, as Claude Code still compacts at the window.
       said = 'The compaction scheduled with the compact tool reported no outcome, so whether it ran is unknown.'
+      failed = true
     }
   } catch (error) {
     said = `The compaction scheduled with the compact tool failed: ${error instanceof Error ? error.message : error}.`
@@ -130,7 +135,7 @@ export function register(on) {
     }
     if (failed) {
       return {
-        deny: `${TOOL} schedules nothing until the owner's next prompt or a compaction that runs, since the one it last scheduled did not run.`,
+        deny: `${TOOL} schedules nothing until the owner's next prompt or a compaction it sees run, since the one it last scheduled was not seen to run.`,
       }
     }
     if (pending) return { result: SCHEDULED }

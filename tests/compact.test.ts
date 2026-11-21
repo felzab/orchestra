@@ -6,7 +6,7 @@ import { quote } from '../hooks/compact.js'
 const TOOL = 'mcp__orchestra__compact'
 const SCHEDULED = { result: 'scheduled: end your turn, and the conversation compacts once it has ended' }
 const REFUSED = {
-  deny: `${TOOL} schedules nothing until the owner's next prompt or a compaction that runs, since the one it last scheduled did not run.`,
+  deny: `${TOOL} schedules nothing until the owner's next prompt or a compaction it sees run, since the one it last scheduled was not seen to run.`,
 }
 const COMMON = '/work/.git'
 const STATE = '/state/fleet'
@@ -328,7 +328,7 @@ test('where no session.compact hook runs, a context left with no reading has com
   expect(seen.prompts).toEqual(['The compaction scheduled with the compact tool has run.'])
 })
 
-test('where no session.compact hook runs and the context keeps its reading, the outcome is unknown', async ($, on) => {
+test('where no session.compact hook runs and the context keeps its reading, the outcome is unknown and the tool stops', async ($, on) => {
   const { clock, seen, complete } = stub($, on, { guarded: true, stays: true })
   await $.tool.call({ tool: TOOL })
   await complete()
@@ -336,8 +336,8 @@ test('where no session.compact hook runs and the context keeps its reading, the 
   expect(seen.prompts).toEqual([
     'The compaction scheduled with the compact tool reported no outcome, so whether it ran is unknown.',
   ])
-  // No evidence of a failure, so the tool is not stopped.
-  expect(await $.tool.call({ tool: TOOL })).toEqual(SCHEDULED)
+  // Under the built-in guard a veto ends here, so the tool stops as after one it saw.
+  expect(await $.tool.call({ tool: TOOL })).toEqual(REFUSED)
 })
 
 test("the pointer's name is quoted as Python's quote(branch, safe='') quotes it", () => {
