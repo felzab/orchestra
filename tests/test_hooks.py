@@ -1582,6 +1582,13 @@ def test_a_prompt_nearing_the_compaction_window_tells_the_coordinator_and_past_i
     said = hook("UserPromptSubmit", project, prompt="go", transcript_path=str(main))[1]
     assert "compaction" not in context_of(said, "UserPromptSubmit")
     assert "systemMessage" not in cast("dict[str, object]", said)
+    # A window set for the transcript's model alone is that session's window.
+    settings["modelSettings"] = {"claude-test": {"autoCompactWindow": 1_000_000}}
+    local.write_bytes(json.dumps(settings).encode())
+    said = hook("UserPromptSubmit", project, prompt="go", transcript_path=str(main))[1]
+    assert "900,474 tokens, at least 75% of the 1,000,000-token compaction window" in context_of(
+        said, "UserPromptSubmit"
+    )
 
 
 def test_a_hook_reads_each_agents_transcript_in_the_session_its_input_names(project: Path, state: Path) -> None:
