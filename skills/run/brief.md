@@ -27,7 +27,7 @@ TRAPS     The tests share one fake clock: advance it, since a sleep makes the su
 - `Rows:` lists the rows a writer's commits answer, which the dispatch routes to it so that its landing closes those its report names fixed, and `none` otherwise. A verifier's rows are named in its `WORK`.
 - `Writes:` lists paths outside the checkout and the state that a researcher, auditor or verifier may write besides its report and its scratch folder.
 - `Lens:` names lenses. The agent reads each file, so paste none.
-- `Model:` is a line you may add, naming a profile of the project's `models`; without it the agent gets `default`.
+- `Model:` is a line you may add, naming a profile of the project's `models`; without it the agent gets `default`. Name a cheaper profile, such as `mechanical`, only where the brief spells out each edit, plant or source, as for one rename's sweep, a changelog entry from named commits or a named command run again; a lens, a verifier and any work of finding, judging or designing keep `default`, since a cheaper model finds fewer defects and its misses fail no check.
 
 ## The sections
 
