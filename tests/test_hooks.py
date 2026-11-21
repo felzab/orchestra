@@ -375,7 +375,8 @@ def test_a_hook_gives_up_on_a_held_lock_within_its_budget(project: Path, state: 
 # --- the dispatch ---------------------------------------------------------------------------------
 
 
-def test_a_dispatch_of_an_agent_with_no_record_names_a_brief_command_that_parses(project: Path, state: Path) -> None:
+@pytest.mark.usefixtures("state")
+def test_a_dispatch_of_an_agent_with_no_record_names_a_brief_command_that_parses(project: Path) -> None:
     """The refusal hands the coordinator the command that writes the brief, so the command must still be one."""
     call = {"description": "NEW", "prompt": "NEW", "subagent_type": "orchestra:writer"}
     verdict, why = decision(hook("PreToolUse", project, tool_name="Agent", tool_input=call)[1])

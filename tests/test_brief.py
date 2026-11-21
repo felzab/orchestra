@@ -181,7 +181,8 @@ def test_a_whole_brief_is_stamped_and_an_edit_unstamps_it(project: Path, state: 
     assert not brief.stamped(state, model.read_agent(state, "A"))
 
 
-def test_a_check_of_a_record_whose_brief_is_gone_names_the_command_that_writes_one(project: Path, state: Path) -> None:
+@pytest.mark.usefixtures("state")
+def test_a_check_of_a_record_whose_brief_is_gone_names_the_command_that_writes_one(project: Path) -> None:
     path = briefed(project, "A")
     path.unlink()
     done = inprocess("brief", "A", "--check", cwd=project)
