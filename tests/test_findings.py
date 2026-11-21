@@ -12,6 +12,8 @@ from orchestra import context, log, model, report, store
 
 STORE = "lib/store.py :: save"
 CLI = "lib/cli.py :: emit"
+# REVIEW-F2's evidence once VERIFY corrects it: the heading changed, so it leads the proof line.
+CORRECTION = "corrected by VERIFY: F2 · optional · loud · lib/cli.py :: main; The flaw is at `main`."
 
 
 @dataclass(frozen=True)
@@ -203,7 +205,7 @@ def test_a_verifiers_report_closes_a_refuted_row_and_routes_a_corrected_one_as_c
     # Routed to the queue it waits on already, the correction still reaches the row.
     assert (held["REVIEW-F2"].owner, held["REVIEW-F2"].evidence) == (
         "ending",
-        "corrected by VERIFY: F2 · optional · loud · lib/cli.py :: main",
+        CORRECTION,
     )
     assert (held["REVIEW-F3"].owner, held["REVIEW-F3"].evidence) == ("FIXER", None)
     # A judge cut short before it marked the verifier: the retry moves nothing a second time.
@@ -223,7 +225,7 @@ def test_a_corrected_row_keeps_its_correction_when_routed_on_to_its_fixer(projec
     done = inprocess("route", "FIXER", "REVIEW-F2", cwd=project)
     assert done.returncode == 0, done.stderr
     held = rows(state)["REVIEW-F2"]
-    assert (held.owner, held.evidence) == ("FIXER", "corrected by VERIFY: F2 · optional · loud · lib/cli.py :: main")
+    assert (held.owner, held.evidence) == ("FIXER", CORRECTION)
 
 
 def test_a_corrected_row_keeps_its_correction_when_a_later_verifier_confirms_and_routes_it(
@@ -238,7 +240,26 @@ def test_a_corrected_row_keeps_its_correction_when_a_later_verifier_confirms_and
     done = inprocess("judge", "AGAIN", "REVIEW-F2=route:FIXER", "--verdict", "v", cwd=project)
     assert done.returncode == 0, done.stderr
     held = rows(state)["REVIEW-F2"]
-    assert (held.owner, held.evidence) == ("FIXER", "corrected by VERIFY: F2 · optional · loud · lib/cli.py :: main")
+    assert (held.owner, held.evidence) == ("FIXER", CORRECTION)
+
+
+def test_a_verdict_records_its_proof_line_and_a_corrected_heading_only_where_it_changed(
+    project: Path, state: Path
+) -> None:
+    """A CORRECTED body opens with the corrected heading, often the banked one unchanged, which proves nothing."""
+    agent(state, "REVIEW", Written("auditor", (STORE, CLI)))
+    waits = ("F1=route:ending", "F2=route:ending")
+    assert inprocess("judge", "REVIEW", *waits, "--verdict", "v", cwd=project).returncode == 0
+    verdicts = (
+        ("REVIEW-F1", "CORRECTED", f"F1 · defect · silent · {STORE}\n\nThe guard is missing at `save`, line 12."),
+        ("REVIEW-F2", "REFUTED", f"F2 · defect · silent · {CLI}\n`emit` flushes at line 30."),
+    )
+    agent(state, "VERIFY", Written("verifier", verdicts=verdicts))
+    done = inprocess("judge", "VERIFY", "REVIEW-F1=route:ending", "--verdict", "v", cwd=project)
+    assert done.returncode == 0, done.stderr
+    held = rows(state)
+    assert held["REVIEW-F1"].evidence == "corrected by VERIFY: The guard is missing at `save`, line 12."
+    assert held["REVIEW-F2"].evidence == "refuted by VERIFY: `emit` flushes at line 30."
 
 
 def test_a_verifiers_confirmed_row_takes_a_disposition(project: Path, state: Path) -> None:

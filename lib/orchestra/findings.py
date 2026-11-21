@@ -392,7 +392,8 @@ def judge(args: argparse.Namespace, state: Path, owner: Callable[[str], str]) ->
     reports = Reports(state)
     new = {report.row(agent.name, round_, finding.number): finding for finding in held.findings}
     if verifier:
-        events = _apply(state, lambda now: _verdicts(agent.name, held.verdicts, given, now, alive))
+        proofs = {verdict.row: _proof(verdict, _heading(reports, verdict.row)) for verdict in held.verdicts}
+        events = _apply(state, lambda now: _verdicts(agent.name, held.verdicts, given, now, alive, proofs))
     else:
         events = _apply(state, lambda now: _bank(agent.name, held.findings, round_, given, now))
     model.update_agent(state, agent.name, lambda before: dataclasses.replace(before, status="judged", verdict=verdict))
@@ -447,16 +448,40 @@ def _bank(
     return made
 
 
+def _heading(reports: Reports, row: str) -> str | None:
+    """The heading the row's finding was banked under; None where its report no longer reads."""
+    try:
+        return reports.finding(row)[0].heading
+    except Refused:
+        return None
+
+
+def _proof(verdict: report.Verdict, banked: str | None) -> str:
+    """What a verdict's row records as its evidence: the body's first line that is no finding heading.
+
+    A CORRECTED body opens with the corrected heading, which is often the banked one unchanged; it leads
+    the evidence only where it differs from `banked`, the heading the row was banked under.
+    """
+    lines = [cli.one_line(line) for line in verdict.body.split("\n") if line.strip()]
+    proof = next((line for line in lines if not report.FINDING_RE.fullmatch(line)), None)
+    corrected = lines[0] if verdict.verdict == "CORRECTED" and lines else None
+    if corrected is not None and banked is not None and _anchor(corrected) == _anchor(banked):
+        corrected = None
+    return "; ".join(part for part in (corrected, proof) if part) or cli.one_line(verdict.first)
+
+
 def _verdicts(
     name: str,
     verdicts: tuple[report.Verdict, ...],
     given: dict[str, Disposition],
     now: dict[str, FindingEvent],
     live: dict[str, str],
+    proofs: dict[str, str],
 ) -> list[FindingEvent | str | None]:
     """A verifier's rows moved: a REFUTED one closed by itself, a CORRECTED one routed with its correction.
 
-    A verdict on a row never banked moves nothing and takes no disposition.
+    A verdict on a row never banked moves nothing and takes no disposition. `proofs` holds each verdict's
+    evidence by its row, as `_proof` reads it.
     """
     rows = [verdict.row for verdict in verdicts]
     if unknown := [row for row in given if row not in rows]:
@@ -472,13 +497,13 @@ def _verdicts(
     for verdict in banked:
         held = now.get(verdict.row)
         # A refutation names its proof, so the row closes on the verifier's evidence unless the judge says otherwise.
-        refuted = Close("NOT A DEFECT", f"refuted by {name}: {cli.one_line(verdict.first)}")
+        refuted = Close("NOT A DEFECT", f"refuted by {name}: {proofs[verdict.row]}")
         match given.get(verdict.row, refuted):
             case Route(owner):
                 # A row's state is its last line, so a route of a routed row carries its evidence, an earlier
                 # verifier's correction included, unless this verifier corrects it again.
                 kept = held.evidence if held is not None and held.status == "ROUTED" else None
-                corrected = f"corrected by {name}: {verdict.first}" if verdict.verdict == "CORRECTED" else kept
+                corrected = f"corrected by {name}: {proofs[verdict.row]}" if verdict.verdict == "CORRECTED" else kept
                 made.append(_route(verdict.row, held, owner, live, corrected))
             case Close(status, evidence):
                 # A row closed so already was closed by a judge of this report that stopped before it marked
