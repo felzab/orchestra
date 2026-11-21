@@ -1579,11 +1579,12 @@ def test_a_prompt_nearing_the_compaction_window_tells_the_coordinator_and_past_i
     seam += " at the next seam."
     main.write_bytes(line("assistant", "m0", 900_000) + line("user") + line("assistant", "m1", 500_000))
     said = hook("UserPromptSubmit", project, prompt="go", transcript_path=str(main))[1]
-    # The compact tool measures against the window Claude Code applied, so past an unapplied one it may wait.
+    # The compact tool measures against the window Claude Code applied, so past an unapplied one it may wait; the
+    # owner's `/compact` is named for a seam where the tool does not compact, the condition the owner's line holds.
     assert context_of(said, "UserPromptSubmit").endswith(
         " Your context is 500,474 tokens, past the 500,000-token compaction window, which has not applied;"
         " `mcp__orchestra__compact` compacts only from 60% of the window Claude Code applied, which may be larger,"
-        " so the owner's `/compact` compacts at the next seam."
+        " so the owner's `/compact` compacts at the next seam where the tool does not."
     )
     # The tool may still compact at that seam, under a larger applied window, so the owner's order waits on it.
     assert field(said, "systemMessage") == (

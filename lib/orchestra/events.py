@@ -1237,7 +1237,8 @@ def user_prompt_submit(where: Where) -> str | None:
     # The tool's threshold is of the window Claude Code applied, which this one is not, so it promises nothing here.
     waits = f"compacts only from {COMPACTS_FROM:.0%} of the window Claude Code applied, which may be larger"
     said += f" Your context is {size} tokens, past the {window}-token compaction window, which has not applied;"
-    said += f" `{COMPACT_TOOL}` {waits}, so the owner's `/compact` compacts at the next seam."
+    # Conditioned as the owner's line below is, so the coordinator relays no order that line holds back.
+    said += f" `{COMPACT_TOOL}` {waits}, so the owner's `/compact` compacts at the next seam where the tool does not."
     # Under a larger applied window the tool may still compact at that seam, so the owner's order waits on it.
     shown = (
         f"orchestra: this session's context is {size} tokens, past its {window}-token compaction window, which"

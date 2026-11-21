@@ -28,9 +28,9 @@ The fixes from the third project session that ran on the plugin.
 - The prompt hook tells the coordinator, from 75% of a compaction window that a settings file or the
   environment sets, that the compact tool compacts at the next seam. Past the window, which has then
   not applied, the coordinator reads that the tool compacts only from 60% of the window Claude Code
-  applied, which may be larger, so the owner's `/compact` compacts at the next seam; the owner is told
-  to type `/compact` at the coordinator's next seam, unless the tool compacts there or answers that
-  none is needed.
+  applied, which may be larger, so the owner's `/compact` compacts at the next seam where the tool
+  does not; the owner is told to type `/compact` at the coordinator's next seam, unless the tool
+  compacts there or answers that none is needed.
 - `orchestra brief NAME --type writer --slice S --body FILE` writes the brief's header above a file
   holding its lists and sections and checks it in the same call. Where the check refuses, the brief
   stays written, and the refusal says to edit it and run `orchestra brief NAME --check`, or to settle
