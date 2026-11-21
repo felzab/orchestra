@@ -1237,9 +1237,11 @@ def user_prompt_submit(where: Where) -> str | None:
     waits = f"compacts only from {COMPACTS_FROM:.0%} of the window Claude Code applied, which may be larger"
     said += f" Your context is {size} tokens, past the {window}-token compaction window, which has not applied;"
     said += f" `{COMPACT_TOOL}` {waits}, so the owner's `/compact` compacts at the next seam."
+    # Under a larger applied window the tool may still compact at that seam, so the owner's order waits on it.
     shown = (
         f"orchestra: this session's context is {size} tokens, past its {window}-token compaction window, which"
-        f" has not applied. The coordinator's compact tool {waits}, so type `/compact` at its next seam."
+        " has not applied. Type `/compact` at the coordinator's next seam, unless its compact tool compacts there"
+        " or answers that none is needed."
     )
     return _json(
         {
