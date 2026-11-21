@@ -290,6 +290,20 @@ def test_a_verifiers_judge_reads_only_its_own_report_and_those_its_verdicts_name
     assert sorted({path.stem for path in read}) == ["REVIEW", "VERIFY"]
 
 
+def test_a_verifiers_route_leaves_a_row_with_the_live_agent_holding_it(project: Path, state: Path) -> None:
+    """A row stays with its agent until that agent reports, so a verdict cannot hand it to a second owner."""
+    agent(state, "FIXER", "writer", "briefed")
+    agent(state, "REVIEW", Written("auditor", (STORE,)))
+    assert inprocess("judge", "REVIEW", "F1=route:FIXER", "--verdict", "v", cwd=project).returncode == 0
+    proof = f"F1 · defect · silent · {STORE}\nThe guard is missing at `load` too."
+    agent(state, "VERIFY", Written("verifier", verdicts=(("REVIEW-F1", "CORRECTED", proof),)))
+    before = lines(state)
+    done = inprocess("judge", "VERIFY", "REVIEW-F1=route:owner", "--verdict", "v", cwd=project)
+    assert done.returncode == 2
+    assert "REVIEW-F1 is routed to FIXER, which is briefed: its rows stay with it until it reports" in done.stderr
+    assert lines(state) == before
+
+
 def test_a_verifiers_confirmed_row_takes_a_disposition(project: Path, state: Path) -> None:
     _review_given_to_a_verifier(project, state)
     before = lines(state)
