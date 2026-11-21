@@ -322,7 +322,7 @@ does not know is refused, naming its path in the file.
   "base": "main",
   "models": {
     "default": { "model": "opus", "effort": "high" },
-    "mechanical": { "model": "sonnet", "effort": "medium" }
+    "mechanical": { "model": "sonnet", "effort": "high" }
   },
   "queues": ["review"],
   "preflight": [{ "run": ["docker", "info"], "why": "the integration tests start a database container" }],
