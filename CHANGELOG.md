@@ -88,6 +88,9 @@ The fixes from the third project session that ran on the plugin.
   - the handoff writes the next session's work list, one line an item, into the programme's plan
     where one exists and otherwise into itself, and the estimate's second reader also runs at each
     estimate the owner starts and names each row it corrected the last time;
+  - the plan lists each slice's files from a search of the whole tree for each name, key and constant
+    the slice renames or whose type or signature it changes, its importers and tests included, so a
+    writer seldom has to ask for a file mid-run;
   - the shared agent page says the Bash tool moves a call into the background after about 180
     seconds, whatever its timeout, so an agent splits a longer check.
 - The guide carries the measured compaction figures, why 500,000 is kept and why a seam compacts
