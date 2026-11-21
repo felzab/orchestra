@@ -222,6 +222,14 @@ test('a resume prompt Claude Code refuses leaves a line saying why', async ($, o
 })
 
 test("the pointer's name is quoted as Python's quote(branch, safe='') quotes it", () => {
-  // Printed by `python -c "from urllib.parse import quote; print(quote('fix/a b!(x)*~é', safe=''))"`.
-  expect(quote('fix/a b!(x)*~é')).toBe('fix%2Fa%20b%21%28x%29%2A~%C3%A9')
+  // Each value printed by `python -c "from urllib.parse import quote; print(quote(branch, safe=''))"`, the
+  // quoting `store.pointer` names its file with, for the branch beside it.
+  const quoted = {
+    'fix/a b': 'fix%2Fa%20b',
+    'feature/x': 'feature%2Fx',
+    "it's!(x)*": 'it%27s%21%28x%29%2A',
+    'café/ü': 'caf%C3%A9%2F%C3%BC',
+    'fix/a b!(x)*~é': 'fix%2Fa%20b%21%28x%29%2A~%C3%A9',
+  }
+  for (const [branch, name] of Object.entries(quoted)) expect(quote(branch)).toBe(name)
 })
