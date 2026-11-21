@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 from conftest import MakeRepo, git
-from orchestra import land, log, model
+from orchestra import land, log, model, prune
 from orchestra.config import Step
 from test_prune import TRASH, Fleet, add_agent, commit, make_fleet, ran, route, wait_gone, write
 from test_report import text
@@ -239,6 +239,35 @@ def test_a_landing_credits_no_agent_whose_branch_had_landed_before_it(fleet: Fle
     assert code == 0, err
     assert model.read_findings(fleet.state)["A-F2"].status == "ROUTED"
     assert "A-F2 is named fixed and is ROUTED FIRST, so it stands as it is" in out
+
+
+def test_a_landing_carries_no_settled_agent_and_looks_up_none_of_their_branches(
+    fleet: Fleet, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A pruned agent's branch outlives its record where its prune could not delete it, as a merge agent may carry it.
+    Its work was credited when it settled, so a later landing neither credits it again nor asks git for its branch.
+    """
+    fixer = agent(fleet, "FIXER", "d1")
+    write(fleet.state, "reports/FIXER.md", text("writer", "FIXER", fixed="A-F1."))
+    commit(fixer, "Docs: A note", {"notes.txt": "second\n"})
+    merger = agent(fleet, "MERGER", "d2")
+    git(merger, "merge", "-q", "--no-ff", "worktree-agent-d1", "-m", "Merge the fixer")
+    commit(merger, "Docs: Another file", {"other.txt": "new\n"})
+    model.update_agent(fleet.state, "FIXER", lambda held: replace(held, status="pruned"))
+    route(fleet, "A-F1", "FIXER")
+    asked: list[str] = []
+    real = prune.branch_exists
+
+    def counted(root: Path, branch: str) -> bool:
+        asked.append(branch)
+        return real(root, branch)
+
+    monkeypatch.setattr(prune, "branch_exists", counted)
+    code, out, err = fleet.run("land", "MERGER")
+    assert code == 0, err
+    assert out.splitlines()[-1].startswith("landed MERGER as "), out
+    assert "worktree-agent-d1" not in asked
+    assert model.read_findings(fleet.state)["A-F1"].status == "ROUTED"
 
 
 def test_a_branch_merged_before_its_bookkeeping_is_settled_by_landing_it_again(fleet: Fleet) -> None:
