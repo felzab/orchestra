@@ -63,11 +63,11 @@ rewritten `NOW.md`, and no report waits to be judged. At each seam, attended or 
 `mcp__orchestra__compact`, a tool the plugin's mod (`hooks/compact.js`) adds. The tool refuses an
 agent and a checkout whose branch holds no session, and below 60% of the compaction window it
 answers that compacting is not needed yet. After a compaction it scheduled was vetoed or failed,
-it refuses every call until your next prompt or a compaction that runs, so a compaction that
-fails each time cannot repeat while you are away. Otherwise the conversation compacts once the
-coordinator's turn ends, and a one-line prompt from the plugin then starts its next turn, so a
-coordinator with no agent left to report carries on; a turn that ends interrupted or in an error
-drops the compaction. Scheduling, compacting and the resume prompt have been driven in headless
+it refuses every call until your next prompt or, where Claude Code's built-in guard does not load
+(below), a compaction that runs, so a compaction that fails each time cannot repeat while you are
+away. Otherwise the conversation compacts once the coordinator's turn ends, and a one-line prompt
+from the plugin then starts its next turn, so a coordinator with no agent left to report carries
+on; a turn that ends interrupted or in an error drops the compaction. Scheduling, compacting and the resume prompt have been driven in headless
 `claude -p` sessions only, not yet in an interactive terminal or the desktop app; the 60% gate and
 the refusal after a failed compaction have run only in the mod's tests. Where the tool is absent or
 fails, the coordinator tells you at a seam to type `/compact`, attended or away, once the hook on
@@ -80,13 +80,13 @@ the tool. `--safe-mode` loads no plugin at all, and `"disableAllHooks": true` st
 well as mods ([settings reference](https://code.claude.com/docs/en/settings-reference),
 `disableAllHooks`), so orchestra cannot run under either. With managed settings, a
 `managed-mcp.json` file or a Team or Enterprise `/login` as the session's credential, "the built-in
-guard loads by default", and a call that a mod you installed approves still meets your `deny` and
-`ask` rules and your `PreToolUse` hooks
-([permissions page](https://code.claude.com/docs/en/permissions), "Precedence among rules, hooks,
-and mods"); where the guard loads, "a hook that a user's mod registers on one of these events never
-runs", `session.compact` among them
+guard loads by default" ([permissions page](https://code.claude.com/docs/en/permissions),
+"Precedence among rules, hooks, and mods"), and where it loads, "a hook that a user's mod registers
+on one of these events never runs", `session.compact` among them
 ([managing mods](https://code.claude.com/docs/en/plugins/mods/admin), "Know which hooks of a user's
-mod don't run").
+mod don't run"). The mod then cannot see a compaction's outcome: it takes a compaction as run where
+the context has no size reading after it, and otherwise refuses the tool as after a failed one until
+your next prompt.
 
 `init` sets the window for you. Where the environment sets no `CLAUDE_CODE_AUTO_COMPACT_WINDOW`, in
 the shell or a settings file's `env`, which outranks every settings key, and none of the checkout's
