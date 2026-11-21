@@ -40,7 +40,8 @@ def test_a_question_waits_with_its_options_until_the_owner_rules_on_it(project: 
     assert inprocess("ask", cwd=project).returncode == 0
     again = inprocess("rule", "1", "Keep it.", cwd=project)
     assert again.returncode == 2
-    assert "question 1 has ruling 101 already" in again.stderr
+    assert "question 1 has ruling 101 already: Raise it, but only this week. A changed" in again.stderr
+    assert "A changed ruling is a new question, asked with `--supersedes 1`, and its own ruling" in again.stderr
 
 
 def test_a_question_asked_again_closes_the_first_which_takes_no_ruling(project: Path, state: Path) -> None:

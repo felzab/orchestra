@@ -127,9 +127,12 @@ def _rule(args: argparse.Namespace, state: Path) -> int:
         if asked.superseded_by is not None:
             raise Refused(f"question {args.ask} was asked again as question {asked.superseded_by}: rule on that one")
         if asked.number is not None:
+            # The owner's words often end a sentence already, so they take no second stop.
+            words = asked.words or ""
+            stop = "" if words.endswith((".", "!", "?")) else "."
             raise Refused(
-                f"question {args.ask} has ruling {asked.number} already: {asked.words}."
-                " A changed ruling is a new question and its own ruling"
+                f"question {args.ask} has ruling {asked.number} already: {words}{stop}"
+                f" A changed ruling is a new question, asked with `--supersedes {args.ask}`, and its own ruling"
             )
         number = model.next_ruling(state, held)
         return [dataclasses.replace(asked, number=number, words=text, date=model.now())]
