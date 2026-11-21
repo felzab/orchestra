@@ -354,6 +354,8 @@ def test_a_round_judged_from_a_record_no_report_hook_moved_is_stamped_by_its_own
     assert code == 0, err
     assert out.splitlines()[-1] == "nothing to land: the session branch already holds worktree-agent-a1", out
     assert "landed" in model.read_agent(fleet.state, "WORKER").since
+    landed = [entry.text for entry in log.entries(fleet.state) if entry.kind == "land"]
+    assert landed == ["WORKER landed: the session branch already holds worktree-agent-a1"]
 
 
 def test_a_record_a_hook_changes_while_the_landing_runs_its_git_keeps_what_the_hook_wrote(
@@ -375,6 +377,8 @@ def test_a_record_a_hook_changes_while_the_landing_runs_its_git_keeps_what_the_h
     assert out.splitlines()[-1] == "nothing to land: the session branch already holds worktree-agent-a1", out
     held = model.read_agent(fleet.state, "WORKER")
     assert (held.status, "landed" in held.since) == ("running", False)
+    # Nor does the log record a landing the record was kept from.
+    assert not [entry for entry in log.entries(fleet.state) if entry.kind == "land"]
 
 
 def test_a_merge_touching_a_steps_paths_installs_regenerates_and_checks(fleet: Fleet) -> None:

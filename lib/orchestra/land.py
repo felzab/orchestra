@@ -373,10 +373,12 @@ def land(here: Checkout, state: Path, name: str, args: argparse.Namespace) -> in
             # and a limit's stop keep the outcome the round before reported, so only a judged record's is its
             # latest round's word, and one a hook changed since it was read here keeps what the hook wrote.
             if agent.status == "judged" and agent.outcome in DELIVERED:
-                model.update_agent(
+                stamped = model.update_agent(
                     state, name, lambda held: replace(held, status="landed") if held.status == "judged" else held
                 )
-                log.record(state, "land", f"{name} landed: the session branch already holds {branch}")
+                # A record the hook kept from the stamp did not land, so the log records no landing either.
+                if stamped.status == "landed":
+                    log.record(state, "land", f"{name} landed: the session branch already holds {branch}")
             said = prune.prune(here, state, {name})
             cli.emit(args, said.failed + said.lines, f"nothing to land: the session branch already holds {branch}")
             return 0
