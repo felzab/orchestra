@@ -245,14 +245,6 @@ def _minutes(since: datetime.timedelta) -> int:
     return int(since.total_seconds() // 60)
 
 
-def _stamp(agent: model.Agent, status: str) -> datetime.datetime | None:
-    held = agent.since.get(status)
-    try:
-        return datetime.datetime.fromisoformat(held) if held else None
-    except ValueError:
-        return None
-
-
 def _who(agent: model.Agent) -> str:
     rounds = len(agent.reports)
     said = f"{agent.name} ({agent.type}, round {rounds}"
@@ -821,7 +813,7 @@ def _holders(state: Path, agents: list[model.Agent]) -> list[str]:
 
 def _for(agent: model.Agent, clock: datetime.datetime) -> str:
     """How long the agent has held its status."""
-    since = _stamp(agent, agent.status)
+    since = _parsed(agent.since.get(agent.status, ""))
     return f"{agent.status} for {_minutes(clock - since)} min" if since else f"{agent.status}, since unknown"
 
 
