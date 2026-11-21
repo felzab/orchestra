@@ -392,8 +392,8 @@ def judge(args: argparse.Namespace, state: Path, owner: Callable[[str], str]) ->
     reports = Reports(state)
     new = {report.row(agent.name, round_, finding.number): finding for finding in held.findings}
     if verifier:
-        proofs = {verdict.row: _proof(verdict, _heading(reports, verdict.row)) for verdict in held.verdicts}
-        events = _apply(state, lambda now: _verdicts(agent.name, held.verdicts, given, now, alive, proofs))
+        proved = [(verdict, _proof(verdict, _heading(reports, verdict.row))) for verdict in held.verdicts]
+        events = _apply(state, lambda now: _verdicts(agent.name, proved, given, now, alive))
     else:
         events = _apply(state, lambda now: _bank(agent.name, held.findings, round_, given, now))
     model.update_agent(state, agent.name, lambda before: dataclasses.replace(before, status="judged", verdict=verdict))
@@ -472,25 +472,25 @@ def _proof(verdict: report.Verdict, banked: str | None) -> str:
 
 def _verdicts(
     name: str,
-    verdicts: tuple[report.Verdict, ...],
+    proved: list[tuple[report.Verdict, str]],
     given: dict[str, Disposition],
     now: dict[str, FindingEvent],
     live: dict[str, str],
-    proofs: dict[str, str],
 ) -> list[FindingEvent | str | None]:
     """A verifier's rows moved: a REFUTED one closed by itself, a CORRECTED one routed with its correction.
 
-    A verdict on a row never banked moves nothing and takes no disposition. `proofs` holds each verdict's
-    evidence by its row, as `_proof` reads it.
+    `proved` holds each verdict with the evidence `_proof` reads from it. A verdict on a row never banked
+    moves nothing and takes no disposition.
     """
-    rows = [verdict.row for verdict in verdicts]
+    proofs = {verdict.row: proof for verdict, proof in proved}
+    rows = list(proofs)
     if unknown := [row for row in given if row not in rows]:
         return [
             f"{', '.join(unknown)} has no verdict in {name}'s report, whose verdicts are {', '.join(rows) or 'none'}"
         ]
     if moot := [row for row in given if row not in now]:
         return [f"{', '.join(moot)} is no banked row, so its verdict moves nothing: give it no disposition"]
-    banked = [verdict for verdict in verdicts if verdict.row in now]
+    banked = [verdict for verdict, _ in proved if verdict.row in now]
     if missing := [verdict.row for verdict in banked if verdict.verdict != "REFUTED" and verdict.row not in given]:
         return [f"every verdict but REFUTED takes a disposition, and {', '.join(missing)} has none: <ROW>={FORM}"]
     made: list[FindingEvent | str | None] = []
