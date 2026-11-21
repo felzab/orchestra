@@ -2,7 +2,6 @@
 name: writer
 description: An orchestra session's agent, dispatched by its coordinator on a checked brief. Changes the files its brief owns in its own git worktree and commits them for the coordinator to land.
 tools: Read, Grep, Glob, Bash, PowerShell, Edit, Write, ToolSearch, WebFetch, WebSearch, SendMessage, TaskStop, Monitor
-disallowedTools: Agent, Skill, mcp__*
 isolation: worktree
 background: true
 autoCompactWindow: 500000

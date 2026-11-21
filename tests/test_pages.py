@@ -19,24 +19,24 @@ ROOT = Path(__file__).resolve().parents[1]
 
 # The most bytes each page under these folders may hold, counted as git stores it.
 BUDGETS = {
-    "skills/run/SKILL.md": 13821,
-    "skills/run/start.md": 2701,
-    "skills/run/brief.md": 4263,
+    "skills/run/SKILL.md": 13876,
+    "skills/run/start.md": 2667,
+    "skills/run/brief.md": 4370,
     "skills/run/review.md": 5616,
-    "skills/run/checkpoint.md": 2058,
+    "skills/run/checkpoint.md": 2306,
     "skills/run/end.md": 2600,
     "skills/run/handoff.md": 2770,
     "skills/run/resume.md": 4445,
     "skills/status/SKILL.md": 500,
-    "skills/estimate/SKILL.md": 3232,
+    "skills/estimate/SKILL.md": 3298,
     "skills/checkpoint/SKILL.md": 500,
     "skills/away/SKILL.md": 2366,
     "skills/back/SKILL.md": 1550,
     "skills/end/SKILL.md": 500,
     "skills/resume/SKILL.md": 500,
     "skills/plan/SKILL.md": 1913,
-    "skills/agent/SKILL.md": 7133,
-    "agents/writer.md": 7262,
+    "skills/agent/SKILL.md": 7195,
+    "agents/writer.md": 7224,
     "agents/driver.md": 5000,
     "agents/researcher.md": 4500,
     "agents/auditor.md": 3000,
@@ -61,8 +61,8 @@ BUDGETS = {
     },
     # Its twelfth checklist item, the built-the-right-way questions, outgrew the shared budget.
     "lenses/essential.md": 1650,
-    # Its sixth item names the plugin's own merge subject as no hit, which outgrew the shared budget.
-    "lenses/disclosure.md": 1594,
+    # Its sixth item names the plugin's own merge subjects as no hit, which outgrew the shared budget.
+    "lenses/disclosure.md": 1672,
     # Its checklist asks after every kind of saving the owner named: timing, scoping, batching and the rest.
     "lenses/estimate.md": 2114,
 }
@@ -79,7 +79,10 @@ RULES = {
         "so append no `; echo exit=$?`",
         "in a worktree, run each command plain from its root, with no `;`, `$?`, `$VAR`, `$(...)`, loop, heredoc"
         " or `git -C`",
-        "A worktree holding no commit goes at the stop, so a writer commits what is done before it stops",
+        "A worktree with no change goes at the stop, and only commits land, so a writer commits what is done before it"
+        " stops",
+        # An earlier rewording gave the handover to the driver alone, and a writer with nothing done lost its own.
+        "and a writer with nothing yet to commit cannot be resumed",
         "since a successor takes the answer",
     ),
     "skills/run/SKILL.md": (
@@ -99,7 +102,7 @@ INJECTION_RE = re.compile(r"(?:^|\s)!`")
 # misspelt field and Claude Code ignores it: a `tools:` line lost that way hands an auditor a shell, and
 # a writer every tool of the session, such as a 48,000-character schema it never calls.
 SHARED = frozenset({"name", "description", "tools", "background", "autoCompactWindow", "skills"})
-COMMITTING = frozenset({"disallowedTools", "isolation"})
+COMMITTING = frozenset({"isolation"})
 
 FIELD_RE = re.compile(r"(?P<key>[A-Za-z_-]+):(?: (?P<value>.+))?")
 ITEM_RE = re.compile(r"  - (?P<value>\S.*)")

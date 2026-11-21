@@ -14,16 +14,21 @@ The fixes from the third project session that ran on the plugin.
 ### Added
 
 - The plugin's first mod, `hooks/compact.js`, gives the coordinator `mcp__orchestra__compact`. The
-  coordinator calls it at each wave's end, attended or away; the conversation compacts once the turn
-  ends, and a one-line prompt then resumes the session. The tool refuses a call from an agent and
-  from a checkout with no orchestra session. Where mods are off, the coordinator suggests `/compact`
-  to the owner, as before. `claude plugin test .` runs the mod's tests, in CI too.
-- The prompt hook tells the coordinator from 75% of its compaction window that the compact tool
-  compacts at the next seam; past the window, it still tells the owner as well.
-- `orchestra brief NAME --type writer --body FILE` writes the brief's header above a file holding its lists
-  and sections and checks it in the same call.
+  coordinator calls it at each natural seam, where the state holds all in flight (a wave has landed
+  or a checkpoint has rewritten `NOW.md`, and no report waits to be judged), attended or away. Below
+  60% of the compaction window the tool answers that compacting is not needed yet; past it, the
+  conversation compacts once the turn ends, and a one-line prompt then resumes the session. The tool
+  refuses a call from an agent and from a checkout with no orchestra session. Where the tool is
+  absent or fails, the coordinator tells the owner at each seam to type `/compact`. The mod has been
+  driven in headless sessions only. `claude plugin test .` runs its tests, in CI too.
+- The prompt hook tells the coordinator, from 75% of a compaction window that a settings file or the
+  environment sets, that the compact tool compacts at the next seam; past the window, it still tells
+  the owner as well.
+- `orchestra brief NAME --type writer --slice S --body FILE` writes the brief's header above a file
+  holding its lists and sections and checks it in the same call.
 - `orchestra status --measure` prints the longest chain of slices still to do by their `after:` edges,
-  with each chain tied for it, and the minutes from each landing to the next dispatch.
+  with up to three of the chains tied for it and a count of the rest, and the median and longest
+  minutes from a landing to the next dispatch.
 - `orchestra status` names a path on a slice still to do that the session deleted or moved.
 - `orchestra status --end` names a slice whose agents landed while its line is unticked.
 - `orchestra queue add --when landed:NAME <what>` accepts a planned slice no agent has taken yet.
@@ -34,22 +39,33 @@ The fixes from the third project session that ran on the plugin.
   discarded agent's slice as still to do, its `Owns:` excusing no drift.
 - `orchestra status --measure` prints an unticked slice as its id, its count of files and its `after:`
   edges rather than its whole line.
-- The `/usage` reading gives up after 90 s rather than 120 s, short of the Bash tool's default limit.
 - The checkpoint falls due at a wave's end, when no agent is live and a writer has landed since the
   last estimate, or after eight judged reports; only a writer's dispatch makes the first one due.
+- A verb's notice that it cut its output goes to standard error, and the overview after a compaction
+  leaves out judged and pruned agents.
+- The writer and driver definitions name the tools they use.
+- The pages:
+  - the estimate's second look asks every kind of saving (timing, waits, scoping, batching, repeats,
+    context, owner waits) and applies each that lowers no review, check or reading, at the session's
+    start too; a session's first estimate scales the week from the handoff's points per agent;
+  - the review's steps start as soon as their inputs exist, its briefs drafted while the last writers
+    run, with a fresh reader over a landing whose defect could reach later work;
+  - an agent's report reads `IN-PROGRESS` until it is final; a writer commits what is done before it
+    stops, and a driver, or a writer with nothing yet to commit, asks by `SendMessage` and writes all
+    a successor needs into its report, since no answer can resume it;
+  - a checked brief that will not go out is settled with `orchestra prune --discard NAME`, and a brief
+    names the parts of an earlier report its agent needs;
+  - the disclosure lens passes the plugin's two merge subjects while still reading their agent names.
+- The guide carries the measured compaction figures and why 500,000 is kept, names `/status`'s
+  setting sources, and says which switches turn the mod off.
+
+### Fixed
+
 - `judge` takes a stopped agent's `BLOCKED` or `NEEDS-ANSWER` report as it stands when its worktree is
   gone, since no answer can reach it.
+- The `/usage` reading gives up after 90 s rather than 120 s, short of the Bash tool's default limit.
 - The report check reads a finding's whole first paragraph for `Harm:` and `Likelihood:`, and accepts
   `Rows fixed: none.`.
-- A verb's notice that it cut its output goes to standard error, and the overview after a compaction
-  leaves out finished agents.
-- The writer and driver definitions name the tools they use.
-- The pages: the estimate's second look asks every kind of saving (timing, waits, scoping, batching,
-  repeats, context, owner waits) and applies each that lowers no review, check or reading; the
-  review's steps start as soon as their inputs exist, with a fresh reader over a landing whose defect
-  could reach later work; an agent commits or hands over before it stops; the run, brief, start,
-  handoff and disclosure pages close the gaps the earlier sessions met.
-- The guide carries the measured compaction figures and names `/status`'s setting sources.
 
 ## [0.3.0] - 2026-11-19
 
@@ -178,6 +194,7 @@ The fixes from the first project session that ran on the plugin.
 - The `orchestra` program and its hooks, five agent types, sixteen lenses and nine slash commands.
 
 [unreleased]: https://github.com/felzab/orchestra/commits/main
+[0.4.0]: https://github.com/felzab/orchestra/pull/4
 [0.3.0]: https://github.com/felzab/orchestra/pull/3
 [0.2.0]: https://github.com/felzab/orchestra/pull/2
 [0.1.0]: https://github.com/felzab/orchestra/commit/364d4ec
