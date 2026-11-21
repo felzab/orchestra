@@ -402,10 +402,9 @@ def test_a_row_naming_the_owners_word_warns_where_it_goes_to_an_agent_and_not_to
     agent(state, "REVIEW", Written("auditor", (STORE, CLI, "README :: install")))
     path = report.path(state, "REVIEW")
     text = path.read_bytes().decode("utf-8")
-    text = text.replace("The write at F1.", "Lowering it is the owner's word.")
-    path.write_bytes(
-        text.replace("The write at F2.", "This is the Owner\N{RIGHT SINGLE QUOTATION MARK}s call.").encode("utf-8")
-    )
+    # The row going to an agent spells it as owners and pasted text do: a typographic apostrophe, a capital.
+    text = text.replace("The write at F1.", "This is the Owner\N{RIGHT SINGLE QUOTATION MARK}s call.")
+    path.write_bytes(text.replace("The write at F2.", "Lowering it is the owner's word.").encode("utf-8"))
     given = ("F1=route:FIXER", "F2=route:ending", "F3=route:FIXER")
     done = inprocess("judge", "REVIEW", *given, "--verdict", "v", cwd=project)
     assert done.returncode == 0, done.stderr
@@ -414,12 +413,19 @@ def test_a_row_naming_the_owners_word_warns_where_it_goes_to_an_agent_and_not_to
         "REVIEW-F1 says its change is the owner's word or call, and goes to the agent FIXER:"
         " ask the owner before it is built, unless a ruling covers it"
     ]
-    # A verifier's verdict is read too, as the text the row is judged on.
+    # A verifier's verdict is read too, as the text the row is judged on, with the body of the finding it judges:
+    # REVIEW-F3's proof says it, and REVIEW-F2's banked finding does where its confirmation does not.
     proof = "F3 · optional · silent · README :: install\nRemoving the check is the owner's call."
-    agent(state, "VERIFY", Written("verifier", verdicts=(("REVIEW-F3", "CORRECTED", proof),)))
-    verified = inprocess("judge", "VERIFY", "REVIEW-F3=route:FIXER", "--verdict", "v", cwd=project)
+    verdicts = (("REVIEW-F3", "CORRECTED", proof), ("REVIEW-F2", "CONFIRMED", "`pytest` exit 1."))
+    agent(state, "VERIFY", Written("verifier", verdicts=verdicts))
+    given = ("REVIEW-F3=route:FIXER", "REVIEW-F2=route:FIXER")
+    verified = inprocess("judge", "VERIFY", *given, "--verdict", "v", cwd=project)
     assert verified.returncode == 0, verified.stderr
-    assert "REVIEW-F3 says its change is the owner's word or call, and goes to the agent FIXER:" in verified.stdout
+    warned = [line.split(":")[0] for line in verified.stdout.splitlines() if "the owner's word or call" in line]
+    assert warned == [
+        "REVIEW-F3 says its change is the owner's word or call, and goes to the agent FIXER",
+        "REVIEW-F2 says its change is the owner's word or call, and goes to the agent FIXER",
+    ]
 
 
 def test_show_prints_whole_findings_judged_or_not_and_names_a_row_it_cannot(project: Path, state: Path) -> None:
