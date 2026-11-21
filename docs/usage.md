@@ -73,10 +73,11 @@ the tool. `--safe-mode` loads no plugin at all, and `"disableAllHooks": true` st
 well as mods ([settings reference](https://code.claude.com/docs/en/settings-reference),
 `disableAllHooks`), so orchestra cannot run under either. With managed settings, a
 `managed-mcp.json` file or a Team or Enterprise `/login` as the session's credential, "the built-in
-guard loads by default"
+guard loads by default", and a call that a mod you installed approves still meets your `deny` and
+`ask` rules and your `PreToolUse` hooks
 ([permissions page](https://code.claude.com/docs/en/permissions), "Precedence among rules, hooks,
-and mods"); where it loads, "a hook that a user's mod registers on one of these events never runs",
-`session.compact` among them
+and mods"); where the guard loads, "a hook that a user's mod registers on one of these events never
+runs", `session.compact` among them
 ([managing mods](https://code.claude.com/docs/en/plugins/mods/admin), "Know which hooks of a user's
 mod don't run").
 
