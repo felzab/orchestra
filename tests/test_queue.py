@@ -161,6 +161,19 @@ def test_an_event_naming_no_agent_or_no_kind_is_refused(project: Path, state: Pa
     assert model.read_queue(state) == {}
 
 
+def test_a_name_with_no_record_is_refused_by_the_missing_plan_that_could_name_its_slice(
+    project: Path, state: Path
+) -> None:
+    """With no PLAN.md the name may still be a slice's, so the refusal names the plan that is gone."""
+    (state / store.PLAN).unlink()
+    done = inprocess("queue", "add", "--when", "landed:NOBODY", "x", cwd=project)
+    assert done.returncode == 2
+    assert done.stderr.strip() == (
+        f"orchestra queue: {state / store.PLAN} is missing: write it again under the headings `orchestra init` gives it"
+    )
+    assert model.read_queue(state) == {}
+
+
 def test_an_item_may_wait_on_a_planned_slice_no_agent_took_yet(project: Path, state: Path) -> None:
     """Its writer is briefed later under a name of its own, as brief.md's example names one: due once it lands."""
     store.write_text(state / store.PLAN, "# Plan\n\n## Slices and their files\n\n- [ ] LATER `b.txt`\n")

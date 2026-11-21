@@ -23,6 +23,7 @@ import pytest
 from conftest import LIB, MakeRepo, git, inprocess, write_agent, write_config
 from orchestra import context, events, findings, hooks, log, model, process, queue, report, store
 from test_context import line, transcript
+from test_pages import parses
 from test_report import text
 
 SID = "c0ffee00-0000-4000-8000-000000000001"
@@ -369,6 +370,18 @@ def test_a_hook_gives_up_on_a_held_lock_within_its_budget(project: Path, state: 
 
 
 # --- the dispatch ---------------------------------------------------------------------------------
+
+
+def test_a_dispatch_of_an_agent_with_no_record_names_a_brief_command_that_parses(project: Path, state: Path) -> None:
+    """The refusal hands the coordinator the command that writes the brief, so the command must still be one."""
+    call = {"description": "NEW", "prompt": "NEW", "subagent_type": "orchestra:writer"}
+    verdict, why = decision(hook("PreToolUse", project, tool_name="Agent", tool_input=call)[1])
+    assert (verdict, why) == (
+        "deny",
+        "no agent NEW in this session: `orchestra brief NEW --type writer --slice S --body FILE` writes its brief"
+        " from a file holding its lists and its four sections, and checks it",
+    )
+    assert parses(str(why).split("`")[1])
 
 
 def test_a_dispatch_is_refused_until_its_brief_is_checked_then_filled(project: Path, state: Path) -> None:

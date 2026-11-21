@@ -178,6 +178,17 @@ def test_a_whole_brief_is_stamped_and_an_edit_unstamps_it(project: Path, state: 
     assert not brief.stamped(state, model.read_agent(state, "A"))
 
 
+def test_a_check_of_a_record_whose_brief_is_gone_names_the_command_that_writes_one(project: Path, state: Path) -> None:
+    path = briefed(project, "A")
+    path.unlink()
+    done = inprocess("brief", "A", "--check", cwd=project)
+    assert done.returncode == 2
+    assert done.stderr.strip() == (
+        f"orchestra brief: A has no brief at {path}: `orchestra brief A --type T --body FILE`, with `--slice S` for"
+        " a writer, writes one from a file holding its lists and its four sections, and checks it"
+    )
+
+
 def test_each_fault_of_the_text_is_named_and_an_old_stamp_cleared(project: Path, state: Path) -> None:
     path = briefed(project, "A", owns="lib/a.py", rows="X-F1, bad", lens="")
     assert check(project, "A")[0] == 2
