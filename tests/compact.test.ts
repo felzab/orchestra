@@ -29,6 +29,7 @@ type Options = {
   tokens?: number | null
   guarded?: boolean
   stays?: boolean
+  rejects?: boolean
 }
 
 // Claude Code's answers for a checkout whose primary branch is `fix/a b`: `pointed` is whether that branch has a
@@ -36,7 +37,7 @@ type Options = {
 // false where no git starts, `drop` a refusal of the mod's prompt, and `others` an agent's and a precompute
 // compaction settling after the main one while `/compact` runs. `tokens` is the context's last reading, null for
 // none; `guarded` runs `/compact` with no `session.compact` hook, as where the built-in guard loads, and `stays`
-// keeps the context's reading after it.
+// keeps the context's reading after it; `rejects` makes `/compact` reject.
 function stub(
   t: any,
   on: any,
@@ -50,6 +51,7 @@ function stub(
     tokens = 400_000,
     guarded = false,
     stays = false,
+    rejects = false,
   }: Options = {},
 ) {
   const clock = mock.clock(on)
@@ -88,8 +90,9 @@ function stub(
   }))
   // The queued `/compact`, its compaction fired through the mod's `session.compact` hook as Claude Code's own is.
   on('command.run', async ($: any, e: any) => {
-    // `$.command.run` "Rejects ... inside a hook the turn or the session's start waits on" (claude-code.d.ts).
-    if (ending) return { deny: 'a command cannot run inside a hook the turn waits on' }
+    // `$.command.run` "Rejects ... inside a hook the turn or the session's start waits on" (claude-code.d.ts). A
+    // stub's `{ deny }` here resolves in the mod; one that throws makes the call reject, as Claude Code's does.
+    if (ending || rejects) throw new Error('a command cannot run inside a hook the turn waits on')
     seen.commands.push(e.command)
     if (guarded) {
       if (!stays) live = undefined
@@ -268,6 +271,16 @@ test('a resume prompt Claude Code refuses leaves a line saying why', async ($, o
   await clock.settle()
   expect(seen.prompts).toEqual(['The compaction scheduled with the compact tool has run.'])
   expect(seen.logs).toEqual(["the compaction's resume prompt was refused: the run reached its --max-turns limit"])
+})
+
+test('a /compact that rejects wakes the session saying so, and stops the tool', async ($, on) => {
+  const { clock, seen, complete } = stub($, on, { rejects: true })
+  await $.tool.call({ tool: TOOL })
+  await complete()
+  await clock.settle()
+  expect(seen.prompts).toHaveLength(1)
+  expect(seen.prompts[0]).toMatch(/^The compaction scheduled with the compact tool failed: /)
+  expect(await $.tool.call({ tool: TOOL })).toEqual(REFUSED)
 })
 
 test('where no session.compact hook runs, a context left with no reading has compacted', async ($, on) => {
