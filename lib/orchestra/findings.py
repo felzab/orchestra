@@ -320,15 +320,6 @@ def repeats(new: dict[str, report.Finding], rows: dict[str, FindingEvent], repor
     return said
 
 
-def _judged_on(verdict: report.Verdict, reports: Reports) -> str:
-    """A verdict's body and the body of the finding it judges, where that report still reads."""
-    try:
-        banked = reports.finding(verdict.row)[0].body
-    except Refused:
-        banked = ""
-    return f"{verdict.body}\n{banked}"
-
-
 def _owners_word(state: Path, given: dict[str, Disposition], texts: dict[str, tuple[str, str]]) -> list[str]:
     """A warning for each row routed to an agent whose text says its change is the owner's word or call.
 
@@ -425,9 +416,14 @@ def judge(args: argparse.Namespace, state: Path, owner: Callable[[str], str]) ->
     if verifier:
         # Only a verifier's routes can meet a row held by a live agent: a report's own rows are new.
         alive = live(state)
-        proved = [(verdict, _proof(verdict, _heading(reports, verdict.row))) for verdict in held.verdicts]
+        banked = {verdict.row: _banked(reports, verdict.row) for verdict in held.verdicts}
+        proved = [(verdict, _proof(verdict, banked[verdict.row])) for verdict in held.verdicts]
+        # A verdict is read for the owner's word with the body of the finding it judges, where that still reads.
+        bodies = {row: found.body if found else "" for row, found in banked.items()}
+        texts = {verdict.row: (verdict.row, f"{verdict.body}\n{bodies[verdict.row]}") for verdict in held.verdicts}
         events = _apply(state, lambda now: _verdicts(agent.name, proved, given, now, alive))
     else:
+        texts = {f"F{finding.number}": (row, finding.body) for row, finding in new.items()}
         events = _apply(state, lambda now: _bank(agent.name, held.findings, round_, given, now))
     model.update_agent(state, agent.name, lambda before: dataclasses.replace(before, status="judged", verdict=verdict))
     routed = sum(event.status == "ROUTED" for event in events)
@@ -445,10 +441,6 @@ def judge(args: argparse.Namespace, state: Path, owner: Callable[[str], str]) ->
     if new and not events:
         lines.append(f"its {len(new)} row(s) were banked by an earlier judge, and stand as it left them")
     lines += repeats(new, rows, reports)
-    if verifier:
-        texts = {verdict.row: (verdict.row, _judged_on(verdict, reports)) for verdict in held.verdicts}
-    else:
-        texts = {f"F{finding.number}": (row, finding.body) for row, finding in new.items()}
     lines += _owners_word(state, given, texts)
     # Imported here, since the hooks import this module and none of them reads the status view.
     paced = typing.cast("Callable[[Path], list[str]]", importlib.import_module("orchestra.status").paced)
@@ -491,24 +483,24 @@ def _bank(
     return made
 
 
-def _heading(reports: Reports, row: str) -> str | None:
-    """The heading the row's finding was banked under; None where its report no longer reads."""
+def _banked(reports: Reports, row: str) -> report.Finding | None:
+    """The finding the row was banked from; None where its report no longer reads."""
     try:
-        return reports.finding(row)[0].heading
+        return reports.finding(row)[0]
     except Refused:
         return None
 
 
-def _proof(verdict: report.Verdict, banked: str | None) -> str:
+def _proof(verdict: report.Verdict, banked: report.Finding | None) -> str:
     """What a verdict's row records as its evidence: the body's first line that is no finding heading.
 
     A CORRECTED body opens with the corrected heading, which is often the banked one unchanged; it leads
-    the evidence only where it differs from `banked`, the heading the row was banked under.
+    the evidence only where it differs from the heading of `banked`, the finding the row was banked from.
     """
     lines = [cli.one_line(line) for line in verdict.body.split("\n") if line.strip()]
     proof = next((line for line in lines if not report.FINDING_RE.fullmatch(line)), None)
     corrected = lines[0] if verdict.verdict == "CORRECTED" and lines else None
-    if corrected is not None and banked is not None and _anchor(corrected) == _anchor(banked):
+    if corrected is not None and banked is not None and _anchor(corrected) == _anchor(banked.heading):
         corrected = None
     return "; ".join(part for part in (corrected, proof) if part) or cli.one_line(verdict.first)
 
