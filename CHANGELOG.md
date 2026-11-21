@@ -97,6 +97,14 @@ The fixes from the third project session that ran on the plugin.
 - `contextCeiling` refuses a resume only once the agent's prompt cache has lapsed, five minutes after
   its transcript was last written; a resume within them reads the context from the cache and goes
   ahead, and the refusal names the transcript's age.
+- The turn-end hook lists a set of undone lines once, and stays silent while it would list the same
+  set and nothing has been logged since, so a report the coordinator holds, a queue item that cannot
+  run yet or a checkpoint a ruling holds back no longer starts a turn at every turn's end. A line
+  come or gone, or any log entry, such as a judgement, a landing or a note, lists the set again,
+  whole. A listing counts only once the turn it continued has ended, so one lost to a crash is
+  listed again, and the line naming an away session with nothing running is listed at every turn's
+  end that holds it, until `orchestra note --waiting "<what>"` names what the session waits on. The
+  state keeps the last listing in `listed.json`.
 - The hooks wait on less: an attended turn's end reads no agent's transcript, the prompt and
   post-call hooks take the primary checkout from `session.json` where its `.git` folder holds the
   session's pointer, rather than from two git runs, and an agent's `SendMessage` loads nothing.
