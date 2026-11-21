@@ -348,7 +348,8 @@ def test_a_round_judged_from_a_record_no_report_hook_moved_is_stamped_by_its_own
     )
     write(fleet.state, "reports/WORKER.md", text("writer", "WORKER", status="BLOCKED"))
     write(fleet.state, "reports/WORKER.2.md", text("writer", "WORKER", round_=2))
-    code, out, err = fleet.run("judge", "WORKER", "--verdict", "done", "F1=close:MOOT:x", "F2=close:MOOT:x")
+    # The dispositions go before the option: Python 3.11 refuses positional arguments after it.
+    code, out, err = fleet.run("judge", "WORKER", "F1=close:MOOT:x", "F2=close:MOOT:x", "--verdict", "done")
     assert code == 0, out + err
     code, out, err = fleet.run("land", "WORKER")
     assert code == 0, err
