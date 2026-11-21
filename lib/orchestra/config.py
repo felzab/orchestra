@@ -35,6 +35,11 @@ POSITIVE = "positive"
 LITERAL = "literal"
 # The longest value a refusal quotes; a longer one is named by its JSON kind.
 SHOWN = 40
+# The checkout's own settings file, which Claude Code keeps out of commits.
+SETTINGS_LOCAL = Path(".claude", "settings.local.json")
+# The auto-compact window's settings key, and the variable that outranks every settings key (model-config.md).
+WINDOW = "autoCompactWindow"
+WINDOW_ENV = "CLAUDE_CODE_AUTO_COMPACT_WINDOW"
 
 StepKind = Literal["install", "regenerate", "check"]
 # An Agent call's `model` takes an alias alone, never a full model id (sub-agents.md, "Choose a model").
@@ -183,6 +188,61 @@ def default_state_root() -> Path:
 def claude_dir() -> Path:
     """Claude Code's folder of the user's own: `CLAUDE_CONFIG_DIR` where it is set, else `~/.claude`."""
     return Path(os.environ.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude")
+
+
+def settings_files(root: Path) -> list[Path]:
+    """The settings files a session in this checkout reads, the one that wins a key first (settings.md).
+
+    Managed settings and `--settings`, which settings.md ranks above the local file, are not read: the
+    first sits in a system folder of each platform's own, and the second is known to the session alone.
+    """
+    return [root / SETTINGS_LOCAL, root / ".claude" / "settings.json", claude_dir() / "settings.json"]
+
+
+def setting(path: Path, *keys: str) -> object:
+    """The value under `keys` in a settings file, the whole file for no key; None where none is or it cannot be read."""
+    try:
+        held: object = json.loads(path.read_bytes().decode("utf-8"))
+    except (OSError, ValueError):
+        return None
+    return setting_in(held, *keys)
+
+
+def setting_in(held: object, *keys: str) -> object:
+    """The value under `keys` in parsed settings; None where they hold none."""
+    for key in keys:
+        held = typing.cast("dict[str, object]", held).get(key) if isinstance(held, dict) else None
+    return held
+
+
+def window(root: Path, model: str | None) -> int | None:
+    """The auto-compact window a session of `model` in this checkout is set to; None where it runs at the model's own.
+
+    `WINDOW_ENV` outranks every settings key; else the first settings file that sets a window for the model
+    or for every model decides, its window for the model first (settings-reference.md, "modelSettings"),
+    where Claude Code writes each entry under the model's canonical name, the name a transcript records.
+    None where nothing sets one, as `init` says such a session runs at Claude Code's default window, a
+    figure no file holds; `"auto"`, the model's tuned window, is None too. A window given by `--autocompact`
+    for one launch is the session's alone, and not read.
+    """
+    if held := _tokens(os.environ.get(WINDOW_ENV, "")):
+        return held
+    for path in settings_files(root):
+        # Parsed once for both keys.
+        parsed = setting(path)
+        found = setting_in(parsed, "modelSettings", model, WINDOW) if model else None
+        found = found if found is not None else setting_in(parsed, WINDOW)
+        if found is not None:
+            return found if isinstance(found, int) and not isinstance(found, bool) else None
+    return None
+
+
+def _tokens(value: str) -> int | None:
+    """A token count as `WINDOW_ENV` takes one, `500000`, `500k` or `1M` (model-config.md); None for any other."""
+    held = re.fullmatch(r"\s*([0-9]+)\s*([kKmM]?)\s*", value)
+    if held is None:
+        return None
+    return int(held[1]) * {"": 1, "k": 1_000, "m": 1_000_000}[held[2].lower()]
 
 
 class Checkout(NamedTuple):

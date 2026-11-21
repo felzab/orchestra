@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 
 from conftest import git, inprocess, orchestra, write_agent
-from orchestra import init, model, store
+from orchestra import config, model, store
 
 OWNER = {store.SESSION_ID: "session-owner"}
 OTHER = {store.SESSION_ID: "session-other"}
@@ -34,7 +34,7 @@ def _user(project: Path) -> Path:
 
 
 def _files(project: Path) -> dict[Path, bytes | None]:
-    paths = [project / init.SETTINGS_LOCAL, _user(project)]
+    paths = [project / config.SETTINGS_LOCAL, _user(project)]
     return {path: path.read_bytes() if path.exists() else None for path in paths}
 
 

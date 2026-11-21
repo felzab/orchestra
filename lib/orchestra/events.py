@@ -1258,9 +1258,7 @@ def _near_window(where: Where) -> tuple[int, int] | None:
         return None
     size = context.tokens(context.as_object(last.get("usage")))
     model = last.get("model")
-    # Imported here, since no other event reads the settings files and every hook would pay for its imports.
-    read = typing.cast("Callable[[Path, str | None], int | None]", importlib.import_module("orchestra.init").window)
-    window = read(root, model if isinstance(model, str) else None)
+    window = config.window(root, model if isinstance(model, str) else None)
     return (size, window) if window is not None and size >= NEAR_WINDOW * window else None
 
 
