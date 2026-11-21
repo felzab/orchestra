@@ -19,13 +19,13 @@ ROOT = Path(__file__).resolve().parents[1]
 
 # The most bytes each page under these folders may hold, counted as git stores it.
 BUDGETS = {
-    "skills/run/SKILL.md": 14473,
+    "skills/run/SKILL.md": 14557,
     "skills/run/start.md": 2597,
     "skills/run/brief.md": 4723,
-    "skills/run/review.md": 5623,
-    "skills/run/checkpoint.md": 2306,
+    "skills/run/review.md": 5674,
+    "skills/run/checkpoint.md": 2360,
     "skills/run/end.md": 2600,
-    "skills/run/handoff.md": 2883,
+    "skills/run/handoff.md": 2976,
     "skills/run/resume.md": 4445,
     "skills/status/SKILL.md": 500,
     "skills/estimate/SKILL.md": 3371,
@@ -35,7 +35,7 @@ BUDGETS = {
     "skills/end/SKILL.md": 500,
     "skills/resume/SKILL.md": 500,
     "skills/plan/SKILL.md": 1913,
-    "skills/agent/SKILL.md": 7168,
+    "skills/agent/SKILL.md": 7229,
     "agents/writer.md": 6763,
     "agents/driver.md": 4164,
     "agents/researcher.md": 3844,
@@ -84,6 +84,8 @@ RULES = {
         "and a writer with nothing yet to commit cannot be resumed",
         # The one place that names the status of an agent no answer can resume, the driver's page included.
         "and stops with `DONE-WITH-CONCERNS` once nothing is left, since a successor takes the answer",
+        # A check given ten minutes went to the background at 180 seconds, and its agent looped on the stop hook.
+        "the Bash tool moves a call into the background after about 180 seconds, whatever its timeout",
     ),
     "skills/run/SKILL.md": (
         "a dispatch waits for nothing but its `after:` edges and its files",

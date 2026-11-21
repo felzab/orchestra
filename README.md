@@ -37,7 +37,10 @@ The second command opens the plugin's details. Choose **Install for all collabor
 repository (project scope)**. An enabled plugin puts its agents' names and descriptions into every
 turn and runs its hooks in every session, and its mod adds one deferred tool,
 `mcp__orchestra__compact`, to every session, so project scope keeps that cost to the projects that
-use it.
+use it. The mod's hook on every prompt reads only where the prompt came from, so that a prompt of
+yours lets the tool schedule again; its other calls run `git` and read one pointer file to find the
+session's state, read the context's size, and run `/compact` and a one-line resume prompt after a
+compaction the tool scheduled.
 
 To set it up from a shell in the project's folder instead, and declare the marketplace in the
 project's `.claude/settings.json`, which a collaborator's terminal session adds once the folder is
@@ -104,7 +107,8 @@ permission prompt or a question still refuses it.
 
 The coordinator's compact tool comes from the plugin's mod, so it is absent where mods are off, as
 under an organization's `allowManagedModsOnly`; the coordinator then asks you to type `/compact` at
-each seam, as [the usage guide](docs/usage.md#setting-up-a-project) says. `--safe-mode` and
+a seam once its context nears the compaction window, as
+[the usage guide](docs/usage.md#setting-up-a-project) says. `--safe-mode` and
 `"disableAllHooks": true` turn mods off too, but they also stop the hooks above, so no session can
 run: `--safe-mode` loads no plugin, and under `disableAllHooks` each agent replies `BLOCKED: the
 plugin's hooks did not run`.

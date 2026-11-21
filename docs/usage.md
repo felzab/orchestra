@@ -52,7 +52,9 @@ included. One compaction cost about as much as 250,000 input tokens: the summary
 tokens of instructions, skills and summary written again, and about 35,000 tokens read again in the
 following half hour. Claude Code caps the window at the model's context, so on a model with a
 smaller context the window changes nothing. Since the coordinator compacts itself at seams from 60%
-of the window (below), the window decides only the compactions that fall at no seam.
+of the window (below), the window decides only the compactions that fall at no seam. At a seam the
+minute's pause is accepted, since a compaction there loses nothing in flight, and on the same replay
+compacting near 300,000 and 400,000 tokens cost 0.85 and 0.91 of compacting near 500,000.
 
 A compaction replaces the conversation with a summary, and the session-start hook gives the state
 back from its files; what it can lose is detail still in flight. So the coordinator compacts itself
@@ -61,14 +63,15 @@ rewritten `NOW.md`, and no report waits to be judged. At each seam, attended or 
 `mcp__orchestra__compact`, a tool the plugin's mod (`hooks/compact.js`) adds. The tool refuses an
 agent and a checkout whose branch holds no session, and below 60% of the compaction window it
 answers that compacting is not needed yet. After a compaction it scheduled was vetoed or failed,
-it refuses every call until your next prompt or a compaction that runs, so a compaction that
-fails each time cannot repeat while you are away. Otherwise the conversation compacts once the
-coordinator's turn ends, and a one-line prompt from the plugin then starts its next turn, so a
-coordinator with no agent left to report carries on; a turn that ends interrupted or in an error
-drops the compaction. Scheduling, compacting and the resume prompt have been driven in headless
+it refuses every call until your next prompt or, where Claude Code's built-in guard does not load
+(below), a compaction that runs, so a compaction that fails each time cannot repeat while you are
+away. Otherwise the conversation compacts once the coordinator's turn ends, and a one-line prompt
+from the plugin then starts its next turn, so a coordinator with no agent left to report carries
+on; a turn that ends interrupted or in an error drops the compaction. Scheduling, compacting and the resume prompt have been driven in headless
 `claude -p` sessions only, not yet in an interactive terminal or the desktop app; the 60% gate and
-the refusal after a failed compaction have run only in the mod's tests. Where the tool is absent or fails, the coordinator tells
-you at each seam that it is one to type `/compact` at, attended or away.
+the refusal after a failed compaction have run only in the mod's tests. Where the tool is absent or
+fails, the coordinator tells you at a seam to type `/compact`, attended or away, once the hook on
+your prompts has told it that its context nears the window (below).
 
 Mods are on by default in the terminal and the desktop app
 ([mods overview](https://code.claude.com/docs/en/plugins/mods/overview), "Turn mods on or off"). An
@@ -77,13 +80,13 @@ the tool. `--safe-mode` loads no plugin at all, and `"disableAllHooks": true` st
 well as mods ([settings reference](https://code.claude.com/docs/en/settings-reference),
 `disableAllHooks`), so orchestra cannot run under either. With managed settings, a
 `managed-mcp.json` file or a Team or Enterprise `/login` as the session's credential, "the built-in
-guard loads by default", and a call that a mod you installed approves still meets your `deny` and
-`ask` rules and your `PreToolUse` hooks
-([permissions page](https://code.claude.com/docs/en/permissions), "Precedence among rules, hooks,
-and mods"); where the guard loads, "a hook that a user's mod registers on one of these events never
-runs", `session.compact` among them
+guard loads by default" ([permissions page](https://code.claude.com/docs/en/permissions),
+"Precedence among rules, hooks, and mods"), and where it loads, "a hook that a user's mod registers
+on one of these events never runs", `session.compact` among them
 ([managing mods](https://code.claude.com/docs/en/plugins/mods/admin), "Know which hooks of a user's
-mod don't run").
+mod don't run"). The mod then cannot see a compaction's outcome: it takes a compaction as run where
+the context has no size reading after it, and otherwise refuses the tool as after a failed one until
+your next prompt.
 
 `init` sets the window for you. Where the environment sets no `CLAUDE_CODE_AUTO_COMPACT_WINDOW`, in
 the shell or a settings file's `env`, which outranks every settings key, and none of the checkout's
@@ -295,9 +298,11 @@ session's end, as a line of the plan's ending; [the away mode](#the-away-mode) s
 command changes.
 
 The coordinator asks you a question the moment it arises. In the terminal,
-`askUserQuestionTimeout` in your user settings closes a question you leave unanswered, and the
-coordinator goes on without you; it has no effect in the desktop app's Code tab or while Remote
-Control is connected. While you are away it holds the question instead, and records your answer
+`askUserQuestionTimeout` in your user settings, off until you set it to `60s`, `5m` or `10m`,
+closes a question you leave unanswered while the terminal's window is not focused, and the
+coordinator goes on without you
+([tools reference](https://code.claude.com/docs/en/tools-reference), "Question auto-continue
+timeout"); it has no effect in the desktop app's Code tab or while Remote Control is connected. While you are away it holds the question instead, and records your answer
 later in your own words:
 
 ```sh
