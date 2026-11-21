@@ -100,13 +100,10 @@ def due(state: Path) -> list[model.QueueItem]:
 
 
 def _planned(state: Path) -> set[str]:
-    """Each slice PLAN.md lists, as `status` reads the plan; none where there is no plan to read."""
+    """Each slice PLAN.md lists, as `status` reads the plan; refused, naming the fault, where there is none to read."""
     # Imported here, as `brief` does: the status view imports this module.
     slices = typing.cast("Callable[[Path], dict[str, bool]]", importlib.import_module("orchestra.status").slices)
-    try:
-        return set(slices(state))
-    except Refused:
-        return set()
+    return set(slices(state))
 
 
 def _landed(state: Path, agents: list[model.Agent]) -> set[str]:
