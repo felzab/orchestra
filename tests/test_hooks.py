@@ -1267,6 +1267,17 @@ def test_an_agents_prompt_is_refused_away_after_the_lease_moves(project: Path, s
     assert hook("PermissionRequest", project, BASH) == (0, None)
 
 
+def test_an_unreadable_lease_still_refuses_a_prompt_while_away(project: Path, state: Path) -> None:
+    """A lease that cannot be read says nothing of whose the event is, so it faults rather than read as nobody's:
+    an event read as another session's would let a prompt through to an owner who is not there.
+    """
+    assert run("mode", "away", "07:30", cwd=project).returncode == 0
+    (state / store.LEASE).write_bytes(b"{not json")
+    code, said = hook("PermissionRequest", project, BASH, quiet=False)
+    assert code == 0
+    assert prompt_refusal(said) == ("deny", events.AWAY_PROMPT)
+
+
 def test_a_hook_that_cannot_judge_logs_its_fault_and_an_away_session_still_refuses(project: Path, state: Path) -> None:
     """A fault's stderr is shown on no exit 0, and a prompt let through while the owner is away waits for nobody."""
     # A record an older or newer build wrote faults every event inside an agent, which reads them all.
