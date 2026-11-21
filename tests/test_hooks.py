@@ -968,6 +968,56 @@ def test_the_turn_continues_once_with_what_is_undone(project: Path, state: Path)
     assert hook("Stop", project, stop_hook_active=True, background_tasks=[]) == (0, None)
 
 
+def test_a_turns_end_lists_a_set_once_until_a_line_or_the_log_moves(project: Path, state: Path) -> None:
+    """A set the coordinator has read and chosen to wait on would otherwise start a turn at every turn's end.
+
+    A listing counts as read once the turn it continued ends, `stop_hook_active` then set, so one lost before
+    that, as to a crash, is listed again. The away line is listed at every turn's end that holds it.
+    """
+    later = time.time() + 86_400
+    # NOW.md stays newer than every entry the case logs, so its line never joins the set.
+    os.utime(state / store.NOW, (later, later))
+    briefed(project, "A", "auditor")
+    dispatched(project, "A", "auditor", "a1")
+    briefed(project, "B", "auditor")
+    dispatched(project, "B", "auditor", "b1")
+    changed(state, "A", status="reported", outcome="DONE")
+
+    def ended(*, active: bool = False) -> list[str]:
+        said = hook("Stop", project, stop_hook_active=active, background_tasks=[])[1]
+        return [] if said is None else context_of(said, "Stop").splitlines()
+
+    head = "Undone in this orchestra session:"
+    a, b = "- A reported (DONE) and is not judged", "- B reported (DONE) and is not judged"
+    assert ended() == [head, a]
+    # The continued turn never ended, as after a crash, so the listing is not known read.
+    assert ended() == [head, a]
+    assert ended(active=True) == []
+    assert ended() == []
+    assert ended() == []
+    # A note may move what waits.
+    assert run("note", "the cap stays at 20", cwd=project).returncode == 0
+    assert ended() == [head, a]
+    assert ended(active=True) == []
+    assert ended() == []
+    # A new report, with nothing logged, lists the set again, whole; so does a line gone.
+    changed(state, "B", status="reported", outcome="DONE")
+    assert ended() == [head, a, b]
+    assert ended(active=True) == []
+    assert ended() == []
+    changed(state, "A", status="judged")
+    assert ended() == [head, b]
+    assert ended(active=True) == []
+    assert ended() == []
+    # Away, a session nobody watches must never stall unseen, so its line is listed until a waiting note stands.
+    changed(state, "B", status="judged")
+    store.write_json(state / store.AWAY, {"since": model.now(), "until": None, "log": 0, "files": []})
+    idle = '- nothing runs, and no `orchestra note --waiting "<what>"` names what the session waits on'
+    assert ended() == [head, idle]
+    assert ended(active=True) == []
+    assert ended() == [head, idle]
+
+
 def test_a_writer_stopped_on_a_question_whose_worktree_is_gone_is_judged_and_leaves_the_turns_end(
     project: Path, state: Path
 ) -> None:
