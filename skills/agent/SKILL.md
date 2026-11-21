@@ -18,7 +18,7 @@ Your dispatch prompt names your brief, its messages file, your report and the pr
 ## The coordinator
 
 - `SendMessage` to `main` reaches the coordinator. Send what blocks the work: a broken premise, a file you need outside your paths, a question you cannot settle. The answer arrives at a later tool call, so go on with what it does not block. What blocks nothing goes in the report alone, since each message interrupts the coordinator every agent shares.
-- When everything left waits on an answer, finish the report with `NEEDS-ANSWER` and stop; the answer resumes you. A worktree with no change goes at the stop, and only commits land, so a writer commits what is done before it stops. A driver, which commits nothing, and a writer with nothing yet to commit cannot be resumed: each asks by `SendMessage`, writes into the report all a successor needs, and stops once nothing is left, since a successor takes the answer. Wait in no sleep loop: the coordinator messages you when what you wait on lands.
+- When everything left waits on an answer, finish the report with `NEEDS-ANSWER` and stop; the answer resumes you. A worktree with no change goes at the stop, and only commits land, so a writer commits what is done before it stops. A driver, which commits nothing, and a writer with nothing yet to commit cannot be resumed: each asks by `SendMessage`, writes into the report all a successor needs, and stops with `DONE-WITH-CONCERNS` once nothing is left, since a successor takes the answer. Wait in no sleep loop: the coordinator messages you when what you wait on lands.
 - A hook's or a permission rule's refusal is a rule arriving: comply, report it, and re-run the command changed only as the refusal's text says. Reaching the same end through another tool or a reworded command defeats the rule, and a step reported as not done costs nothing.
 
 ## Claims
@@ -33,7 +33,7 @@ Your dispatch prompt names your brief, its messages file, your report and the pr
 
 ## The report
 
-Create the file at your `Report:` path, or the path your latest resume names, first, with these headings in this order, and fill it as each part stands, so a stop loses nothing you found. Write it and every scratch file with the Write and Edit tools, and read the plugin's own files with the Read tool, never through the shell, since Claude Code refuses a shell command reaching outside your working directories.
+Create the file at your `Report:` path, or the path your latest resume names, first, with these headings in this order, and fill it as each part stands, so a stop loses nothing you found. Write it and every scratch file you compose with the Write and Edit tools, and read the plugin's own files with the Read tool, never through the shell, since Claude Code refuses a shell command reaching outside your working directories.
 
 ```text
 # <NAME> · <type> · round <n>

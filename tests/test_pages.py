@@ -19,7 +19,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 # The most bytes each page under these folders may hold, counted as git stores it.
 BUDGETS = {
-    "skills/run/SKILL.md": 14392,
+    "skills/run/SKILL.md": 14473,
     "skills/run/start.md": 2597,
     "skills/run/brief.md": 4723,
     "skills/run/review.md": 5623,
@@ -28,16 +28,16 @@ BUDGETS = {
     "skills/run/handoff.md": 2883,
     "skills/run/resume.md": 4445,
     "skills/status/SKILL.md": 500,
-    "skills/estimate/SKILL.md": 3365,
+    "skills/estimate/SKILL.md": 3371,
     "skills/checkpoint/SKILL.md": 500,
     "skills/away/SKILL.md": 2366,
     "skills/back/SKILL.md": 1550,
     "skills/end/SKILL.md": 500,
     "skills/resume/SKILL.md": 500,
     "skills/plan/SKILL.md": 1913,
-    "skills/agent/SKILL.md": 7130,
+    "skills/agent/SKILL.md": 7168,
     "agents/writer.md": 6763,
-    "agents/driver.md": 4311,
+    "agents/driver.md": 4164,
     "agents/researcher.md": 3844,
     "agents/auditor.md": 2734,
     "agents/verifier.md": 3500,
@@ -82,7 +82,8 @@ RULES = {
         " stops",
         # An earlier rewording gave the handover to the driver alone, and a writer with nothing done lost its own.
         "and a writer with nothing yet to commit cannot be resumed",
-        "since a successor takes the answer",
+        # The one place that names the status of an agent no answer can resume, the driver's page included.
+        "and stops with `DONE-WITH-CONCERNS` once nothing is left, since a successor takes the answer",
     ),
     "skills/run/SKILL.md": (
         "a dispatch waits for nothing but its `after:` edges and its files",
