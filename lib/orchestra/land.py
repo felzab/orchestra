@@ -199,11 +199,11 @@ def _merge(root: Path, message: str, branch: str, steps: tuple[Step, ...], writt
     return said
 
 
-def _others(state: Path, name: str, root: Path) -> list[tuple[model.Agent, str]]:
-    """Each unsettled agent but `name` whose branch exists, with it: a landed one's branch is on the session
-    branch already, and a pruned one's is deleted, so neither can bring anything in."""
+def _others(agents: list[model.Agent], name: str, root: Path) -> list[tuple[model.Agent, str]]:
+    """Each unsettled agent of `agents` but `name` whose branch exists, with it: a landed one's branch is on the
+    session branch already, and a pruned one's is deleted, so neither can bring anything in."""
     found: list[tuple[model.Agent, str]] = []
-    for agent in model.agents(state):
+    for agent in agents:
         if agent.name == name or agent.status in model.SETTLED:
             continue
         if (branch := prune.branch_of(agent)) and prune.branch_exists(root, branch):
@@ -309,7 +309,7 @@ def _settle(
     # A merge agent's branch carries others' commits: each agent whose branch this span brought in landed too.
     carried = [
         agent.name
-        for agent, other in _others(state, name, root)
+        for agent, other in _others(model.agents(state), name, root)
         if not _ok(root, "merge-base", "--is-ancestor", other, before)
         and _ok(root, "merge-base", "--is-ancestor", other, after)
     ]
@@ -400,7 +400,10 @@ def land(here: Checkout, state: Path, name: str, args: argparse.Namespace) -> in
         )
     steps = config.load(root).land.steps
     written: list[str] = []
-    others = functools.partial(_others, state, name, root)
+    # Every record is read before the merge, so one that does not read refuses the landing while nothing has
+    # changed, where the bookkeeping would stop on it after the merge commit. A conflict names who else changes its
+    # paths from these; the bookkeeping reads them afresh, as it does finishing a merge made earlier.
+    others = functools.partial(_others, model.agents(state), name, root)
     try:
         # `Merge <a> into <b>` is a subject commit-message linters pass as a merge.
         message = f"Merge {name} into {model.read_session(state).branch}"

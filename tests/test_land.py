@@ -435,6 +435,13 @@ def _refused(fleet: Fleet, name: str = "WORKER") -> str:
     return err
 
 
+def test_another_agents_record_that_does_not_read_refuses_the_landing_before_its_merge(fleet: Fleet) -> None:
+    """The bookkeeping reads every record, so one that does not read would stop it after the merge commit."""
+    commit(agent(fleet), "Docs: A note", {"notes.txt": "second\n"})
+    write(fleet.state, "agents/BROKEN.json", "{")
+    assert "BROKEN.json" in _refused(fleet)
+
+
 def test_a_checkout_holding_changes_is_refused(fleet: Fleet) -> None:
     commit(agent(fleet), "Docs: A note", {"notes.txt": "second\n"})
     write(fleet.root, "stray.txt", "uncommitted\n")
