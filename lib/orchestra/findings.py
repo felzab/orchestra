@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import dataclasses
+import datetime
 import importlib
 import re
 import typing
@@ -169,7 +170,11 @@ def is_live(agent: model.Agent, session: str | None = None) -> bool:
     that cannot be read shows nothing, so the record is believed, as `prune` believes it, rather than
     hand a live agent's rows to a second owner. A hook passes its input's `session`, as `context.ended` takes it.
     """
-    return agent.status == "briefed" or (agent.status == "running" and context.gone(agent, session) is None)
+    if agent.status != "running":
+        return agent.status == "briefed"
+    quiet, why = context.ended(agent, datetime.datetime.now().astimezone(), session)
+    # No minutes is no transcript read, which shows nothing either way, as a harness keeping them elsewhere leaves.
+    return quiet is None or why is None
 
 
 def live(state: Path, session: str | None = None) -> dict[str, str]:
