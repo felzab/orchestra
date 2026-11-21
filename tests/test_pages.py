@@ -36,7 +36,7 @@ BUDGETS = {
     "skills/resume/SKILL.md": 500,
     "skills/plan/SKILL.md": 1913,
     "skills/agent/SKILL.md": 7133,
-    "agents/writer.md": 7262,
+    "agents/writer.md": 7224,
     "agents/driver.md": 5000,
     "agents/researcher.md": 4500,
     "agents/auditor.md": 3000,
@@ -99,7 +99,7 @@ INJECTION_RE = re.compile(r"(?:^|\s)!`")
 # misspelt field and Claude Code ignores it: a `tools:` line lost that way hands an auditor a shell, and
 # a writer every tool of the session, such as a 48,000-character schema it never calls.
 SHARED = frozenset({"name", "description", "tools", "background", "autoCompactWindow", "skills"})
-COMMITTING = frozenset({"disallowedTools", "isolation"})
+COMMITTING = frozenset({"isolation"})
 
 FIELD_RE = re.compile(r"(?P<key>[A-Za-z_-]+):(?: (?P<value>.+))?")
 ITEM_RE = re.compile(r"  - (?P<value>\S.*)")
