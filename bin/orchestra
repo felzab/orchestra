@@ -99,8 +99,9 @@ if [ $# -eq 2 ] && [ "$1" = hook ]; then
     exit 1
   fi
   # Each code is one a Python that never ran the hook gives, so, as where none was found, no session's
-  # state was read and none is guarded: the plugin is inert. Never 2, for the reason the end of this
-  # file gives.
+  # state was read and none is guarded: the plugin is inert. Never 2: a hook exiting 2 blocks the
+  # prompt or the tool call in every session of the project (Claude Code's hooks.md, "Exit code 2
+  # behavior per event"), and without Python no orchestra session exists.
   exit 0
 fi
 
@@ -147,10 +148,4 @@ if path=$(lookup py -3); then
 fi
 
 echo "orchestra: no Python 3.11 or newer found (tried $tried)" >&2
-# A hook exiting 2 blocks the prompt or the tool call in every session of the project (Claude Code's
-# hooks.md, "Exit code 2 behavior per event"); without Python no orchestra session exists, so a hook
-# answers nothing, whatever its arguments.
-if [ "${1-}" = hook ]; then
-  exit 0
-fi
 exit 2

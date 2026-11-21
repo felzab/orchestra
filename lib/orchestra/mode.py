@@ -129,13 +129,23 @@ def _attended(args: argparse.Namespace, state: Path) -> int:
 
 
 def _stop(args: argparse.Namespace, state: Path) -> int:
-    if store.lease(state).get("stopped"):
-        cli.emit(args, [], 'stopped already: `orchestra mode takeover "<reason>"` continues it from another session')
-        return DONE
-    # Logged first: once stopped, this session's own writes are refused.
-    log.record(state, "mode", f"stopped by session {store.caller() or 'with no id'}")
-    store.stop_lease(state)
-    cli.emit(args, [], 'stopped: no session writes this state until `orchestra mode takeover "<reason>"`')
+    me = store.caller()
+    if not store.lease(state).get("stopped"):
+        # Logged first: once stopped, this session's own writes are refused. The log write refuses a
+        # session other than the holder, and where this process carries no id, the holder is stopped.
+        log.record(state, "mode", f"stopped by session {me or 'with no id'}")
+        owner = store.lease(state).get("owner")
+        if store.release_lease(state, me or (owner if isinstance(owner, str) else None)):
+            cli.emit(args, [], 'stopped: no session writes this state until `orchestra mode takeover "<reason>"`')
+            return DONE
+        # Another session wrote between the log line and the stop: stopped it, or took the lease.
+        held = store.lease(state)
+        if not held.get("stopped"):
+            raise Refused(
+                f"session {held.get('owner')} holds this session's state, so only it stops it;"
+                f" this is session {me or 'with no id'}"
+            )
+    cli.emit(args, [], 'stopped already: `orchestra mode takeover "<reason>"` continues it from another session')
     return DONE
 
 

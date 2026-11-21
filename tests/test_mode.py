@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime
+import json
 import os
 import subprocess
 import time
@@ -11,7 +12,7 @@ from pathlib import Path
 import pytest
 
 from conftest import git, inprocess, orchestra, write_agent
-from orchestra import init, model, store
+from orchestra import config, log, model, store
 
 OWNER = {store.SESSION_ID: "session-owner"}
 OTHER = {store.SESSION_ID: "session-other"}
@@ -34,7 +35,7 @@ def _user(project: Path) -> Path:
 
 
 def _files(project: Path) -> dict[Path, bytes | None]:
-    paths = [project / init.SETTINGS_LOCAL, _user(project)]
+    paths = [project / config.SETTINGS_LOCAL, _user(project)]
     return {path: path.read_bytes() if path.exists() else None for path in paths}
 
 
@@ -125,6 +126,26 @@ def test_the_lease_refuses_another_session_and_hands_over_only_after_a_stop(proj
         "session session-other holds this state already",
     ]
     assert model.read_agent(session, "OWN").status == "running"
+
+
+def test_a_stop_whose_lease_another_session_took_meanwhile_is_refused_naming_the_holder(
+    project: Path, session: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The lease can move between the stop's log line and its write, and the stop then claims nothing it did not do."""
+    recorded = log.record
+
+    def raced(state: Path, kind: str, text: str) -> log.Entry:
+        done = recorded(state, kind, text)
+        taken = {"owner": OTHER[store.SESSION_ID], "since": model.now(), "stopped": False}
+        (state / store.LEASE).write_bytes(json.dumps(taken).encode())
+        return done
+
+    monkeypatch.setattr(log, "record", raced)
+    stopped = _run("mode", "stop", cwd=project)
+    assert stopped.returncode == 2, stopped.stdout
+    said = "session session-other holds this session's state, so only it stops it; this is session session-owner"
+    assert said in stopped.stderr
+    assert store.lease(session)["stopped"] is False
 
 
 def test_a_waiting_takeover_takes_the_state_once_its_holder_falls_quiet(project: Path, session: Path) -> None:

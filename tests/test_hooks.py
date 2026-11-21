@@ -858,6 +858,21 @@ def test_an_agent_ended_by_a_limit_is_stopped_never_asked_to_repair(project: Pat
         assert (agent.status, agent.reason) == ("stopped", said)
 
 
+def test_a_report_quoting_a_limit_notice_or_an_api_error_is_reported_not_stopped(project: Path, state: Path) -> None:
+    """A notice ends the turn as the whole message; a summary citing one, as its sources line may, is a report."""
+    briefed(project, "A", "auditor")
+    dispatched(project, "A", "auditor", "a1")
+    report.path(state, "A").write_bytes(text("auditor", "A").encode())
+    summary = (
+        "## Summary\nDONE\nI read the errors page.\n"
+        "- [Errors: You've hit your session limit](https://code.claude.com/docs/en/errors.md)\n"
+        "API Error: 529 Overloaded is the text an overload ends a turn with.\n"
+    )
+    assert hook("SubagentStop", project, inside(project, "a1", "auditor", last_assistant_message=summary)) == (0, None)
+    agent = model.read_agent(state, "A")
+    assert (agent.status, agent.outcome) == ("reported", "DONE")
+
+
 def test_a_stop_failure_marks_its_agent_stopped(project: Path, state: Path) -> None:
     briefed(project, "A", "auditor")
     dispatched(project, "A", "auditor", "a1")
