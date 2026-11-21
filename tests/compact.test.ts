@@ -14,19 +14,50 @@ const STATE = '/state/fleet'
 const POINTER = `${COMMON}/orchestra/fix%2Fa%20b`
 // A conversation of one message: a compaction runs over at least one and leaves at least one.
 const MESSAGES = [{ role: 'user', text: 'the work so far', toolUses: [] }]
+// The model's whole context, which `percent` is of, and the smaller compaction window the breakdown measures against.
+const WINDOW = 1_000_000
+const RAW = 500_000
 
 type Seen = { commands: string[]; prompts: string[]; logs: string[] }
-type Options = { pointed?: boolean; stale?: boolean; skip?: string; git?: boolean; drop?: string; others?: boolean }
+type Options = {
+  pointed?: boolean
+  stale?: boolean
+  skip?: string
+  git?: boolean
+  drop?: string
+  others?: boolean
+  tokens?: number | null
+  guarded?: boolean
+  stays?: boolean
+}
 
 // Claude Code's answers for a checkout whose primary branch is `fix/a b`: `pointed` is whether that branch has a
 // state, `stale` a pointer whose state folder is gone, `skip` the veto of the compaction `/compact` runs, `git`
 // false where no git starts, `drop` a refusal of the mod's prompt, and `others` an agent's and a precompute
-// compaction settling after the main one while `/compact` runs.
-function stub(t: any, on: any, { pointed = true, stale = false, skip, git = true, drop, others = false }: Options = {}) {
+// compaction settling after the main one while `/compact` runs. `tokens` is the context's last reading, null for
+// none; `guarded` runs `/compact` with no `session.compact` hook, as where the built-in guard loads, and `stays`
+// keeps the context's reading after it.
+function stub(
+  t: any,
+  on: any,
+  {
+    pointed = true,
+    stale = false,
+    skip,
+    git = true,
+    drop,
+    others = false,
+    tokens = 400_000,
+    guarded = false,
+    stays = false,
+  }: Options = {},
+) {
   const clock = mock.clock(on)
   const seen: Seen = { commands: [], prompts: [], logs: [] }
   // Whether the test's turn end is in flight, during which Claude Code's `$.command.run` rejects.
   let ending = false
+  // The context's reading, which a compaction that ran clears until the next response (SessionContextUsage).
+  let live: number | undefined = tokens ?? undefined
   on('tool.register', () => ({ value: { tool: TOOL } }))
   on('session.start', () => ({ cwd: '/work' }))
   on('session.root', () => ({ value: '/work' }))
@@ -42,12 +73,30 @@ function stub(t: any, on: any, { pointed = true, stale = false, skip, git = true
   const at = (path: string, wanted: string) => path.replaceAll('\\', '/').endsWith(wanted)
   on('fs.exists', ($: any, e: any) => ({ value: pointed && (at(e.path, POINTER) || (!stale && at(e.path, STATE))) }))
   on('fs.read', () => ({ value: `${STATE}\n` }))
+  // The breakdown comes only when asked for, as `$.session.usage({ breakdown })` gives it.
+  on('session.usage', ($: any, e: any) => ({
+    value: {
+      startedAt: 0,
+      context: {
+        tokens: live,
+        window: WINDOW,
+        percent: live === undefined ? undefined : Math.round((100 * live) / WINDOW),
+        breakdown: e?.breakdown === undefined ? undefined : { rawMaxTokens: RAW, maxTokens: RAW },
+      },
+      rateLimits: [],
+    },
+  }))
   // The queued `/compact`, its compaction fired through the mod's `session.compact` hook as Claude Code's own is.
   on('command.run', async ($: any, e: any) => {
     // `$.command.run` "Rejects ... inside a hook the turn or the session's start waits on" (claude-code.d.ts).
     if (ending) return { deny: 'a command cannot run inside a hook the turn waits on' }
     seen.commands.push(e.command)
-    await t.session.compact({ trigger: 'manual', messages: MESSAGES })
+    if (guarded) {
+      if (!stays) live = undefined
+      return { text: '' }
+    }
+    const result = await t.session.compact({ trigger: 'manual', messages: MESSAGES })
+    if (result.skip === undefined) live = undefined
     if (others) {
       await t.session.compact({ trigger: 'auto', agentId: 'a1', messages: MESSAGES })
       await t.session.compact({ trigger: 'precompute', messages: MESSAGES })
@@ -219,6 +268,26 @@ test('a resume prompt Claude Code refuses leaves a line saying why', async ($, o
   await clock.settle()
   expect(seen.prompts).toEqual(['The compaction scheduled with the compact tool has run.'])
   expect(seen.logs).toEqual(["the compaction's resume prompt was refused: the run reached its --max-turns limit"])
+})
+
+test('where no session.compact hook runs, a context left with no reading has compacted', async ($, on) => {
+  const { clock, seen, complete } = stub($, on, { guarded: true })
+  await $.tool.call({ tool: TOOL })
+  await complete()
+  await clock.settle()
+  expect(seen.prompts).toEqual(['The compaction scheduled with the compact tool has run.'])
+})
+
+test('where no session.compact hook runs and the context keeps its reading, the outcome is unknown', async ($, on) => {
+  const { clock, seen, complete } = stub($, on, { guarded: true, stays: true })
+  await $.tool.call({ tool: TOOL })
+  await complete()
+  await clock.settle()
+  expect(seen.prompts).toEqual([
+    'The compaction scheduled with the compact tool reported no outcome, so whether it ran is unknown.',
+  ])
+  // No evidence of a failure, so the tool is not stopped.
+  expect(await $.tool.call({ tool: TOOL })).toEqual(SCHEDULED)
 })
 
 test("the pointer's name is quoted as Python's quote(branch, safe='') quotes it", () => {

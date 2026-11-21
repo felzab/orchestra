@@ -20,9 +20,10 @@ const POINTERS = 'orchestra'
 let pending = false
 // While the queued `/compact` runs: the main conversation's compaction result, once one settles.
 let running
-// Set once a compaction the tool scheduled did not run, until the owner's next prompt or a main compaction that
-// runs: the resume prompt starts a turn, so a compaction that fails each time would repeat for as long as the model
-// calls the tool again (plugins/mods/api.md, "A `claude -p` run with your mod never exits").
+// Set once a compaction the tool scheduled is known not to have run, a veto or a rejected `/compact`, until the
+// owner's next prompt or a main compaction that runs: the resume prompt starts a turn, so a compaction that fails
+// each time would repeat for as long as the model calls the tool again (plugins/mods/api.md, "A `claude -p` run with
+// your mod never exits").
 let failed = false
 // The origins of a prompt that is the owner's own input (PromptOrigin): Enter at the terminal, the Remote Control
 // bridge, the SDK host's own turn, and a ping from Slack.
@@ -65,11 +66,18 @@ async function compactThenResume($) {
     // session is idle".
     await $.command.run({ command: 'compact', args: '' })
     const outcome = running.outcome
-    const ran = outcome !== undefined && outcome.skip === undefined
-    said = ran
-      ? 'The compaction scheduled with the compact tool has run.'
-      : `The compaction scheduled with the compact tool did not run: ${outcome?.skip ?? 'no compaction happened'}.`
-    if (!ran) failed = true
+    if (outcome?.skip !== undefined) {
+      said = `The compaction scheduled with the compact tool did not run: ${outcome.skip}.`
+      failed = true
+    } else if (outcome !== undefined || (await $.session.usage()).context.tokens === undefined) {
+      // Where Claude Code's built-in guard loads, no `session.compact` hook of this mod runs (plugins/mods/admin.md,
+      // "Know which hooks of a user's mod don't run"). The context's `tokens` then tells: "absent until the first
+      // response of the live window: a fresh session, or one just compacted" (SessionContextUsage).
+      said = 'The compaction scheduled with the compact tool has run.'
+    } else {
+      // A reading may come from a turn something else started since, so it is no evidence the compaction failed.
+      said = 'The compaction scheduled with the compact tool reported no outcome, so whether it ran is unknown.'
+    }
   } catch (error) {
     said = `The compaction scheduled with the compact tool failed: ${error instanceof Error ? error.message : error}.`
     failed = true
