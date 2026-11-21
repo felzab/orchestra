@@ -127,7 +127,12 @@ def test_add_and_done_number_the_items_and_log_the_end(project: Path, state: Pat
 @pytest.mark.parametrize(
     ("args", "said"),
     [
-        (["add", "--when", "landed:NOBODY", "x"], "no agent NOBODY in this session"),
+        (
+            ["add", "--when", "landed:NOBODY", "x"],
+            "no agent NOBODY in this session and no slice of PLAN.md: `orchestra status` lists both",
+        ),
+        # A report is an agent's, so a name with no record, a slice's included, is no `reported:` event's.
+        (["add", "--when", "reported:S1", "x"], "no agent S1 in this session: `reported:` names an agent"),
         (["add", "--when", "merged:A", "x"], "`merged:A` is none of ci, landed:NAME and reported:NAME"),
     ],
 )
@@ -155,17 +160,6 @@ def test_an_item_may_wait_on_a_planned_slice_no_agent_took_yet(project: Path, st
     assert "waits     #1 (when landed:LATER) dispatch C: waits on slice LATER, which has not landed" in paced(state)
     status(state, "API-RETRY", "landed")
     assert numbers(state) == [1]
-    reported_on_slice = inprocess("queue", "add", "--when", "reported:LATER", "x", cwd=project)
-    assert (reported_on_slice.returncode, reported_on_slice.stderr) == (
-        2,
-        "orchestra queue: no agent LATER in this session: `reported:` names an agent, as `orchestra status` lists\n",
-    )
-    unplanned = inprocess("queue", "add", "--when", "landed:NOBODY", "x", cwd=project)
-    assert (unplanned.returncode, unplanned.stderr) == (
-        2,
-        "orchestra queue: no agent NOBODY in this session and no slice of PLAN.md: `orchestra status` lists both\n",
-    )
-    assert list(model.read_queue(state)) == [1]
 
 
 def test_a_fault_exits_with_a_code_of_its_own_and_prints_its_trace(project: Path, state: Path) -> None:
