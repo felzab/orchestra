@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from conftest import inprocess, orchestra, write_agent
-from orchestra import FAULT, model, store
+from orchestra import FAULT, log, model, store
 from orchestra import queue as items
 from orchestra.status import paced
 
@@ -87,6 +87,25 @@ def test_a_landed_item_falls_due_for_a_pruned_agent_only_where_its_work_landed(
     if not due:
         said = "which settled with nothing landed and never lands: `orchestra queue done 1` ends it"
         assert any(said in line for line in paced(state))
+
+
+def test_due_given_the_records_and_the_log_reads_neither_again(monkeypatch: pytest.MonkeyPatch, state: Path) -> None:
+    """The turn-end hook holds both already, and each read costs it a pass over the state."""
+    store.append_jsonl(state / store.LOG, {"time": LATER, "kind": items.CI_READ, "text": "run 1 concluded"})
+    queued(
+        state,
+        model.QueueItem(1, "ci", "push the fix", time=EARLY),
+        model.QueueItem(2, "landed", "dispatch B", "A", time=EARLY),
+    )
+    status(state, "A", "landed")
+    agents, entries = model.agents(state), log.entries(state)
+
+    def unread(_state: Path) -> list[object]:
+        raise AssertionError("read again")
+
+    monkeypatch.setattr(model, "agents", unread)
+    monkeypatch.setattr(log, "entries", unread)
+    assert [item.number for item in items.due(state, agents, entries)] == [1, 2]
 
 
 def reported(state: Path, at: str) -> None:
