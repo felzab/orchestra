@@ -196,13 +196,12 @@ def _routed_to(rows: list[str]) -> str | None:
     return f"rows are routed to it: {', '.join(rows[:SHOWN])}{more}"
 
 
-def _kept(root: Path, session: str, agent: model.Agent, tree: Tree | None, rows: list[str]) -> str | None:
-    """Why a finished agent's branch and tree stay; None where both can go."""
+def _kept(root: Path, session: str, branch: str | None, tree: Tree | None, rows: list[str]) -> str | None:
+    """Why a finished agent's branch and tree stay; None where both can go. `branch` is its branch where it exists."""
     if held := _routed_to(rows):
         return held
-    branch = branch_of(agent)
     # A detached tree's commits are on no branch: its head is read as well.
-    refs = [branch] if branch and branch_exists(root, branch) else []
+    refs = [branch] if branch else []
     refs += [tree.head] if tree is not None and tree.head and not tree.branch else []
     for ref in refs:
         if ahead := _ahead(root, session, ref):
@@ -302,7 +301,7 @@ def prune(
             continue
         listed = next((tree for tree in mine if tree.listed), None)
         rows = routed.get(agent.name, [])
-        keep = _discarded(agent, rows, out) if discard else _kept(root, session.branch, agent, listed, rows)
+        keep = _discarded(agent, rows, out) if discard else _kept(root, session.branch, held, listed, rows)
         if keep is not None and listed is None:
             out.lines.append(f"kept {held or 'its record'} ({agent.name}): {keep}")
         removed = _clear(agent, mine, keep, out, moved)
