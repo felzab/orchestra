@@ -35,7 +35,7 @@ BUDGETS = {
     "skills/end/SKILL.md": 500,
     "skills/resume/SKILL.md": 500,
     "skills/plan/SKILL.md": 1913,
-    "skills/agent/SKILL.md": 7168,
+    "skills/agent/SKILL.md": 7206,
     "agents/writer.md": 6763,
     "agents/driver.md": 4164,
     "agents/researcher.md": 3844,
@@ -84,6 +84,8 @@ RULES = {
         "and a writer with nothing yet to commit cannot be resumed",
         # The one place that names the status of an agent no answer can resume, the driver's page included.
         "and stops with `DONE-WITH-CONCERNS` once nothing is left, since a successor takes the answer",
+        # A check given ten minutes went to the background at 180 seconds, and its agent looped on the stop hook.
+        "the Bash tool moves a call into the background after about 180 seconds, whatever its timeout",
     ),
     "skills/run/SKILL.md": (
         "a dispatch waits for nothing but its `after:` edges and its files",
