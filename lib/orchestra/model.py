@@ -193,8 +193,13 @@ def from_record(cls: type[T], record: Record, source: Path) -> T:
 
 
 def _fold(records: list[Record], cls: type[T], key: str, source: Path) -> dict[Any, T]:
-    """Each item's state as its last line, in the order items first appear."""
-    return {record[key]: from_record(cls, record, source) for record in records if key in record}
+    """Each item's state as its last line, in the order items first appear.
+
+    Only each item's last line is built: every writer goes through `_write`, which builds an item before
+    it appends its line, so a line no later one replaced is the only one a read must check.
+    """
+    last = {record[key]: record for record in records if key in record}
+    return {held: from_record(cls, record, source) for held, record in last.items()}
 
 
 def _read(path: Path, cls: type[T], key: str) -> dict[Any, T]:
