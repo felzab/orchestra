@@ -151,8 +151,6 @@ def test_add_and_done_number_the_items_and_log_the_end(project: Path, state: Pat
             ["add", "--when", "landed:NOBODY", "x"],
             "no agent NOBODY in this session and no slice of PLAN.md: `orchestra status` lists both",
         ),
-        # A report is an agent's, so a name with no record, a slice's included, is no `reported:` event's.
-        (["add", "--when", "reported:S1", "x"], "no agent S1 in this session: `reported:` names an agent"),
         (["add", "--when", "merged:A", "x"], "`merged:A` is none of ci, landed:NAME and reported:NAME"),
     ],
 )
@@ -166,6 +164,11 @@ def test_an_event_naming_no_agent_or_no_kind_is_refused(project: Path, state: Pa
 def test_an_item_may_wait_on_a_planned_slice_no_agent_took_yet(project: Path, state: Path) -> None:
     """Its writer is briefed later under a name of its own, as brief.md's example names one: due once it lands."""
     store.write_text(state / store.PLAN, "# Plan\n\n## Slices and their files\n\n- [ ] LATER `b.txt`\n")
+    # A report is an agent's, so a planned slice no agent took yet is no `reported:` event's: it would never fall due.
+    refused = inprocess("queue", "add", "--when", "reported:LATER", "x", cwd=project)
+    assert refused.returncode == 2
+    assert "no agent LATER in this session: `reported:` names an agent" in refused.stderr
+    assert model.read_queue(state) == {}
     added = inprocess("queue", "add", "--when", "landed:LATER", "dispatch", "C", cwd=project)
     assert added.returncode == 0, added.stderr
     assert added.stdout.splitlines() == ["  1  waits  landed:LATER              dispatch C"]
