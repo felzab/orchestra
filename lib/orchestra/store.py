@@ -50,6 +50,8 @@ PLAN = "PLAN.md"
 NOW = "NOW.md"
 LEASE = "lease.json"
 AWAY = "away.json"
+# The undone lines the coordinator's turn-end hook last listed, so that it lists a set once.
+LISTED = "listed.json"
 OVERRIDE = "override.json"
 REPORTS = "reports"
 SCRATCH = "scratch"

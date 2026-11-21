@@ -28,9 +28,9 @@ The fixes from the third project session that ran on the plugin.
 - The prompt hook tells the coordinator, from 75% of a compaction window that a settings file or the
   environment sets, that the compact tool compacts at the next seam. Past the window, which has then
   not applied, the coordinator reads that the tool compacts only from 60% of the window Claude Code
-  applied, which may be larger, so the owner's `/compact` compacts at the next seam; the owner is told
-  to type `/compact` at the coordinator's next seam, unless the tool compacts there or answers that
-  none is needed.
+  applied, which may be larger, so the owner's `/compact` compacts at the next seam where the tool
+  does not; the owner is told to type `/compact` at the coordinator's next seam, unless the tool
+  compacts there or answers that none is needed.
 - `orchestra brief NAME --type writer --slice S --body FILE` writes the brief's header above a file
   holding its lists and sections and checks it in the same call. Where the check refuses, the brief
   stays written, and the refusal says to edit it and run `orchestra brief NAME --check`, or to settle
@@ -88,6 +88,9 @@ The fixes from the third project session that ran on the plugin.
   - the handoff writes the next session's work list, one line an item, into the programme's plan
     where one exists and otherwise into itself, and the estimate's second reader also runs at each
     estimate the owner starts and names each row it corrected the last time;
+  - the plan lists each slice's files from a search of the whole tree for each name, key and constant
+    the slice renames or whose type or signature it changes, its importers and tests included, so a
+    writer seldom has to ask for a file mid-run;
   - the shared agent page says the Bash tool moves a call into the background after about 180
     seconds, whatever its timeout, so an agent splits a longer check.
 - The guide carries the measured compaction figures, why 500,000 is kept and why a seam compacts
@@ -97,6 +100,14 @@ The fixes from the third project session that ran on the plugin.
 - `contextCeiling` refuses a resume only once the agent's prompt cache has lapsed, five minutes after
   its transcript was last written; a resume within them reads the context from the cache and goes
   ahead, and the refusal names the transcript's age.
+- The turn-end hook lists a set of undone lines once, and stays silent while it would list the same
+  set and nothing has been logged since, so a report the coordinator holds, a queue item that cannot
+  run yet or a checkpoint a ruling holds back no longer starts a turn at every turn's end. A line
+  come or gone, or any log entry, such as a judgement, a landing or a note, lists the set again,
+  whole. A listing counts only once the turn it continued has ended, so one lost to a crash is
+  listed again, and the line naming an away session with nothing running is listed at every turn's
+  end that holds it, until `orchestra note --waiting "<what>"` names what the session waits on. The
+  state keeps the last listing in `listed.json`.
 - The hooks wait on less: an attended turn's end reads no agent's transcript, the prompt and
   post-call hooks take the primary checkout from `session.json` where its `.git` folder holds the
   session's pointer, rather than from two git runs, and an agent's `SendMessage` loads nothing.

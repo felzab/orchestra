@@ -88,6 +88,8 @@ JUDGED = 8
 DISCLOSURE_ONLY = ("disclosure",)
 # When the previous prompt arrived, for the clock line.
 PROMPT = "prompt.json"
+# The turn-end line of an away session with nothing running, listed at every turn's end that holds it.
+IDLE_AWAY = 'nothing runs, and no `orchestra note --waiting "<what>"` names what the session waits on'
 # The labels of the overview's rows naming judged and pruned agents, left out of the one given back after a
 # compaction or a resume: one long session spent 17% of those overviews' characters on them.
 FINISHED_ROWS = frozenset({"judged", "pruned"})
@@ -947,9 +949,19 @@ def stop_failure(where: Where) -> str | None:
 
 
 def stop(where: Where) -> str | None:
-    """The turn continued once with what the coordinator can act on now."""
+    """The turn continued once with what the coordinator can act on now, and not again for a set it has read.
+
+    Each forced turn re-reads the coordinator's whole context, so a set it has read and chose to wait on, as a
+    report it holds or a queue item that cannot run yet, is left out until a line comes or goes or a log entry is
+    written. A listing counts as read once the turn it continued ends, which `stop_hook_active` marks (hooks.md,
+    "Stop input"), so one lost before then, as to a crash, is listed again. `IDLE_AWAY` is listed at every turn's
+    end that holds it: a session nobody watches must never stall unseen, and a waiting note silences it.
+    """
     state = where.state
-    if not where.coordinator or state is None or where.data.get("stop_hook_active"):
+    if not where.coordinator or state is None:
+        return None
+    if where.data.get("stop_hook_active"):
+        _read(state)
         return None
     agents = model.agents(state)
     # Listed once for every report stopped on a question, and only once one is read.
@@ -978,7 +990,7 @@ def stop(where: Where) -> str | None:
     # A session nobody watches must never stall unseen; an attended one ends its turn in front of its owner. So
     # each agent's transcript is read only while away, and last: an attended turn's end reads none.
     if (state / store.AWAY).exists() and not _waits(agents, entries) and not _busy(where, agents):
-        undone.append('nothing runs, and no `orchestra note --waiting "<what>"` names what the session waits on')
+        undone.append(IDLE_AWAY)
     now = state / store.NOW
     if now.is_file():
         # Compared at the log's own precision, the second: an entry of NOW.md's second may follow it.
@@ -996,7 +1008,30 @@ def stop(where: Where) -> str | None:
         undone.append(due)
     if not undone:
         return None
+    path = state / store.LISTED
+    listing = {"lines": sorted(undone), "log": len(entries), "read": False}
+    if IDLE_AWAY not in undone and _listed(path) == {**listing, "read": True}:
+        return None
+    # Written unread before the answer leaves, so a listing never reaches Claude Code with no record of it.
+    _quietly(lambda: store.write_json(path, listing))
     return _context("Stop", "Undone in this orchestra session:\n" + "\n".join(f"- {line}" for line in undone))
+
+
+def _listed(path: Path) -> Record | None:
+    """The turn-end hook's last listing; None where there is none or it cannot be read, which lists the set again."""
+    if not path.is_file():
+        return None
+    try:
+        return store.read_json(path)
+    except Refused:
+        return None
+
+
+def _read(state: Path) -> None:
+    """The last listing marked read, since the turn it continued has ended."""
+    path = state / store.LISTED
+    if path.is_file():
+        _quietly(lambda: store.update_json(path, lambda held: {**(held or {}), "read": True}))
 
 
 def _busy(where: Where, agents: list[model.Agent]) -> bool:
@@ -1237,7 +1272,8 @@ def user_prompt_submit(where: Where) -> str | None:
     # The tool's threshold is of the window Claude Code applied, which this one is not, so it promises nothing here.
     waits = f"compacts only from {COMPACTS_FROM:.0%} of the window Claude Code applied, which may be larger"
     said += f" Your context is {size} tokens, past the {window}-token compaction window, which has not applied;"
-    said += f" `{COMPACT_TOOL}` {waits}, so the owner's `/compact` compacts at the next seam."
+    # Conditioned as the owner's line below is, so the coordinator relays no order that line holds back.
+    said += f" `{COMPACT_TOOL}` {waits}, so the owner's `/compact` compacts at the next seam where the tool does not."
     # Under a larger applied window the tool may still compact at that seam, so the owner's order waits on it.
     shown = (
         f"orchestra: this session's context is {size} tokens, past its {window}-token compaction window, which"
