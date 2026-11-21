@@ -420,10 +420,11 @@ def judge(args: argparse.Namespace, state: Path, owner: Callable[[str], str]) ->
     for chosen in given.values():
         if isinstance(chosen, Route):
             owner(chosen.owner)
-    alive = live(state)
     reports = Reports(state)
     new = {report.row(agent.name, round_, finding.number): finding for finding in held.findings}
     if verifier:
+        # Only a verifier's routes can meet a row held by a live agent: a report's own rows are new.
+        alive = live(state)
         proved = [(verdict, _proof(verdict, _heading(reports, verdict.row))) for verdict in held.verdicts]
         events = _apply(state, lambda now: _verdicts(agent.name, proved, given, now, alive))
     else:
