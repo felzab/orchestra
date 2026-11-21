@@ -303,20 +303,16 @@ def within(path: Path, folder: Path) -> bool:
     is compared by its volume and file number, and the parts below the folder's nearest existing one,
     which no file holds yet, in the file system's case.
     """
-    return under(path, folder) is not None
+    return _under(path, folder) is not None
 
 
 def identical(path: Path, other: Path) -> bool:
     """Whether two paths name one file or folder, as `within` judges a folder: by identity, not spelling."""
-    return under(path, other) == []
+    return _under(path, other) == []
 
 
-def under(path: Path, folder: Path) -> list[str] | None:
-    """The path's parts below the folder, in the file system's case, as `within` judges it; None outside it.
-
-    The folder itself has none, so a pattern written below a folder can be matched against what is
-    left once the folder is found by its identity.
-    """
+def _under(path: Path, folder: Path) -> list[str] | None:
+    """The path's parts below the folder, in the file system's case, none for the folder itself; None outside it."""
     outer, below = _anchor(folder.resolve())
     inner = path.resolve()
     for depth, held in enumerate((inner, *inner.parents)):
