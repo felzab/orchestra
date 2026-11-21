@@ -12,14 +12,8 @@ each refusal, `PermissionDenied`'s in auto mode among them, is recorded for the 
 
 Each function returns the event's stdout, None for nothing; the shapes are Claude Code's hooks.md.
 A refusal is a `PreToolUse` deny or a `SubagentStop` block, which one `orchestra override` naming its
-caller lets through, logged. Once this module runs, an event that cannot be judged, its state
-unreadable, a lock held past the hook's budget or any fault, fails closed where it guards: a
-`PreToolUse` of one of the plugin's agents, or dispatching one, is denied naming the fault, and while
-the session is away any session's prompt or question in the checkout is refused. Every other such
-event of the lease holder's session or of one of the plugin's agents logs a line and shows it in a
-`systemMessage`; one of nobody's answers nothing, its trace on stderr. A hook that fails before,
-its Python missing or crashed, or past its timeout, lets the call through (`"onFailure": "continue"`
-in hooks/hooks.json), so a broken install never blocks a session.
+caller lets through, logged. An event this module cannot judge is answered as `_faulted` says, and
+one whose hook fails before this module runs as `bin/orchestra` says.
 
 The writes of an event inside one of the plugin's agents record that agent's own facts, its stop,
 its branch and their log lines, so they pass whichever session holds the lease (`store.unleased`).
