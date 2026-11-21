@@ -321,13 +321,15 @@ def grant(root: Path, folder: Path) -> str:
     formats JSON, so no key of the owner's changes; any other shape is left for the owner to edit.
     Whoever wrote it, an untracked file is kept out of git, since it stops every landing either way.
     """
+    # Asked once: the exclusion between here and the write cannot change whether the file is tracked.
+    tracked = tracked_local(root)
     # Before the write, so this machine's paths are never one `git add` from a commit.
-    excluded = None if tracked_local(root) else exclude_local(root)
-    said = _grant(root, folder)
+    excluded = None if tracked else exclude_local(root)
+    said = _grant(root, folder, tracked=tracked)
     return "\n".join(said if excluded is None else [excluded, *said])
 
 
-def _grant(root: Path, folder: Path) -> list[str]:
+def _grant(root: Path, folder: Path, *, tracked: bool) -> list[str]:
     said: list[str] = []
     wanted: list[str] = []
     needs_grant = not granted(root, folder)
@@ -343,16 +345,19 @@ def _grant(root: Path, folder: Path) -> list[str]:
     if not wanted:
         return said
     yourself = f"add {' and '.join(wanted)} yourself"
-    return [*said, *_rewrite(root, folder if needs_grant else None, yourself, set_window=window is None)]
+    return [
+        *said,
+        *_rewrite(root, folder if needs_grant else None, yourself, set_window=window is None, tracked=tracked),
+    ]
 
 
-def _rewrite(root: Path, folder: Path | None, yourself: str, *, set_window: bool) -> list[str]:
+def _rewrite(root: Path, folder: Path | None, yourself: str, *, set_window: bool, tracked: bool) -> list[str]:
     """The folder granted where given and the window set where asked, in one write of the local file; what was done.
 
-    `yourself` says what to add by hand where the file is left as it is.
+    `yourself` says what to add by hand where the file is left as it is; `tracked`, whether git tracks the file.
     """
     path = root / config.SETTINGS_LOCAL
-    if tracked_local(root):
+    if tracked:
         # Its every change would be one `git add` from a commit carrying this machine's paths.
         return [f"{path} is tracked, so it is left as it is: {yourself}"]
     try:
