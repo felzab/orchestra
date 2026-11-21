@@ -5,6 +5,9 @@ import { quote } from '../hooks/compact.js'
 
 const TOOL = 'mcp__orchestra__compact'
 const SCHEDULED = { result: 'scheduled: end your turn, and the conversation compacts once it has ended' }
+const REFUSED = {
+  deny: `${TOOL} schedules nothing until the owner's next prompt or a compaction that runs, since the one it last scheduled did not run.`,
+}
 const COMMON = '/work/.git'
 const STATE = '/state/fleet'
 // The primary checkout's branch needs quoting, so a pointer read without `quote` names no file.
@@ -13,13 +16,13 @@ const POINTER = `${COMMON}/orchestra/fix%2Fa%20b`
 const MESSAGES = [{ role: 'user', text: 'the work so far', toolUses: [] }]
 
 type Seen = { commands: string[]; prompts: string[]; logs: string[] }
-type Options = { pointed?: boolean; stale?: boolean; skip?: string; git?: boolean; others?: boolean }
+type Options = { pointed?: boolean; stale?: boolean; skip?: string; git?: boolean; drop?: string; others?: boolean }
 
 // Claude Code's answers for a checkout whose primary branch is `fix/a b`: `pointed` is whether that branch has a
 // state, `stale` a pointer whose state folder is gone, `skip` the veto of the compaction `/compact` runs, `git`
-// false where no git starts, and `others` an agent's and a precompute compaction settling after the main one while
-// `/compact` runs.
-function stub(t: any, on: any, { pointed = true, stale = false, skip, git = true, others = false }: Options = {}) {
+// false where no git starts, `drop` a refusal of the mod's prompt, and `others` an agent's and a precompute
+// compaction settling after the main one while `/compact` runs.
+function stub(t: any, on: any, { pointed = true, stale = false, skip, git = true, drop, others = false }: Options = {}) {
   const clock = mock.clock(on)
   const seen: Seen = { commands: [], prompts: [], logs: [] }
   // Whether the test's turn end is in flight, during which Claude Code's `$.command.run` rejects.
@@ -57,7 +60,7 @@ function stub(t: any, on: any, { pointed = true, stale = false, skip, git = true
   )
   on('prompt.submit', ($: any, e: any) => {
     seen.prompts.push(e.text)
-    return { text: e.text }
+    return drop === undefined ? { text: e.text } : { drop }
   })
   on('ui.log', ($: any, e: any) => {
     seen.logs.push(e.text)
@@ -84,6 +87,9 @@ const end = (reason: string, agentId?: string) => ({
   reason,
   ...(agentId === undefined ? {} : { agentId }),
 })
+
+// A prompt as Claude Code raises it, from `kind` (PromptOrigin).
+const prompt = (kind: string) => ({ text: 'carry on', wait: false, origin: { kind } })
 
 test("the main loop's call compacts once its turn ends, then wakes the session", async ($, on) => {
   const { clock, seen, complete } = stub($, on)
@@ -178,6 +184,41 @@ test("an agent's or a precompute compaction during the queued /compact leaves th
   expect(seen.prompts).toEqual([
     'The compaction scheduled with the compact tool did not run: blocked by a PreCompact hook.',
   ])
+})
+
+test("after a compaction that did not run, the tool schedules nothing until the owner's next prompt", async ($, on) => {
+  const { clock, seen, complete } = stub($, on, { skip: 'blocked by a PreCompact hook' })
+  await $.tool.call({ tool: TOOL })
+  await complete()
+  await clock.settle()
+  expect(await $.tool.call({ tool: TOOL })).toEqual(REFUSED)
+  // An agent's report is no owner at the prompt.
+  await $.prompt.submit(prompt('task-notification'))
+  expect(await $.tool.call({ tool: TOOL })).toEqual(REFUSED)
+  await $.prompt.submit(prompt('composer'))
+  expect(await $.tool.call({ tool: TOOL })).toEqual(SCHEDULED)
+  expect(seen.commands).toEqual(['compact'])
+})
+
+test('after a compaction that did not run, a main compaction that runs lets the tool schedule again', async ($, on) => {
+  const { clock, complete } = stub($, on, { skip: 'blocked by a PreCompact hook' })
+  await $.tool.call({ tool: TOOL })
+  await complete()
+  await clock.settle()
+  // An agent's own compaction shows nothing of the main conversation's.
+  await $.session.compact({ trigger: 'auto', agentId: 'a1', messages: MESSAGES })
+  expect(await $.tool.call({ tool: TOOL })).toEqual(REFUSED)
+  await $.session.compact({ trigger: 'auto', messages: MESSAGES })
+  expect(await $.tool.call({ tool: TOOL })).toEqual(SCHEDULED)
+})
+
+test('a resume prompt Claude Code refuses leaves a line saying why', async ($, on) => {
+  const { clock, seen, complete } = stub($, on, { drop: 'the run reached its --max-turns limit' })
+  await $.tool.call({ tool: TOOL })
+  await complete()
+  await clock.settle()
+  expect(seen.prompts).toEqual(['The compaction scheduled with the compact tool has run.'])
+  expect(seen.logs).toEqual(["the compaction's resume prompt was refused: the run reached its --max-turns limit"])
 })
 
 test("the pointer's name is quoted as Python's quote(branch, safe='') quotes it", () => {

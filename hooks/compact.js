@@ -20,6 +20,13 @@ const POINTERS = 'orchestra'
 let pending = false
 // While the queued `/compact` runs: the main conversation's compaction result, once one settles.
 let running
+// Set once a compaction the tool scheduled did not run, until the owner's next prompt or a main compaction that
+// runs: the resume prompt starts a turn, so a compaction that fails each time would repeat for as long as the model
+// calls the tool again (plugins/mods/api.md, "A `claude -p` run with your mod never exits").
+let failed = false
+// The origins of a prompt that is the owner's own input (PromptOrigin): Enter at the terminal, the Remote Control
+// bridge, the SDK host's own turn, and a ping from Slack.
+const OWNER = new Set(['composer', 'bridge', 'sdk', 'slack-ping'])
 
 // `store.pointer`'s quoting, Python's `quote(branch, safe="")`: every byte but RFC 3986's unreserved characters
 // percent-encoded, which `encodeURIComponent` does once `!'()*` are encoded too (MDN, `encodeURIComponent`,
@@ -58,17 +65,22 @@ async function compactThenResume($) {
     // session is idle".
     await $.command.run({ command: 'compact', args: '' })
     const outcome = running.outcome
-    said =
-      outcome !== undefined && outcome.skip === undefined
-        ? 'The compaction scheduled with the compact tool has run.'
-        : `The compaction scheduled with the compact tool did not run: ${outcome?.skip ?? 'no compaction happened'}.`
+    const ran = outcome !== undefined && outcome.skip === undefined
+    said = ran
+      ? 'The compaction scheduled with the compact tool has run.'
+      : `The compaction scheduled with the compact tool did not run: ${outcome?.skip ?? 'no compaction happened'}.`
+    if (!ran) failed = true
   } catch (error) {
     said = `The compaction scheduled with the compact tool failed: ${error instanceof Error ? error.message : error}.`
+    failed = true
   } finally {
     running = undefined
   }
   // `$.prompt.submit`: "a turn of its own, once the session is idle", read after a sentence naming this mod.
-  await $.prompt.submit({ text: said })
+  const sent = await $.prompt.submit({ text: said })
+  // A refused prompt "resolves with `{ drop: '<reason>' }` and queues no prompt" (plugins/mods/api.md, "What
+  // refused calls return"), so the session stays idle; the engine's own reason is logged nowhere else.
+  if (sent.drop !== undefined) $.ui.log(`the compaction's resume prompt was refused: ${sent.drop}`)
 }
 
 export function register(on) {
@@ -89,6 +101,11 @@ export function register(on) {
     // `agentId`: "for a subagent or a teammate ...; absent on the main loop" (AgentLoop).
     if (e.agentId !== undefined) {
       return { deny: `${TOOL} compacts the main conversation alone; agent ${e.agentId} called it.` }
+    }
+    if (failed) {
+      return {
+        deny: `${TOOL} schedules nothing until the owner's next prompt or a compaction that runs, since the one it last scheduled did not run.`,
+      }
     }
     if (pending) return { result: SCHEDULED }
     if ((await stateOf($)) === null) {
@@ -122,11 +139,24 @@ export function register(on) {
     return next(e)
   })
 
+  // The owner's input lets the tool schedule again, as Claude Code refuses a mod's calls after an interruption
+  // "until the user's next input" (plugins/mods/api.md, "Retry a refused or dropped call"). `prompt.submit` "Fires
+  // when a prompt is submitted, before the turn starts", the mod's own resume prompt among them, whose `origin` is
+  // a plugin's.
+  on('prompt.submit', ($, e, next) => {
+    if (OWNER.has(e.origin.kind)) failed = false
+    return next(e)
+  })
+
   // Records whether the queued `/compact` compacted the main conversation: `next(e)` resolves to the compaction or
   // to `{ skip }` (SessionCompactResult), and `precompute` installs nothing (SessionCompactTrigger).
   on('session.compact', async ($, e, next) => {
     const result = await next(e)
-    if (running !== undefined && e.agentId === undefined && e.trigger !== 'precompute') running.outcome = result
+    if (e.agentId === undefined && e.trigger !== 'precompute') {
+      if (running !== undefined) running.outcome = result
+      // Any main compaction that ran, the owner's `/compact` or Claude Code's own at the window, shows the next may.
+      if (result.skip === undefined) failed = false
+    }
     return result
   })
 }
