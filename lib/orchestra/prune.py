@@ -142,15 +142,15 @@ def _unread(agent: model.Agent) -> str | None:
     return f"its record is running, and {why}" if quiet is None else None
 
 
-def _busy(state: Path, agent: model.Agent, branch: str | None, never: Collection[str], *, discard: bool) -> str | None:
-    """Why the agent's tree stays whatever it holds; None where nothing keeps it.
+def _busy(state: Path, root: Path, agent: model.Agent, *, discard: bool) -> str | None:
+    """Why the agent's tree stays whatever it holds, its branch aside; None where nothing keeps it.
 
     A tree its agent may be working in is never moved, a folder git dropped included, nor one whose report
     waits: a pruned agent's report can no longer be judged, nor its question answered. A `running` record
     no transcript shows is kept unless discarded, the coordinator's own word, since nothing else settles it.
     """
     unread = None if discard else _unread(agent)
-    return context.working(agent) or unread or findings.waiting(state, agent) or _spared(branch, never)
+    return context.working(agent) or unread or findings.waiting(state, agent, root)
 
 
 def _discarded(agent: model.Agent, rows: list[str], out: Outcome) -> str | None:
@@ -294,7 +294,7 @@ def prune(
                     " settles it once you have saved what it holds"
                 )
             continue
-        if why := _busy(state, agent, branch, never, discard=discard):
+        if why := _busy(state, root, agent, discard=discard) or _spared(branch, never):
             out.lines += [f"kept {tree.path} ({agent.name}): {why}" for tree in mine] or [
                 f"kept {held or 'its record'} ({agent.name}): {why}"
             ]

@@ -316,7 +316,7 @@ def _settle(
     names = [name, *carried]
     # Each agent is judged once, before any row closes: one whose record stays is credited nothing, since its
     # report may still change or be refused, and its rows are credited when it lands itself.
-    kept = {each: why for each in names if (why := _kept(state, model.read_agent(state, each)))}
+    kept = {each: why for each in names if (why := _kept(state, model.read_agent(state, each), root))}
     lines = credit(state, [each for each in names if each not in kept], short)
     for each in names:
         if each not in kept:
@@ -325,7 +325,7 @@ def _settle(
     return names, [*lines, *kept.values()], prune.prune(here, state, set(names))
 
 
-def _kept(state: Path, agent: model.Agent) -> str | None:
+def _kept(state: Path, agent: model.Agent, root: Path) -> str | None:
     """Why a landing leaves the agent's record as it is, said so; None where the agent lands."""
     # An agent still at work keeps its record: its stop reports, and landing it then settles it.
     if agent.status in findings.LIVE:
@@ -333,7 +333,7 @@ def _kept(state: Path, agent: model.Agent) -> str | None:
     if why := context.working(agent):
         return f"{agent.name} may still be working ({why}), so its record stays: land it again then"
     # A carried agent's report not yet judged keeps its record too, so `judge` can still bank it.
-    if waits := findings.waiting(state, agent):
+    if waits := findings.waiting(state, agent, root):
         return f"{waits}; its record stays: land it again then"
     return None
 
@@ -362,7 +362,7 @@ def land(here: Checkout, state: Path, name: str, args: argparse.Namespace) -> in
         raise Stop(2, f"{name} is {agent.status} and has not reported: land it once its report is judged")
     if why := context.working(agent):
         raise Stop(2, f"{name} may still be working ({why}), so its branch may still move: land it once its turn ends")
-    if waits := findings.waiting(state, agent):
+    if waits := findings.waiting(state, agent, root):
         raise Stop(2, waits)
     preflight(root, branch)
     if _ok(root, "merge-base", "--is-ancestor", branch, "HEAD"):

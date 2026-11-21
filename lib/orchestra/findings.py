@@ -120,14 +120,14 @@ def unreached(agent: model.Agent, root: Path, listed: Callable[[], dict[str, Pat
     )
 
 
-def waiting(state: Path, agent: model.Agent) -> str | None:
+def waiting(state: Path, agent: model.Agent, root: Path) -> str | None:
     """Why an agent no longer working stays as it is: its report waits to be judged, or its question answered.
 
     A `stopped` agent's report, written before a limit, a takeover or a refused stop ended it, is judged
     too where it reads and asks nothing, as is a `running` one's whose stop hook never ran; one that does
     not read holds nothing back, so it can be settled. A record `is_live` holds live cannot be judged, so
     its report holds nothing back either: only a discard settles it. A report stopped on a question that
-    no answer can reach, its worktree gone, is judged as it stands.
+    no answer can reach, its worktree gone from those the checkout at `root` lists, is judged as it stands.
     """
     if agent.status == "stopped" or (agent.status == "running" and not is_live(agent)):
         round_ = max(agent.reports, default=1)
@@ -143,7 +143,7 @@ def waiting(state: Path, agent: model.Agent) -> str | None:
         return None
     return (
         unjudged(agent)
-        or unreached(agent, config.checkout().root)
+        or unreached(agent, root)
         or f"{agent.name} stopped {agent.outcome}: answer it by message, and judge the report it writes"
     )
 
@@ -366,8 +366,10 @@ def add(verb: str, parser: argparse.ArgumentParser) -> None:
 def run(args: argparse.Namespace) -> int:
     here = config.checkout()
     state = store.state_dir(held=here)
-    if args.verb in {"judge", "route"}:
-        return (judge if args.verb == "judge" else route)(args, state, owners(state, here.root))
+    if args.verb == "judge":
+        return judge(args, state, owners(state, here.root), here.root)
+    if args.verb == "route":
+        return route(args, state, owners(state, here.root))
     verbs: dict[str, Callable[[argparse.Namespace, Path], int]] = {"show": show, "close": close, "findings": unclosed}
     return verbs[args.verb](args, state)
 
@@ -387,7 +389,7 @@ def _given(values: list[str], *, verifier: bool) -> dict[str, Disposition]:
     return given
 
 
-def judge(args: argparse.Namespace, state: Path, owner: Callable[[str], str]) -> int:
+def judge(args: argparse.Namespace, state: Path, owner: Callable[[str], str], root: Path) -> int:
     agent = model.read_agent(state, args.name)
     if is_live(agent):
         raise Refused(f"{agent.name} is {agent.status}, so its report may be unfinished: judge it once it reports")
@@ -402,7 +404,7 @@ def judge(args: argparse.Namespace, state: Path, owner: Callable[[str], str]) ->
     round_ = max(agent.reports, default=1)
     held = report.read(report.path(state, agent.name, round_), agent.type)
     # A question no answer can reach, its agent's worktree gone, leaves the report as it stands to be judged.
-    if held.status in report.STOPPED and gone(agent, config.checkout().root) is None:
+    if held.status in report.STOPPED and gone(agent, root) is None:
         raise Refused(
             f"{agent.name} stopped {held.status}: {held.reason}. Answer it by message, and judge the report it writes"
         )
