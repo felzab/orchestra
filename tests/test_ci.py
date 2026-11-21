@@ -339,10 +339,12 @@ def test_a_project_running_no_ci_reads_none_and_one_holding_a_workflow_waits_for
 BRIEF: dict[str, object] = {"ci": {**CI, "waitMinutes": 0.05}}
 
 
-def test_a_wait_takes_a_check_created_after_every_run_concluded(repo: Path) -> None:
+def test_a_wait_takes_a_check_created_after_every_run_concluded(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Code scanning creates its check run only once the analysis has concluded, so one read that finds
     everything concluded is not yet the set."""
-    project = Project(repo, BRIEF)
+    # Ended by two equal reads, not by the bound, so a loaded machine's slow first read still gets its second.
+    monkeypatch.setattr(ci, "POLL_SECONDS", 0.2)
+    project = Project(repo, {"ci": {**CI, "waitMinutes": 1}})
     project.answer(runs="runs-passed.json", **{"checks.1": "checks-none.json", "checks.2": "checks-failing.json"})
     code, out, _ = project.run("--wait")
     assert code == 1, out

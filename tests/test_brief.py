@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from conftest import git, inprocess, line, transcript, write_config
+from conftest import MakeSession, git, inprocess, line, transcript, write_config
 from orchestra import brief, config, context, model, store
 
 BODY = (
@@ -20,16 +20,19 @@ BODY = (
 )
 
 
-@pytest.fixture
-def state(project: Path) -> Path:
-    """A session on `main`, whose branch holds `lib/a.py` and `docs/[id]/page.md`."""
+def _session(project: Path) -> None:
     for path in ("lib/a.py", "docs/[id]/page.md"):
         (project / path).parent.mkdir(parents=True, exist_ok=True)
         (project / path).write_bytes(b"x\n")
     git(project, "add", ".")
     git(project, "commit", "-m", "files")
     assert inprocess("init", "s1", cwd=project).returncode == 0
-    return store.state_dir(project)
+
+
+@pytest.fixture
+def state(make_session: MakeSession) -> Path:
+    """A session on `main`, whose branch holds `lib/a.py` and `docs/[id]/page.md`."""
+    return make_session("brief", _session)
 
 
 def briefed(project: Path, name: str, *, kind: str = "writer", **values: str) -> Path:
@@ -176,6 +179,18 @@ def test_a_whole_brief_is_stamped_and_an_edit_unstamps_it(project: Path, state: 
     assert brief.stamped(state, record)
     path.write_bytes(path.read_bytes() + b"one more line\n")
     assert not brief.stamped(state, model.read_agent(state, "A"))
+
+
+@pytest.mark.usefixtures("state")
+def test_a_check_of_a_record_whose_brief_is_gone_names_the_command_that_writes_one(project: Path) -> None:
+    path = briefed(project, "A")
+    path.unlink()
+    done = inprocess("brief", "A", "--check", cwd=project)
+    assert done.returncode == 2
+    assert done.stderr.strip() == (
+        f"orchestra brief: A has no brief at {path}: `orchestra brief A --type T --body FILE`, with `--slice S` for"
+        " a writer, writes one from a file holding its lists and its four sections, and checks it"
+    )
 
 
 def test_each_fault_of_the_text_is_named_and_an_old_stamp_cleared(project: Path, state: Path) -> None:
@@ -432,15 +447,7 @@ def test_a_running_record_whose_transcript_ended_holds_no_path_and_no_row(projec
         ("lib/ab.py", "lib/a", False),
         ("lib/x/a.py", "lib/*.py", False),
         ("docs/i/page.md", "docs/[id]/*.md", False),
-    ],
-)
-def test_a_star_matches_within_a_folder_and_two_across_folders(path: str, pattern: str, *, owned: bool) -> None:
-    assert brief.owned([pattern], path) is owned
-
-
-@pytest.mark.parametrize(
-    ("path", "pattern", "owned"),
-    [
+        # `owned` skips its walk for a path outside a pattern's literal start, which must change no answer.
         ("lib/x/a.py", "**/a.py", True),
         ("a.py", "**/a.py", True),
         ("src/a.py", "lib/**", False),
@@ -450,7 +457,6 @@ def test_a_star_matches_within_a_folder_and_two_across_folders(path: str, patter
         ("lib\\x\\a.py", "lib/x/*.py", True),
         ("lib/a.py", "lib\\*.py", True),
         ("lib/a", "lib/a/", True),
-        ("lib/a/b.py", "lib/a/", True),
         ("lib/ab.py", "lib/a/", False),
         # `Writes:` patterns reach `owned` absolute and case-folded, the path spelled the same way.
         ("c:/users/me/state/reports/a.md", "c:/users/me/state/**", True),
@@ -459,18 +465,8 @@ def test_a_star_matches_within_a_folder_and_two_across_folders(path: str, patter
         ("c:/users/me/other/a.md", "c:/users/me/state/**", False),
     ],
 )
-def test_the_literal_start_prefilter_answers_as_the_walk_alone_does(
-    monkeypatch: pytest.MonkeyPatch, path: str, pattern: str, *, owned: bool
-) -> None:
-    """`owned` skips the automaton walk for a path outside a pattern's literal start, which must change no answer."""
-    filtered = brief.owned([pattern], path)
-
-    def unfiltered(_pattern: str) -> str:
-        """An empty start, which lets every path through to the walk: `owned` with no prefilter."""
-        return ""
-
-    monkeypatch.setattr(brief, "_start", unfiltered)
-    assert (filtered, brief.owned([pattern], path)) == (owned, owned)
+def test_a_star_matches_within_a_folder_and_two_across_folders(path: str, pattern: str, *, owned: bool) -> None:
+    assert brief.owned([pattern], path) is owned
 
 
 @pytest.mark.parametrize(

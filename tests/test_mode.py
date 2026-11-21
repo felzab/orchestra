@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from conftest import git, inprocess, orchestra, write_agent
+from conftest import MakeSession, git, inprocess, orchestra, write_agent
 from orchestra import config, log, model, store
 
 OWNER = {store.SESSION_ID: "session-owner"}
@@ -22,11 +22,14 @@ def _run(*args: str, cwd: Path, env: dict[str, str] = OWNER) -> subprocess.Compl
     return inprocess(*args, cwd=cwd, env=env)
 
 
-@pytest.fixture
-def session(project: Path) -> Path:
-    """A session made by the owner; its state."""
+def _session(project: Path) -> None:
     assert _run("init", "s1", cwd=project).returncode == 0
-    return project.parent / "state" / "project" / "s1"
+
+
+@pytest.fixture
+def session(make_session: MakeSession) -> Path:
+    """A session made by the owner; its state."""
+    return make_session("mode", _session)
 
 
 def _user(project: Path) -> Path:
@@ -128,6 +131,15 @@ def test_the_lease_refuses_another_session_and_hands_over_only_after_a_stop(proj
     assert model.read_agent(session, "OWN").status == "running"
 
 
+def test_a_stop_from_a_process_with_no_session_id_stops_the_holder(project: Path, session: Path) -> None:
+    """An owner may stop a session from a plain shell, which carries no Claude Code session id."""
+    stopped = _run("mode", "stop", cwd=project, env={})
+    assert stopped.returncode == 0, stopped.stderr
+    assert stopped.stdout.startswith("stopped: no session writes this state")
+    assert store.lease(session)["stopped"] is True
+    assert log.entries(session)[-1].text == "stopped by session with no id"
+
+
 def test_a_stop_whose_lease_another_session_took_meanwhile_is_refused_naming_the_holder(
     project: Path, session: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -150,13 +162,13 @@ def test_a_stop_whose_lease_another_session_took_meanwhile_is_refused_naming_the
 
 def test_a_waiting_takeover_takes_the_state_once_its_holder_falls_quiet(project: Path, session: Path) -> None:
     """A resume runs it once in the background, so its exit code says whether the state was taken."""
-    # The holder's last write is set to fall quiet twenty seconds from now, so the takeover without a wait is
-    # still refused on a loaded runner.
-    stamp = time.time() - store.QUIET_SECONDS + 20
+    # `init` has just written the state, so its holder falls quiet ten minutes on, however loaded the runner.
+    assert _run("mode", "takeover", "a limit", cwd=project, env=OTHER).returncode == 2
+    # The holder's last write is set to fall quiet three seconds from now, so the wait sleeps once.
+    stamp = time.time() - store.QUIET_SECONDS + 3
     for path in session.rglob("*"):
         if path.is_file():
             os.utime(path, (stamp, stamp))
-    assert _run("mode", "takeover", "a limit", cwd=project, env=OTHER).returncode == 2
     # The flag after the reason: Python 3.11's argparse leaves a positional list empty before a flag.
     taken = _run("mode", "takeover", "a limit", "--wait", cwd=project, env=OTHER)
     assert taken.returncode == 0, taken.stderr

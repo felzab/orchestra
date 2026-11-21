@@ -2,14 +2,15 @@
 
 from __future__ import annotations
 
+import json
 import sys
 from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
-from conftest import MakeRepo, git
-from orchestra import land, log, model
+from conftest import MakeSession, git
+from orchestra import land, log, model, prune
 from orchestra.config import Step
 from test_prune import TRASH, Fleet, add_agent, commit, make_fleet, ran, route, wait_gone, write
 from test_report import text
@@ -50,9 +51,13 @@ STEPS = [
 
 
 @pytest.fixture
-def fleet(tmp_path: Path, make_repo: MakeRepo) -> Fleet:
-    made = make_fleet(make_repo(tmp_path / "project"), {"land": {"steps": STEPS}})
-    hooks = tmp_path / "hooks"
+def fleet(project: Path, make_session: MakeSession) -> Fleet:
+    return Fleet(project, make_session("land", _landing))
+
+
+def _landing(root: Path) -> None:
+    made = make_fleet(root, {"land": {"steps": STEPS}})
+    hooks = root.parent / "hooks"
     # Git runs a hook only where its executable bit is set, which a Windows checkout does not need.
     write(hooks, "commit-msg", COMMIT_MSG_HOOK).chmod(0o755)
     write(hooks, "prepare-commit-msg", PREPARE_HOOK).chmod(0o755)
@@ -74,7 +79,6 @@ def fleet(tmp_path: Path, make_repo: MakeRepo) -> Fleet:
     # The install's output is ignored, as an install folder is.
     with (made.root / ".git" / "info" / "exclude").open("ab") as excluded:
         excluded.write(b"installed.txt\n")
-    return made
 
 
 def agent(fleet: Fleet, name: str = "WORKER", ident: str = "a1") -> Path:
@@ -178,9 +182,8 @@ def test_a_row_routed_back_after_a_landing_is_closed_by_the_latest_report_alone(
     ("status", "turn", "after"),
     [
         ("judged", "ended", "pruned"),
-        ("running", "mid-turn", "running"),
-        ("running", "silent", "running"),
         ("running", "unseen", "running"),
+        ("judged", "mid-turn", "judged"),
         ("reported", "ended", "reported"),
         ("stopped", "ended", "stopped"),
     ],
@@ -194,10 +197,10 @@ def test_a_landing_credits_every_agent_whose_branch_it_brought_in(
     """
     fixer = agent(fleet, "FIXER", "b1")
     model.update_agent(fleet.state, "FIXER", lambda held: replace(held, status=status))
-    # A `running` record whose turn ended long ago is a stop hook that never ran: its report is still unjudged.
-    # One with no transcript found is still running all the same, which only its record says.
+    # A `running` record is kept by its status alone, whatever its transcript shows; one with none found is too.
+    # A judged one whose transcript is mid-turn may still be working, though no report of it waits.
     if turn != "unseen":
-        ran(fleet, "b1", ended=turn != "mid-turn", minutes=20 if turn == "silent" else None)
+        ran(fleet, "b1", ended=turn != "mid-turn")
     write(fleet.state, "reports/FIXER.md", text("writer", "FIXER", fixed="A-F1."))
     commit(fixer, "Docs: A note", {"notes.txt": "second\n"})
     merger = agent(fleet, "MERGER", "b2")
@@ -239,6 +242,35 @@ def test_a_landing_credits_no_agent_whose_branch_had_landed_before_it(fleet: Fle
     assert code == 0, err
     assert model.read_findings(fleet.state)["A-F2"].status == "ROUTED"
     assert "A-F2 is named fixed and is ROUTED FIRST, so it stands as it is" in out
+
+
+def test_a_landing_carries_no_settled_agent_and_looks_up_none_of_their_branches(
+    fleet: Fleet, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A pruned agent's branch outlives its record where its prune could not delete it, as a merge agent may carry it.
+    Its work was credited when it settled, so a later landing neither credits it again nor asks git for its branch.
+    """
+    fixer = agent(fleet, "FIXER", "d1")
+    write(fleet.state, "reports/FIXER.md", text("writer", "FIXER", fixed="A-F1."))
+    commit(fixer, "Docs: A note", {"notes.txt": "second\n"})
+    merger = agent(fleet, "MERGER", "d2")
+    git(merger, "merge", "-q", "--no-ff", "worktree-agent-d1", "-m", "Merge the fixer")
+    commit(merger, "Docs: Another file", {"other.txt": "new\n"})
+    model.update_agent(fleet.state, "FIXER", lambda held: replace(held, status="pruned"))
+    route(fleet, "A-F1", "FIXER")
+    asked: list[str] = []
+    real = prune.branch_exists
+
+    def counted(root: Path, branch: str) -> bool:
+        asked.append(branch)
+        return real(root, branch)
+
+    monkeypatch.setattr(prune, "branch_exists", counted)
+    code, out, err = fleet.run("land", "MERGER")
+    assert code == 0, err
+    assert out.splitlines()[-1].startswith("landed MERGER as "), out
+    assert "worktree-agent-d1" not in asked
+    assert model.read_findings(fleet.state)["A-F1"].status == "ROUTED"
 
 
 def test_a_branch_merged_before_its_bookkeeping_is_settled_by_landing_it_again(fleet: Fleet) -> None:
@@ -345,6 +377,22 @@ def test_a_conflict_in_a_regenerated_file_is_answered_by_regenerating_it(fleet: 
     assert git(fleet.root, "show", "HEAD:doc.json") == '{"a": 2, "b": 2}'
     # The conflict's lines git adds to the merge's message are left out of the commit.
     assert git(fleet.root, "log", "-1", "--format=%B") == "Merge WORKER into main"
+
+
+def test_a_conflict_under_a_folder_a_regeneration_writes_is_answered_by_regenerating_it(fleet: Fleet) -> None:
+    """A step's `writes` may name a folder, and every file under it is then that step's to regenerate."""
+    path = fleet.root / ".claude" / "orchestra.json"
+    settings = json.loads(path.read_bytes())
+    generator = GENERATOR.replace("Path('doc.json')", "Path('docs/doc.json')")
+    settings["land"]["steps"] = [_step("regenerate", ["src/"], "tools/generate.py", writes=["docs/"])]
+    files = {".claude/orchestra.json": json.dumps(settings), "tools/generate.py": generator, "docs/doc.json": "{}\n"}
+    commit(fleet.root, "Repo: The document moves into a folder", files)
+    tree = agent(fleet)
+    commit(tree, "Docs: b grows", {"src/b.txt": '"b": 2', "docs/doc.json": '{"a": 1, "b": 2}\n'})
+    commit(fleet.root, "Docs: a grows", {"src/a.txt": '"a": 2', "docs/doc.json": '{"a": 2, "b": 1}\n'})
+    code, _, err = fleet.run("land", "WORKER")
+    assert code == 0, err
+    assert git(fleet.root, "show", "HEAD:docs/doc.json") == '{"a": 2, "b": 2}'
 
 
 def test_a_conflict_no_regeneration_answers_aborts_naming_who_else_changes_the_path(fleet: Fleet) -> None:

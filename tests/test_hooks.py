@@ -20,9 +20,10 @@ from typing import Any, cast
 
 import pytest
 
-from conftest import LIB, MakeRepo, git, inprocess, write_agent, write_config
+from conftest import LIB, MakeRepo, MakeSession, git, inprocess, write_agent, write_config
 from orchestra import context, events, findings, hooks, log, model, process, queue, report, store
 from test_context import line, transcript
+from test_pages import parses
 from test_report import text
 
 SID = "c0ffee00-0000-4000-8000-000000000001"
@@ -43,6 +44,8 @@ NO_FLEET = (
     "except SystemExit as done:\n"
     "    print(done.code)\n"
     "heavy = {'orchestra.cli', 'orchestra.config', 'orchestra.store', 'orchestra.events', 'argparse', 'subprocess'}\n"
+    # Before Python 3.13, `pathlib` imports `urllib.parse` itself, so only from 3.13 is its absence the hook's.
+    "heavy |= {'urllib.parse'} if sys.version_info >= (3, 13) else set()\n"
     "print(sorted(heavy & set(sys.modules)))\n"
 )
 # One event answered as the launcher answers it, then which of the fleet's heavier modules it loaded.
@@ -111,14 +114,17 @@ def changed(state: Path, name: str, **values: object) -> None:
     model.update_agent(state, name, lambda held: dataclasses.replace(held, **values))
 
 
-@pytest.fixture
-def state(project: Path) -> Path:
+def _session(project: Path) -> None:
     (project / "lib").mkdir()
     (project / "lib" / "a.py").write_bytes(b"x\n")
     git(project, "add", ".")
     git(project, "commit", "-m", "lib")
     assert run("init", "s1", cwd=project).returncode == 0
-    return store.state_dir(project)
+
+
+@pytest.fixture
+def state(make_session: MakeSession) -> Path:
+    return make_session("hooks", _session)
 
 
 def briefed(project: Path, name: str, kind: str, *, checked: bool = True, **lists: str) -> Path:
@@ -367,6 +373,19 @@ def test_a_hook_gives_up_on_a_held_lock_within_its_budget(project: Path, state: 
 
 
 # --- the dispatch ---------------------------------------------------------------------------------
+
+
+@pytest.mark.usefixtures("state")
+def test_a_dispatch_of_an_agent_with_no_record_names_a_brief_command_that_parses(project: Path) -> None:
+    """The refusal hands the coordinator the command that writes the brief, so the command must still be one."""
+    call = {"description": "NEW", "prompt": "NEW", "subagent_type": "orchestra:writer"}
+    verdict, why = decision(hook("PreToolUse", project, tool_name="Agent", tool_input=call)[1])
+    assert (verdict, why) == (
+        "deny",
+        "no agent NEW in this session: `orchestra brief NEW --type writer --slice S --body FILE` writes its brief"
+        " from a file holding its lists and its four sections, and checks it",
+    )
+    assert parses(str(why).split("`")[1])
 
 
 def test_a_dispatch_is_refused_until_its_brief_is_checked_then_filled(project: Path, state: Path) -> None:
@@ -626,8 +645,8 @@ def test_a_resume_of_a_writer_whose_worktree_is_gone_is_refused(project: Path, s
     said = hook("PreToolUse", project, tool_name="SendMessage", tool_input={"to": "W", "message": "go on"})[1]
     assert decision(said) == (
         "deny",
-        "W's worktree is gone (gone), so a resume has no worktree to run in: `orchestra prune` settles its record,"
-        " then dispatch a successor briefed with what is left",
+        "W's worktree is gone (gone), so a resume has no worktree to run in: `orchestra prune` settles its record"
+        " or says what keeps it, then dispatch a successor briefed with what is left",
     )
     # One whose report reads, written before the limit, is judged as a reported one is.
     report.path(state, "W").write_bytes(text("writer", "W", status="DONE").encode())
@@ -671,8 +690,8 @@ def test_a_resume_refused_for_a_record_prune_passes_over_names_the_discard(proje
     changed(state, "W", status="running", branch="kept")
     assert refused() == (
         "deny",
-        "W's worktree is gone (kept), so a resume has no worktree to run in: `orchestra prune` settles its record,"
-        " then dispatch a successor briefed with what is left",
+        "W's worktree is gone (kept), so a resume has no worktree to run in: `orchestra prune` settles its record"
+        " or says what keeps it, then dispatch a successor briefed with what is left",
     )
     assert "kept kept (W): " in run("prune", cwd=project).stdout
     assert model.read_agent(state, "W").status == "running"
@@ -1010,7 +1029,7 @@ def test_a_turns_end_lists_the_worktrees_once_for_every_report_stopped_on_a_ques
 
 
 def test_the_root_comes_from_session_json_where_exact_and_a_git_fault_drops_no_dispatch(
-    project: Path, state: Path, monkeypatch: pytest.MonkeyPatch
+    project: Path, state: Path, monkeypatch: pytest.MonkeyPatch, make_repo: MakeRepo
 ) -> None:
     """Every prompt and post-call event read the primary checkout, which two git runs found, though the state names it.
 
@@ -1048,6 +1067,12 @@ def test_the_root_comes_from_session_json_where_exact_and_a_git_fault_drops_no_d
     # A checkout recorded elsewhere, as after a move, is no proof: git finds the root, and it is the same.
     facts = model.read_session(state)
     model.write_session(state, dataclasses.replace(facts, checkout=str(project.parent / "moved")))
+    assert near in prompted()
+    assert [argv[3] for argv in ran] == ["rev-parse", "worktree"]
+    # Nor is another clone's checkout, as one made at the old path after a move: its `.git` holds no pointer.
+    clone = make_repo(project.parent / "clone" / "project")
+    model.write_session(state, dataclasses.replace(facts, checkout=str(clone)))
+    ran.clear()
     assert near in prompted()
     assert [argv[3] for argv in ran] == ["rev-parse", "worktree"]
     # With git failing, the dispatch is recorded all the same, and its rows wait for `orchestra route`.
@@ -1148,6 +1173,13 @@ def test_an_attended_turns_end_reads_no_transcript(project: Path, state: Path, m
     store.write_json(state / store.AWAY, {"since": model.now(), "until": None, "log": 0, "files": []})
     said = context_of(hook("Stop", project, stop_hook_active=False, background_tasks=[])[1], "Stop")
     assert '- nothing runs, and no `orchestra note --waiting "<what>"` names what the session waits on' in said
+    # A background task running says something runs, so no transcript is read to ask whether an agent works.
+    with monkeypatch.context() as patched:
+        patched.setattr(context, "working", refused)
+        patched.setattr(context, "transcript", refused)
+        code, said = hook("Stop", project, stop_hook_active=False, background_tasks=[{"id": "t1"}])
+    assert code == 0
+    assert "nothing runs" not in str(said)
 
 
 def test_a_turns_end_hands_the_queue_what_it_read(project: Path, state: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1250,6 +1282,17 @@ def test_an_agents_prompt_is_refused_away_after_the_lease_moves(project: Path, s
     assert prompt_refusal(said) == ("deny", events.AWAY_PROMPT)
     # The main session no longer holds the state, so it is not the away session's.
     assert hook("PermissionRequest", project, BASH) == (0, None)
+
+
+def test_an_unreadable_lease_still_refuses_a_prompt_while_away(project: Path, state: Path) -> None:
+    """A lease that cannot be read says nothing of whose the event is, so it faults rather than read as nobody's:
+    an event read as another session's would let a prompt through to an owner who is not there.
+    """
+    assert run("mode", "away", "07:30", cwd=project).returncode == 0
+    (state / store.LEASE).write_bytes(b"{not json")
+    code, said = hook("PermissionRequest", project, BASH, quiet=False)
+    assert code == 0
+    assert prompt_refusal(said) == ("deny", events.AWAY_PROMPT)
 
 
 def test_a_hook_that_cannot_judge_logs_its_fault_and_an_away_session_still_refuses(project: Path, state: Path) -> None:
@@ -1567,6 +1610,13 @@ def test_a_prompt_nearing_the_compaction_window_tells_the_coordinator_and_past_i
     said = hook("UserPromptSubmit", project, prompt="go", transcript_path=str(main))[1]
     assert "compaction" not in context_of(said, "UserPromptSubmit")
     assert "systemMessage" not in cast("dict[str, object]", said)
+    # A window set for the transcript's model alone is that session's window.
+    settings["modelSettings"] = {"claude-test": {"autoCompactWindow": 1_000_000}}
+    local.write_bytes(json.dumps(settings).encode())
+    said = hook("UserPromptSubmit", project, prompt="go", transcript_path=str(main))[1]
+    assert "900,474 tokens, at least 75% of the 1,000,000-token compaction window" in context_of(
+        said, "UserPromptSubmit"
+    )
 
 
 def test_a_hook_reads_each_agents_transcript_in_the_session_its_input_names(project: Path, state: Path) -> None:

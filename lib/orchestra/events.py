@@ -668,7 +668,7 @@ def _settle(state: Path, root: Path, agent: model.Agent, session: str | None) ->
     branch = prune.branch_of(agent, session)
     if branch is None or (agent.status != "stopped" and not prune.branch_exists(root, branch)):
         return f"`orchestra prune --discard {agent.name}` settles its record once you have saved what it holds, then "
-    return "`orchestra prune` settles its record, then "
+    return "`orchestra prune` settles its record or says what keeps it, then "
 
 
 def _running(state: Path, agent: model.Agent) -> tuple[int, bool] | None:

@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
 
-from conftest import inprocess, line, transcript, write_agent
+from conftest import MakeSession, inprocess, line, transcript, write_agent
 from orchestra import context, log, model, report, store
 
 STORE = "lib/store.py :: save"
@@ -45,11 +46,14 @@ class Written:
         return "\n".join([*head, *items, *closing, *section, *tail])
 
 
-@pytest.fixture
-def state(project: Path) -> Path:
+def _session(project: Path) -> None:
     done = inprocess("init", "s", cwd=project)
     assert done.returncode in {0, 1}, done.stderr
-    return store.state_dir(project)
+
+
+@pytest.fixture
+def state(make_session: MakeSession) -> Path:
+    return make_session("findings", _session)
 
 
 def agent(state: Path, name: str, kind: model.AgentType | Written, status: model.AgentStatus = "reported") -> None:
@@ -262,6 +266,47 @@ def test_a_verdict_records_its_proof_line_and_a_corrected_heading_only_where_it_
     assert held["REVIEW-F2"].evidence == "refuted by VERIFY: `emit` flushes at line 30."
 
 
+def test_a_verifiers_judge_reads_only_its_own_report_and_those_its_verdicts_name(
+    project: Path, state: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A verifier banks no finding, so no other banked row's report is read for a repeat it cannot make."""
+    _review_given_to_a_verifier(project, state)
+    agent(state, "OTHER", Written("auditor", (STORE,)))
+    model.write_findings(
+        state,
+        lambda _: [
+            model.FindingEvent("OTHER-F1", "bank", "OPEN"),
+            model.FindingEvent("OTHER-F1", "route", "ROUTED", "owner"),
+        ],
+    )
+    read: list[Path] = []
+    real = report.read
+
+    def counted(path: Path, agent_type: str | None = None) -> report.Report:
+        read.append(path)
+        return real(path, agent_type)
+
+    monkeypatch.setattr(report, "read", counted)
+    given = ("REVIEW-F2=route:ending", "REVIEW-F3=route:FIXER")
+    done = inprocess("judge", "VERIFY", *given, "--verdict", "v", cwd=project)
+    assert done.returncode == 0, done.stderr
+    assert sorted({path.stem for path in read}) == ["REVIEW", "VERIFY"]
+
+
+def test_a_verifiers_route_leaves_a_row_with_the_live_agent_holding_it(project: Path, state: Path) -> None:
+    """A row stays with its agent until that agent reports, so a verdict cannot hand it to a second owner."""
+    agent(state, "FIXER", "writer", "briefed")
+    agent(state, "REVIEW", Written("auditor", (STORE,)))
+    assert inprocess("judge", "REVIEW", "F1=route:FIXER", "--verdict", "v", cwd=project).returncode == 0
+    proof = f"F1 · defect · silent · {STORE}\nThe guard is missing at `load` too."
+    agent(state, "VERIFY", Written("verifier", verdicts=(("REVIEW-F1", "CORRECTED", proof),)))
+    before = lines(state)
+    done = inprocess("judge", "VERIFY", "REVIEW-F1=route:owner", "--verdict", "v", cwd=project)
+    assert done.returncode == 2
+    assert "REVIEW-F1 is routed to FIXER, which is briefed: its rows stay with it until it reports" in done.stderr
+    assert lines(state) == before
+
+
 def test_a_verifiers_confirmed_row_takes_a_disposition(project: Path, state: Path) -> None:
     _review_given_to_a_verifier(project, state)
     before = lines(state)
@@ -296,6 +341,14 @@ def test_a_confirmed_verdict_on_a_fixed_row_needs_no_disposition_and_one_on_a_re
     assert (held["REVIEW-F2"].kind, held["REVIEW-F2"].owner) == ("reopen", "FIXER")
     # The one line written is REVIEW-F2's reopening.
     assert len(lines(state).splitlines()) == len(before.splitlines()) + 1
+    # Only a confirmation agrees with a fix: a correction of the fixed row takes a disposition, or it would be lost.
+    correction = f"F1 · defect · silent · {STORE}\nThe fix guards `save` but not `load`."
+    agent(state, "AGAIN", Written("verifier", verdicts=(("REVIEW-F1", "CORRECTED", correction),)))
+    after = lines(state)
+    corrected = inprocess("judge", "AGAIN", "--verdict", "v", cwd=project)
+    assert corrected.returncode == 2
+    assert "every verdict but REFUTED takes a disposition, and REVIEW-F1 has none" in corrected.stderr
+    assert lines(state) == after
 
 
 def test_a_verifiers_verdict_on_a_row_never_banked_moves_nothing_and_takes_no_disposition(
@@ -337,6 +390,35 @@ def test_judge_names_a_finding_at_the_anchor_of_another_reports_row_and_how_it_w
     assert "LENS-F3 may repeat" not in done.stdout
 
 
+def test_a_repeat_is_named_from_the_bank_line_without_the_banked_rows_report(project: Path, state: Path) -> None:
+    """The bank line carries the anchor, so a session's earlier reports are not read again at every judge."""
+    agent(state, "REVIEW", Written("auditor", (STORE,)))
+    assert inprocess("judge", "REVIEW", "F1=close:FIXED:abc1234", "--verdict", "v", cwd=project).returncode == 0
+    report.path(state, "REVIEW").unlink()
+    agent(state, "LENS", Written("auditor", (STORE,)))
+    done = inprocess("judge", "LENS", "F1=route:owner", "--verdict", "v", cwd=project)
+    assert done.returncode == 0, done.stderr
+    assert f"LENS-F1 may repeat REVIEW-F1 (FIXED: abc1234): both at `{STORE}`" in done.stdout
+
+
+def test_a_bank_line_written_before_it_carried_an_anchor_reads_and_its_report_gives_the_anchor(
+    project: Path, state: Path
+) -> None:
+    """findings.jsonl outlives an upgrade, so a line with no `anchor` key still reads and still meets a repeat."""
+    agent(state, "REVIEW", Written("auditor", (STORE,)))
+    written = [
+        {"row": "REVIEW-F1", "kind": "bank", "status": "OPEN", "owner": None, "evidence": None, "time": "t"},
+        {"row": "REVIEW-F1", "kind": "close", "status": "MOOT", "owner": None, "evidence": "gone", "time": "t"},
+    ]
+    (state / store.FINDINGS).write_bytes(b"".join(json.dumps(record).encode("utf-8") + b"\n" for record in written))
+    model.update_agent(state, "REVIEW", lambda held: model.Agent(held.name, held.type, "judged"))
+    assert rows(state)["REVIEW-F1"] == model.FindingEvent("REVIEW-F1", "close", "MOOT", evidence="gone", time="t")
+    agent(state, "LENS", Written("auditor", (STORE,)))
+    done = inprocess("judge", "LENS", "F1=route:owner", "--verdict", "v", cwd=project)
+    assert done.returncode == 0, done.stderr
+    assert f"LENS-F1 may repeat REVIEW-F1 (MOOT: gone): both at `{STORE}`" in done.stdout
+
+
 def test_a_row_naming_the_owners_word_warns_where_it_goes_to_an_agent_and_not_to_a_queue(
     project: Path, state: Path
 ) -> None:
@@ -345,10 +427,9 @@ def test_a_row_naming_the_owners_word_warns_where_it_goes_to_an_agent_and_not_to
     agent(state, "REVIEW", Written("auditor", (STORE, CLI, "README :: install")))
     path = report.path(state, "REVIEW")
     text = path.read_bytes().decode("utf-8")
-    text = text.replace("The write at F1.", "Lowering it is the owner's word.")
-    path.write_bytes(
-        text.replace("The write at F2.", "This is the Owner\N{RIGHT SINGLE QUOTATION MARK}s call.").encode("utf-8")
-    )
+    # The row going to an agent spells it as owners and pasted text do: a typographic apostrophe, a capital.
+    text = text.replace("The write at F1.", "This is the Owner\N{RIGHT SINGLE QUOTATION MARK}s call.")
+    path.write_bytes(text.replace("The write at F2.", "Lowering it is the owner's word.").encode("utf-8"))
     given = ("F1=route:FIXER", "F2=route:ending", "F3=route:FIXER")
     done = inprocess("judge", "REVIEW", *given, "--verdict", "v", cwd=project)
     assert done.returncode == 0, done.stderr
@@ -357,12 +438,19 @@ def test_a_row_naming_the_owners_word_warns_where_it_goes_to_an_agent_and_not_to
         "REVIEW-F1 says its change is the owner's word or call, and goes to the agent FIXER:"
         " ask the owner before it is built, unless a ruling covers it"
     ]
-    # A verifier's verdict is read too, as the text the row is judged on.
+    # A verifier's verdict is read too, as the text the row is judged on, with the body of the finding it judges:
+    # REVIEW-F3's proof says it, and REVIEW-F2's banked finding does where its confirmation does not.
     proof = "F3 · optional · silent · README :: install\nRemoving the check is the owner's call."
-    agent(state, "VERIFY", Written("verifier", verdicts=(("REVIEW-F3", "CORRECTED", proof),)))
-    verified = inprocess("judge", "VERIFY", "REVIEW-F3=route:FIXER", "--verdict", "v", cwd=project)
+    verdicts = (("REVIEW-F3", "CORRECTED", proof), ("REVIEW-F2", "CONFIRMED", "`pytest` exit 1."))
+    agent(state, "VERIFY", Written("verifier", verdicts=verdicts))
+    given = ("REVIEW-F3=route:FIXER", "REVIEW-F2=route:FIXER")
+    verified = inprocess("judge", "VERIFY", *given, "--verdict", "v", cwd=project)
     assert verified.returncode == 0, verified.stderr
-    assert "REVIEW-F3 says its change is the owner's word or call, and goes to the agent FIXER:" in verified.stdout
+    warned = [line.split(":")[0] for line in verified.stdout.splitlines() if "the owner's word or call" in line]
+    assert warned == [
+        "REVIEW-F3 says its change is the owner's word or call, and goes to the agent FIXER",
+        "REVIEW-F2 says its change is the owner's word or call, and goes to the agent FIXER",
+    ]
 
 
 def test_show_prints_whole_findings_judged_or_not_and_names_a_row_it_cannot(project: Path, state: Path) -> None:

@@ -112,6 +112,9 @@ class FindingEvent:
     owner: str | None = None
     evidence: str | None = None
     time: str = field(default_factory=now)
+    # A bank line's finding anchor, so `judge` compares a new finding with a banked row without reading its
+    # report; None on every other line, and on a bank line written before the field existed.
+    anchor: str | None = None
 
     def __post_init__(self) -> None:
         # Every writer goes through here, so a row can never be ROUTED to nobody or closed on nothing.

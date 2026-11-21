@@ -113,3 +113,13 @@ def test_a_key_the_program_cannot_read_is_refused_by_its_path(
     with pytest.raises(Refused) as refused:
         config.load(tmp_path)
     assert said in str(refused.value)
+
+
+def test_a_path_below_a_folder_is_within_it_and_identical_only_to_the_folder_itself(tmp_path: Path) -> None:
+    """`identical` asks whether two paths name one folder, where `within` takes every path below it too."""
+    folder = tmp_path / "project"
+    (folder / ".git").mkdir(parents=True)
+    assert (config.within(folder / ".git", folder), config.identical(folder / ".git", folder)) == (True, False)
+    # Another spelling of the folder is the folder.
+    assert config.identical(tmp_path / "elsewhere" / ".." / "project", folder)
+    assert not config.within(tmp_path, folder)

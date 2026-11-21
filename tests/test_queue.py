@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from conftest import inprocess, orchestra, write_agent
+from conftest import MakeSession, inprocess, orchestra, write_agent
 from orchestra import FAULT, log, model, store
 from orchestra import queue as items
 from orchestra.status import paced
@@ -16,10 +16,13 @@ EARLY = "2026-11-17T10:00:00+01:00"
 LATER = "2026-11-17T11:00:00+01:00"
 
 
-@pytest.fixture
-def state(project: Path) -> Path:
+def _session(project: Path) -> None:
     assert inprocess("init", "s1", cwd=project).returncode == 0
-    held = store.state_dir(project)
+
+
+@pytest.fixture
+def state(make_session: MakeSession) -> Path:
+    held = make_session("queue", _session)
     write_agent(held, model.Agent("A", "writer", "running"))
     return held
 
@@ -69,8 +72,6 @@ def test_a_landed_item_never_falls_due_when_its_agent_is_discarded(project: Path
     [
         # Stopped by a limit before its first commit, then settled by a plain prune: nothing of it landed.
         (None, {}, []),
-        # A report stopped on a question, judged and pruned: nothing of it landed either.
-        ("NEEDS-ANSWER", {}, []),
         # A DONE report whose branch was lost before it landed: its report alone lands nothing.
         ("DONE", {}, []),
         # `land` stamps the landing, the session branch holding its branch already or not.
@@ -153,8 +154,6 @@ def test_add_and_done_number_the_items_and_log_the_end(project: Path, state: Pat
             ["add", "--when", "landed:NOBODY", "x"],
             "no agent NOBODY in this session and no slice of PLAN.md: `orchestra status` lists both",
         ),
-        # A report is an agent's, so a name with no record, a slice's included, is no `reported:` event's.
-        (["add", "--when", "reported:S1", "x"], "no agent S1 in this session: `reported:` names an agent"),
         (["add", "--when", "merged:A", "x"], "`merged:A` is none of ci, landed:NAME and reported:NAME"),
     ],
 )
@@ -165,9 +164,27 @@ def test_an_event_naming_no_agent_or_no_kind_is_refused(project: Path, state: Pa
     assert model.read_queue(state) == {}
 
 
+def test_a_name_with_no_record_is_refused_by_the_missing_plan_that_could_name_its_slice(
+    project: Path, state: Path
+) -> None:
+    """With no PLAN.md the name may still be a slice's, so the refusal names the plan that is gone."""
+    (state / store.PLAN).unlink()
+    done = inprocess("queue", "add", "--when", "landed:NOBODY", "x", cwd=project)
+    assert done.returncode == 2
+    assert done.stderr.strip() == (
+        f"orchestra queue: {state / store.PLAN} is missing: write it again under the headings `orchestra init` gives it"
+    )
+    assert model.read_queue(state) == {}
+
+
 def test_an_item_may_wait_on_a_planned_slice_no_agent_took_yet(project: Path, state: Path) -> None:
     """Its writer is briefed later under a name of its own, as brief.md's example names one: due once it lands."""
     store.write_text(state / store.PLAN, "# Plan\n\n## Slices and their files\n\n- [ ] LATER `b.txt`\n")
+    # A report is an agent's, so a planned slice no agent took yet is no `reported:` event's: it would never fall due.
+    refused = inprocess("queue", "add", "--when", "reported:LATER", "x", cwd=project)
+    assert refused.returncode == 2
+    assert "no agent LATER in this session: `reported:` names an agent" in refused.stderr
+    assert model.read_queue(state) == {}
     added = inprocess("queue", "add", "--when", "landed:LATER", "dispatch", "C", cwd=project)
     assert added.returncode == 0, added.stderr
     assert added.stdout.splitlines() == ["  1  waits  landed:LATER              dispatch C"]

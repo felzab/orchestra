@@ -15,6 +15,8 @@ const POINTER = `${COMMON}/orchestra/fix%2Fa%20b`
 // A conversation of one message: a compaction runs over at least one and leaves at least one.
 const MESSAGES = [{ role: 'user', text: 'the work so far', toolUses: [] }]
 // The model's whole context, which `percent` is of, and the smaller compaction window the breakdown measures against.
+// `stub`'s 400,000 tokens are 80% of the compaction window and 40% of the model's whole context, and the 300,000
+// that schedule at 60% are 30% of it, so a threshold read from `percent` would schedule neither.
 const WINDOW = 1_000_000
 const RAW = 500_000
 
@@ -287,15 +289,6 @@ test('below 60% of the compaction window, the tool schedules nothing and says wh
 
 test('at 60% of the compaction window the tool schedules', async ($, on) => {
   const { clock, seen, complete } = stub($, on, { tokens: 300_000 })
-  expect(await $.tool.call({ tool: TOOL })).toEqual(SCHEDULED)
-  await complete()
-  await clock.settle()
-  expect(seen.commands).toEqual(['compact'])
-})
-
-test("above 60% of the compaction window the tool schedules, though under 60% of the model's", async ($, on) => {
-  // 400,000 tokens are 80% of the compaction window and 40% of the model's whole context, which `percent` is of.
-  const { clock, seen, complete } = stub($, on, { tokens: 400_000 })
   expect(await $.tool.call({ tool: TOOL })).toEqual(SCHEDULED)
   await complete()
   await clock.settle()

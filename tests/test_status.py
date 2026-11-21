@@ -11,8 +11,9 @@ from pathlib import Path
 
 import pytest
 
-from conftest import claude_stub, git, inprocess, line, transcript, usage_answer, write_agent, write_config
-from orchestra import brief, ci, model, override, report, status, store
+from conftest import MakeSession, claude_stub, git, inprocess, line, transcript, usage_answer, write_agent, write_config
+from orchestra import brief, ci, log, model, override, report, status, store
+from test_hooks import _session as hooks_session  # pyright: ignore[reportPrivateUsage]
 from test_hooks import briefed, changed, dispatched, run
 from test_report import text
 
@@ -70,11 +71,14 @@ def _ran(project: Path, ident: str, *, minutes: float, ended: bool = False, read
     transcript(folder, ident, line("assistant", "m1", read, calls=not ended), session="session-1", minutes=minutes)
 
 
-@pytest.fixture
-def built(project: Path) -> Path:
-    """A session with an agent in every state status reads, its findings, queue, plan and a drifted file."""
+def _session(project: Path) -> None:
     assert inprocess("init", "s1", cwd=project).returncode == 0
-    state = _state(project)
+
+
+@pytest.fixture
+def built(project: Path, make_session: MakeSession) -> Path:
+    """A session with an agent in every state status reads, its findings, queue, plan and a drifted file."""
+    state = make_session("status", _session)
     store.write_text(state / store.PLAN, PLAN)
     # Queued before the agents' records, so DONE's report, stamped as its record is written, comes after it.
     model.write_queue(
@@ -501,34 +505,25 @@ S2_HELD = "waits     slice S2, which no agent took: it is after S1, which is unt
 
 
 @pytest.fixture
-def chained(project: Path) -> Path:
+def chained(project: Path, make_session: MakeSession) -> Path:
     """A session whose writer W, dispatched as `w1`, is on S1, the slice S2 is after."""
-    (project / "lib").mkdir()
-    (project / "lib" / "a.py").write_bytes(b"x\n")
-    git(project, "add", ".")
-    git(project, "commit", "-m", "lib")
-    assert run("init", "s1", cwd=project).returncode == 0
-    state = store.state_dir(project)
+    # The session test_hooks.py's `state` makes.
+    state = make_session("hooks", hooks_session)
     store.write_text(state / store.PLAN, CHAINED)
     briefed(project, "W", "writer")
     dispatched(project, "W", "writer", "w1")
     return state
 
 
-@pytest.mark.parametrize("tree", ["gone", "standing"])
-def test_a_writer_pruned_before_its_first_commit_leaves_its_slice_to_do(
-    project: Path, chained: Path, tree: str
-) -> None:
+def test_a_writer_pruned_before_its_first_commit_leaves_its_slice_to_do(project: Path, chained: Path) -> None:
     """A usage limit stops it with nothing committed, and the checkpoint's plain `prune` settles it.
 
-    Its tree goes with its branch, by Claude Code or by the prune; neither makes the slice landed.
+    Its tree goes with its branch, here by the prune, which makes the slice no more landed than Claude Code's own
+    cleanup would; test_prune.py holds the prune of a record whose tree and branch are gone already.
     """
     worktree = project.parent / "trees" / "agent-w1"
     git(project, "worktree", "add", "-b", "worktree-agent-w1", str(worktree))
     changed(chained, "W", status="stopped", reason="You've hit your limit", branch="worktree-agent-w1")
-    if tree == "gone":
-        git(project, "worktree", "remove", "--force", str(worktree))
-        git(project, "branch", "-D", "worktree-agent-w1")
     assert run("prune", cwd=project).returncode == 0
     assert model.read_agent(chained, "W").status == "pruned"
     measured = _lines(run("status", "--measure", cwd=project))
@@ -602,6 +597,30 @@ def test_the_waits_lines_read_each_brief_once_while_an_item_waits_on_a_slice(
     monkeypatch.setattr(brief, "header", counted)
     assert "waits     #3 (when landed:S2) push: waits on slice S2, which has not landed" in status.paced(built)
     assert sorted(read) == sorted(agent.name for agent in model.agents(built))
+
+
+def test_the_end_reads_the_log_once_and_each_brief_once(
+    project: Path, built: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Every section of the view reads what the view read first, since no view writes the log or a brief."""
+    entries: list[Path] = []
+    headers: list[str] = []
+    logged, header = log.entries, brief.header
+
+    def counted_log(state: Path) -> list[log.Entry]:
+        entries.append(state)
+        return logged(state)
+
+    def counted_header(state: Path, name: str) -> brief.Header:
+        headers.append(name)
+        return header(state, name)
+
+    monkeypatch.setattr(log, "entries", counted_log)
+    monkeypatch.setattr(brief, "header", counted_header)
+    done = inprocess("status", "--end", cwd=project)
+    assert done.returncode in {0, 1}, done.stderr
+    assert len(entries) == 1
+    assert sorted(headers) == sorted(agent.name for agent in model.agents(built))
 
 
 def test_a_verb_closes_on_five_waits_lines_and_a_count_of_the_rest(built: Path) -> None:
