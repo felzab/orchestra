@@ -591,7 +591,7 @@ def _resume(where: Where, given: Record) -> str | None:
     if (held := findings.gone(agent, root)) is not None:
         why = (
             f"{name}'s worktree is gone ({held}), so a resume has no worktree to run in:"
-            f" {_settle(state, agent)}dispatch a successor briefed with what is left"
+            f" {_settle(state, root, agent, where.session)}dispatch a successor briefed with what is left"
         )
     elif (unjudged := findings.unjudged(agent)) is not None:
         # `judge` reads an agent's latest round alone, so a round begun before it would leave this one's unread.
@@ -646,17 +646,24 @@ def _cold(agent: model.Agent, session: str | None) -> str | None:
     return f"its transcript was last written {int(seconds // 60)} min ago, past the {CACHE_MINUTES}-min cache"
 
 
-def _settle(state: Path, agent: model.Agent) -> str:
+def _settle(state: Path, root: Path, agent: model.Agent, session: str | None) -> str:
     """The verb that settles an agent no resume reaches, ahead of its successor's dispatch; empty where it is judged.
 
     No answer reaches it, so `judge` takes its report as it stands, a question included, and a judged record
     holds nothing a successor's brief needs. A round stopped before its report reads, which `judge` refuses,
-    has nothing to bank, and `prune` settles it.
+    has nothing to bank. `prune` settles it where it is `stopped` and the branch it names is gone, and says what
+    keeps it where the branch stands; elsewhere only its discard settles it, which is the coordinator's word.
     """
     if agent.status in findings.JUDGED:
         return ""
     if agent.status == "reported" or findings.readable(state, agent):
         return f"`orchestra judge {agent.name}` banks its report, then "
+    # Imported here, since only this refusal reads it and every hook would pay for its imports.
+    from orchestra import prune  # noqa: PLC0415
+
+    branch = prune.branch_of(agent, session)
+    if branch is None or (agent.status != "stopped" and not prune.branch_exists(root, branch)):
+        return f"`orchestra prune --discard {agent.name}` settles its record once you have saved what it holds, then "
     return "`orchestra prune` settles its record, then "
 
 
